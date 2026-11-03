@@ -10,7 +10,7 @@ A push to `main` or `master` builds a Linux release in GitHub Actions and deploy
 4. Upload a checksum-verified release to a private, encrypted S3 bucket and invoke the fixed Systems Manager document on the one production instance. No SSH private key or production database password is stored in GitHub.
 5. The root-owned host installer verifies the target, archive paths, manifest, SHA-256, disk capacity, and Node version. It runs repository code as the dedicated, unprivileged `onesystemserp` account.
 6. A read-only MySQL query and schema comparison must pass. Candidate frontend/backend processes are checked before activating the release. Only the two ERP services are restarted. Failed activation restores and checks the previous release.
-7. Check the public HTTPS login page. Retain the current and previous host releases; expire S3 artifacts after 30 days.
+7. Check the public HTTPS login page. Retain the current and previous host releases; expire S3 artifacts after 30 days. Before staging another release, older releases may be retired to free disk space; the running release is always preserved as the rollback target.
 
 ## Database changes
 

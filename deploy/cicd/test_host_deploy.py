@@ -85,6 +85,24 @@ class ArtifactSafety(unittest.TestCase):
             self.assertIn(['systemctl', 'restart'] + list(host.UNITS), calls)
             self.assertFalse((state / 'shared-data-initialized').exists())
 
+    def test_disk_rotation_preserves_current_and_unrelated_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            parent = base / 'releases'
+            parent.mkdir()
+            current = parent / ('a' * 40 + '-1-1')
+            previous = parent / ('b' * 40 + '-2-1')
+            unrelated = parent / 'unrelated-data'
+            for path in (current, previous, unrelated):
+                path.mkdir()
+            def disk(_):
+                return types.SimpleNamespace(free=100 if previous.exists() else 300)
+            with patch.object(host, 'BASE', base), patch.object(host.shutil, 'disk_usage', side_effect=disk):
+                host.reserve_release_space(200, current)
+            self.assertTrue(current.exists())
+            self.assertTrue(unrelated.exists())
+            self.assertFalse(previous.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

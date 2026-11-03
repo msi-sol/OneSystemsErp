@@ -98,6 +98,22 @@ def atomic_text(path, text, mode=0o600):
     os.replace(temp, path)
 
 
+def reserve_release_space(required, current):
+    # The running release is the rollback target for the incoming deployment.
+    # Retire older generated releases when the small shared disk needs space.
+    parent = BASE / 'releases'
+    retired = sorted((p for p in parent.iterdir()
+                      if p != current and not p.is_symlink() and p.is_dir()
+                      and re.fullmatch(r'[a-f0-9]{40}-[0-9]{1,20}-[0-9]{1,4}', p.name)),
+                     key=lambda p: p.stat().st_mtime)
+    for old in retired:
+        if shutil.disk_usage(BASE).free >= required:
+            break
+        shutil.rmtree(old)
+    if shutil.disk_usage(BASE).free < required:
+        raise DeployError('Insufficient disk space to stage a release with rollback safety')
+
+
 def set_current(release):
     link = BASE / 'current.tmp'
     if link.is_symlink():
@@ -244,8 +260,10 @@ def deploy(args):
             with tarfile.open(archive_path, 'r:gz') as archive:
                 validate_archive(archive)
                 expanded = sum(m.size for m in archive.getmembers())
-                if expanded > 4_000_000_000 or shutil.disk_usage(BASE).free < expanded + 1_000_000_000:
-                    raise DeployError('Insufficient disk space to stage a release with rollback safety')
+                if expanded > 4_000_000_000:
+                    raise DeployError('Expanded release exceeds the 4GB limit')
+                current = (BASE / 'current').resolve() if (BASE / 'current').is_symlink() else None
+                reserve_release_space(expanded + 1_000_000_000, current)
                 release.mkdir(mode=0o755)
                 archive.extractall(release, filter='data')
             metadata = json.loads((release / 'deployment-manifest.json').read_text())

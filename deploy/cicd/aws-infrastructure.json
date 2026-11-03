@@ -45,7 +45,7 @@
             {
               "Id": "ExpireProductionReleasesAfterThirtyDays",
               "Status": "Enabled",
-              "Filter": {"Prefix": "onesystemserp/releases/"},
+              "Prefix": "onesystemserp/releases/",
               "ExpirationInDays": 30,
               "NoncurrentVersionExpiration": {"NoncurrentDays": 30},
               "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}
