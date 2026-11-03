@@ -175,9 +175,10 @@ def unit_override(unit):
         '/usr/bin/node ' + str(BASE / 'current/node_modules/next/dist/bin/next') +
         ' start --hostname 127.0.0.1 --port 3000')
     return '\n'.join(['[Service]', 'User=' + USER, 'Group=' + USER,
-                      'WorkingDirectory=' + str(BASE / 'current'), 'EnvironmentFile=',
+                      'WorkingDirectory=' + str(LEGACY), 'EnvironmentFile=',
                       'EnvironmentFile=' + str(CONFIG / 'production.env'), 'ExecStart=', 'ExecStart=' + execute,
-                      'NoNewPrivileges=true', 'PrivateTmp=true', 'ProtectHome=true', 'ProtectSystem=strict',
+                      'NoNewPrivileges=true', 'PrivateTmp=true', 'ProtectHome=tmpfs', 'ProtectSystem=strict',
+                      'BindReadOnlyPaths=' + str(BASE / 'current') + ':' + str(LEGACY),
                       'ReadWritePaths=' + str(STATE) + ' ' + str(BASE / 'current/.next/cache'), ''])
 
 

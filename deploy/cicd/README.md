@@ -38,6 +38,8 @@ The first successful activation copies uploads again while both ERP services are
 
 The original RDS CA bundles are copied into `/etc/onesystemserp/` and the shared environment points to those copies. Certificate contents and strict TLS verification are preserved, allowing the dedicated service account to connect without access to Ubuntu's home directory.
 
+Inside the two ERP services, the selected release is mounted read-only at the original `/home/ubuntu/onesystemserp` working path. This keeps absolute upload references stable across release replacement. Other home-directory content stays hidden; uploads resolve to shared writable storage. Outside those service namespaces, the original checkout remains intact for recovery.
+
 ## Operations
 
 See the **Production release** workflow under GitHub Actions for build/deployment results. `DEPLOYMENT_SUCCEEDED <commit>` identifies a completed host deployment. A failed build or candidate check leaves the running ERP release unchanged. A schema-check failure does not apply any SQL changes.
