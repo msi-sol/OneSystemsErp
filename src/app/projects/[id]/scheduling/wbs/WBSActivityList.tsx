@@ -26,9 +26,10 @@ interface WBSActivityListProps {
   projectId: string;
   schedule: any;
   onRefresh: () => void;
+  canEditDraft?: boolean;
 }
 
-export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSActivityListProps) {
+export default function WBSActivityList({ projectId, schedule, onRefresh, canEditDraft = false }: WBSActivityListProps) {
   const activities: Activity[] = schedule?.activities || [];
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -92,6 +93,7 @@ export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSA
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newName,
+          expectedRowVersion: schedule.rowVersion,
           activityCode: newCode || null,
           plannedDuration: newDuration,
           unit: newUnit || null,
@@ -140,6 +142,7 @@ export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSA
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: editName,
+          expectedRowVersion: schedule.rowVersion,
           activityCode: editCode || null,
           plannedDuration: editDuration,
           status: editStatus,
@@ -163,7 +166,11 @@ export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSA
   const handleDelete = async (actId: string) => {
     if (!confirm('Delete this activity? This cannot be undone.')) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/scheduling/activities/${actId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/projects/${projectId}/scheduling/activities/${actId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedRowVersion: schedule.rowVersion }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setSuccess('Activity deleted');
@@ -217,7 +224,7 @@ export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSA
     DELAYED: '#ef4444'
   };
 
-  const isImmutable = schedule?.workflowStatus === 'ACTIVE_BASELINE';
+  const isImmutable = !canEditDraft || !['AI_GENERATED_DRAFT', 'INVALID_GENERATED_DRAFT', 'TECHNICAL_REVISIONS_REQUIRED'].includes(schedule?.workflowStatus);
 
   return (
     <div style={{ padding: '20px' }}>
@@ -489,8 +496,8 @@ export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSA
                     return editingId === act.id ? (
                 /* Edit Row */
                 <tr key={act.id} style={{ borderBottom: '1px solid var(--glass-border)', backgroundColor: 'rgba(245, 158, 11, 0.05)' }}>
-                  <td style={{ padding: '6px 8px' }}><input style={inputStyle} value={editCode} onChange={e => setEditCode(e.target.value)} /></td>
-                  <td style={{ padding: '6px 8px' }}><input style={inputStyle} value={editName} onChange={e => setEditName(e.target.value)} /></td>
+                  <td style={{ padding: '6px 8px' }}><input aria-label="Work package code" style={inputStyle} value={editCode} onChange={e => setEditCode(e.target.value)} /></td>
+                  <td style={{ padding: '6px 8px' }}><input aria-label="Work package name" style={inputStyle} value={editName} onChange={e => setEditName(e.target.value)} /></td>
                   <td style={{ padding: '6px 8px' }}>
                     <select style={inputStyle} value={editStatus} onChange={e => setEditStatus(e.target.value)}>
                       <option value="NOT_STARTED">Not Started</option>
@@ -507,7 +514,7 @@ export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSA
                   <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text-secondary)' }}>{formattedActivityCost}</td>
                   <td style={{ padding: '6px 8px', textAlign: 'center' }}>{act.criticalPath ? '🔴' : '—'}</td>
                   <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                    <button onClick={handleUpdate} style={{ padding: '4px 8px', backgroundColor: '#10b981', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginRight: '4px' }}>💾</button>
+                    <button aria-label="Save work package" onClick={handleUpdate} style={{ padding: '4px 8px', backgroundColor: '#10b981', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginRight: '4px' }}>💾</button>
                     <button onClick={() => setEditingId(null)} style={{ padding: '4px 8px', backgroundColor: 'transparent', color: '#ef4444', border: '1px solid #ef4444', borderRadius: '4px', cursor: 'pointer' }}>✗</button>
                   </td>
                 </tr>
@@ -542,7 +549,7 @@ export default function WBSActivityList({ projectId, schedule, onRefresh }: WBSA
                   <td style={{ padding: '8px', textAlign: 'center' }}>
                     {!isImmutable && (
                       <>
-                        <button onClick={() => startEdit(act)} style={{ padding: '3px 6px', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', marginRight: '4px', fontSize: '0.75rem' }}>✏️</button>
+                        <button aria-label={`Edit work package ${act.activityCode || act.id}`} onClick={() => startEdit(act)} style={{ padding: '3px 6px', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-secondary)', borderRadius: '4px', cursor: 'pointer', marginRight: '4px', fontSize: '0.75rem' }}>✏️</button>
                         <button onClick={() => handleDelete(act.id)} style={{ padding: '3px 6px', background: 'transparent', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>🗑</button>
                       </>
                     )}

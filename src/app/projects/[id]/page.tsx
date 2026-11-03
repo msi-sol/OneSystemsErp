@@ -4,11 +4,13 @@ import Link from 'next/link';
 import * as xlsx from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { checkSchedulingAccess, getSessionActor } from '@/lib/scheduling/authUtils';
 
 import BOQActions from './BOQActions';
 import AwardedBOQViewer from './AwardedBOQViewer';
+import DraftBoqEditor from './DraftBoqEditor';
+import { buildDraftBoqChecksum } from '@/lib/boq/draft-workflow';
 import BOQConsolidationTab from './BOQConsolidationTab';
 import ProjectVariationOrdersTab from './ProjectVariationOrdersTab';
 import ModuleKnowledgeTab from '@/app/knowledge-center/ModuleKnowledgeTab';
@@ -53,6 +55,10 @@ const PROJECT_TABS = [
 
 export const dynamic = 'force-dynamic';
 
+function escapeBoqText(value: string) {
+  return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
+}
+
 export default async function ProjectDetailsPage({ 
   params,
   searchParams 
@@ -62,6 +68,10 @@ export default async function ProjectDetailsPage({
 }) {
   const { id } = await params;
   const { tab = 'summary' } = await searchParams;
+  const actor = await getSessionActor().catch(() => null);
+  if (!actor) redirect('/login');
+  const access = await checkSchedulingAccess(actor.id, actor.role, id, 'canView');
+  if (!access.allowed) notFound();
   
   const project = await prisma.project.findUnique({
     where: { id },
@@ -83,16 +93,19 @@ export default async function ProjectDetailsPage({
     return <div style={{ padding: '20px', color: 'red' }}>Project not found.</div>;
   }
 
-  const cookieStore = await cookies();
-  const email = cookieStore.get('demo_user_email')?.value; 
-  if(!email) {
-    redirect('/');
-  }
-  const currentUser = await prisma.user.findFirst({
-    where: { email },
+  const currentUser = await prisma.user.findUnique({
+    where: { id: actor.id },
     include: { userRoles: { include: { role: true } } }
   });
   const isPurchasingOfficer = currentUser?.userRoles.some(ur => ur.role.roleCode === 'PURCHASING_OFFICER');
+  const boqVersion = tab === 'awarded-boq' ? await prisma.projectBOQVersion.findFirst({
+    where: { projectId: id }, orderBy: { versionNumber: 'desc' },
+  }) : null;
+  const isDraftBoq = boqVersion?.status === 'DRAFT';
+  const [boqEditAccess, boqApprovalAccess] = isDraftBoq ? await Promise.all([
+    checkSchedulingAccess(actor.id, actor.role, id, 'canEditDraft'),
+    checkSchedulingAccess(actor.id, actor.role, id, 'canApprove'),
+  ]) : [{ allowed: false }, { allowed: false }];
 
   let htmlTable = '';
   let consolidatedHtmlTable = '';
@@ -135,7 +148,9 @@ export default async function ProjectDetailsPage({
       const additiveAmount = voAmount > 0 ? voAmount : 0;
       const deductiveAmount = voAmount < 0 ? Math.abs(voAmount) : 0;
       
-      const displayUnitCost = displayQty > 0 ? displayTotalCost / displayQty : 0;
+      const displayUnitCost = hasVariations
+        ? (displayQty > 0 ? displayTotalCost / displayQty : 0)
+        : item.combinedUnitCost;
       
       const isHeader = !item.quantity && !item.totalCost && !item.revisedContractAmount;
       const isVariation = item.description.includes('(VO)') || voQty !== 0 || voAmount !== 0;
@@ -143,9 +158,9 @@ export default async function ProjectDetailsPage({
       const rowStyle = isVariation ? 'color: #3b82f6; font-weight: 500; background-color: rgba(59, 130, 246, 0.05);' : '';
       
       customHtml += `<tr style="${rowStyle}">
-        <td style="${isHeader ? 'font-weight: bold; background-color: rgba(0,0,0,0.05);' : ''}">${item.itemCode || ''}</td>
-        <td style="${isHeader ? 'font-weight: bold; background-color: rgba(0,0,0,0.05);' : ''}">${item.description || ''}</td>
-        <td style="${isHeader ? 'background-color: rgba(0,0,0,0.05);' : ''}">${item.unit || ''}</td>`;
+        <td style="${isHeader ? 'font-weight: bold; background-color: rgba(0,0,0,0.05);' : ''}">${escapeBoqText(item.itemCode || '')}</td>
+        <td style="${isHeader ? 'font-weight: bold; background-color: rgba(0,0,0,0.05);' : ''}">${escapeBoqText(item.description || '')}</td>
+        <td style="${isHeader ? 'background-color: rgba(0,0,0,0.05);' : ''}">${escapeBoqText(item.unit || '')}</td>`;
       
       if (hasVariations) {
         customHtml += `
@@ -202,9 +217,9 @@ export default async function ProjectDetailsPage({
       grandTotal += group.totalCost;
       const displayGroupUnitCost = group.quantity > 0 ? group.totalCost / group.quantity : 0;
       consHtml += `<tr>
-        <td>${group.itemCode || ''}</td>
-        <td>${group.description || ''}</td>
-        <td>${group.unit || ''}</td>
+        <td>${escapeBoqText(group.itemCode || '')}</td>
+        <td>${escapeBoqText(group.description || '')}</td>
+        <td>${escapeBoqText(group.unit || '')}</td>
         <td>${group.quantity?.toLocaleString() || ''}</td>
         <td>${displayGroupUnitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td>${group.totalCost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || ''}</td>
@@ -274,7 +289,7 @@ export default async function ProjectDetailsPage({
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
             <div>
-              <h2 style={{ color: 'var(--text-primary)', margin: 0 }}>Contract BOQ (Awarded)</h2>
+              <h2 style={{ color: 'var(--text-primary)', margin: 0 }}>{isDraftBoq ? 'Draft BOQ' : 'Contract BOQ (Awarded)'}</h2>
               <div style={{ display: 'flex', gap: '20px', marginTop: '8px' }}>
                 <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '1rem' }}>
                   Original Contract: ₱ {project.contractAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
@@ -286,7 +301,10 @@ export default async function ProjectDetailsPage({
                 )}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Link href={`/projects/${project.id}/scheduling`} className="btn-secondary">
+                Open work packages
+              </Link>
               {project.description && project.description.includes('BOQ File Uploaded: ') && (
                 <a 
                   href={project.description.split('BOQ File Uploaded: ')[1]} 
@@ -308,17 +326,25 @@ export default async function ProjectDetailsPage({
                 </a>
               )}
               {!isPurchasingOfficer && (
-                <BOQActions projectId={project.id} isLocked={project.boqLocked} hasBOQ={hasBOQ} />
+                <BOQActions projectId={project.id} isLocked={project.boqLocked} hasBOQ={hasBOQ} usesDraftApproval={isDraftBoq} />
               )}
             </div>
           </div>
-          <AwardedBOQViewer 
+          {isDraftBoq && boqVersion ? <DraftBoqEditor
+            projectId={project.id}
+            version={{ id: boqVersion.id, checksum: boqVersion.checksum || buildDraftBoqChecksum(project.awardedBoqItems) }}
+            rows={project.awardedBoqItems.map(item => ({ id: item.id, itemCode: item.itemCode, description: item.description, unit: item.unit,
+              quantity: item.quantity, combinedUnitCost: item.combinedUnitCost, totalCost: item.totalCost }))}
+            contractAmount={project.contractAmount || 0}
+            canEdit={boqEditAccess.allowed}
+            canApprove={boqApprovalAccess.allowed}
+          /> : <AwardedBOQViewer
             projectId={project.id}
             htmlTable={htmlTable} 
             consolidatedHtmlTable={consolidatedHtmlTable} 
             originalFileUrl={originalFileUrl}
             projectName={project.name}
-          />
+          />}
         </>
       )}
 

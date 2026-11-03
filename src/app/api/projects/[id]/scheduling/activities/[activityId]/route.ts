@@ -1,94 +1,53 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { assertScheduleEditable } from '@/lib/scheduling/scheduleWorkflow';
+import { getSessionActor, checkSchedulingAccess } from '@/lib/scheduling/authUtils';
+import {
+  DraftEditingError,
+  deleteDraftScheduleActivity,
+  editDraftScheduleActivity,
+} from '@/lib/scheduling/draft-editing';
 
-// PUT: Update an activity
-// DELETE: Delete an activity
-export async function PUT(req: Request, { params }: { params: Promise<any> }) {
+type RouteParams = { params: Promise<{ id: string; activityId: string }> };
+
+export async function PUT(req: Request, { params }: RouteParams) {
   try {
-    const { activityId } = await params;
-    const body = await req.json();
-    const { name, activityCode, description, wbsId, plannedDuration, plannedStartDate, plannedFinishDate, unit, plannedQuantity, status, priority, actualStartDate, actualFinishDate, actualProgressPercent } = body;
+    const { id: projectId, activityId } = await params;
+    const actor = await getSessionActor();
+    const access = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canEditDraft');
+    if (!access.allowed) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
 
-    const activityToUpdate = await prisma.scheduleActivity.findUnique({
-      where: { id: activityId },
-      include: { schedule: true }
-    });
-    
-    if (!activityToUpdate) {
-      return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'INVALID_REQUEST_BODY' }, { status: 400 });
     }
-
-    assertScheduleEditable(activityToUpdate.schedule);
-
-    const updateData: any = {};
-    if (name !== undefined) updateData.name = name;
-    if (activityCode !== undefined) updateData.activityCode = activityCode;
-    if (description !== undefined) updateData.description = description;
-    if (wbsId !== undefined) updateData.wbsId = wbsId || null;
-    if (plannedDuration !== undefined) updateData.plannedDuration = plannedDuration;
-    if (plannedStartDate !== undefined) updateData.plannedStartDate = plannedStartDate ? new Date(plannedStartDate) : null;
-    if (plannedFinishDate !== undefined) updateData.plannedFinishDate = plannedFinishDate ? new Date(plannedFinishDate) : null;
-    if (unit !== undefined) updateData.unit = unit;
-    if (plannedQuantity !== undefined) updateData.plannedQuantity = plannedQuantity;
-    if (status !== undefined) updateData.status = status;
-    if (priority !== undefined) updateData.priority = priority;
-    if (actualStartDate !== undefined) updateData.actualStartDate = actualStartDate ? new Date(actualStartDate) : null;
-    if (actualFinishDate !== undefined) updateData.actualFinishDate = actualFinishDate ? new Date(actualFinishDate) : null;
-    if (actualProgressPercent !== undefined) {
-      updateData.actualProgressPercent = actualProgressPercent;
-      
-      // Also create a history record
-      await prisma.scheduleProgressUpdate.create({
-        data: {
-          scheduleId: activityToUpdate.scheduleId,
-          activityId: activityId,
-          updateDate: new Date(),
-          progressPercent: actualProgressPercent,
-          remarks: 'Manual progress update from Gantt/WBS list'
-        }
-      });
-    }
-
-    const activity = await prisma.scheduleActivity.update({
-      where: { id: activityId },
-      data: updateData,
-      include: {
-        wbs: true,
-        predecessors: true,
-        successors: true
-      }
-    });
-
+    const activity = await editDraftScheduleActivity({ projectId, activityId, actor, body });
     return NextResponse.json({ success: true, activity });
-  } catch (error: any) {
-    console.error('Error updating activity:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    if (error instanceof DraftEditingError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof Error && error.message.startsWith('UNAUTHORIZED:')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'DATABASE_OPERATION_FAILED' }, { status: 500 });
   }
 }
 
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string; activityId: string }> }) {
+export async function DELETE(req: Request, { params }: RouteParams) {
   try {
-    const { activityId } = await params;
+    const { id: projectId, activityId } = await params;
+    const actor = await getSessionActor();
+    const access = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canEditDraft');
+    if (!access.allowed) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
 
-    const activity = await prisma.scheduleActivity.findUnique({
-      where: { id: activityId },
-      include: { schedule: true }
-    });
-
-    if (!activity) {
-      return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'INVALID_REQUEST_BODY' }, { status: 400 });
     }
-
-    assertScheduleEditable(activity.schedule);
-
-    await prisma.scheduleActivity.delete({
-      where: { id: activityId }
-    });
-
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error('Error deleting activity:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const result = await deleteDraftScheduleActivity({ projectId, activityId, actor, body });
+    return NextResponse.json({ success: true, ...result });
+  } catch (error) {
+    if (error instanceof DraftEditingError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof Error && error.message.startsWith('UNAUTHORIZED:')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'DATABASE_OPERATION_FAILED' }, { status: 500 });
   }
 }

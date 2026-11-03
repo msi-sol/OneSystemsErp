@@ -37,6 +37,7 @@ interface GanttChartViewProps {
   projectStartDate: string;
   projectFinishDate: string | null;
   scheduleStatus: string;
+  rowVersion: number;
   onRefresh: () => void;
 }
 
@@ -75,6 +76,7 @@ export default function GanttChartView({
   projectStartDate,
   projectFinishDate,
   scheduleStatus,
+  rowVersion,
   onRefresh
 }: GanttChartViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('WEEK');
@@ -228,17 +230,20 @@ export default function GanttChartView({
           const newFinish = origFinish ? addDays(origFinish, daysMoved) : addDays(newStart, act.plannedDuration);
 
           try {
-            await fetch(`/api/projects/${projectId}/scheduling/activities/${dragActivity}`, {
+            const response = await fetch(`/api/projects/${projectId}/scheduling/activities/${dragActivity}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                expectedRowVersion: rowVersion,
                 plannedStartDate: formatDateISO(newStart),
                 plannedFinishDate: formatDateISO(newFinish)
               })
             });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'Could not save activity dates.');
             onRefresh();
           } catch (err) {
-            console.error('Failed to update activity dates:', err);
+            setNotification(err instanceof Error ? err.message : 'Could not save activity dates.');
           }
         }
       }
@@ -255,7 +260,7 @@ export default function GanttChartView({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragActivity, dragStartX, dragOriginalStart, columnWidth, activities, projectId, onRefresh]);
+  }, [dragActivity, dragStartX, dragOriginalStart, columnWidth, activities, projectId, rowVersion, onRefresh]);
 
   // ── Auto-dismiss notification ──
   useEffect(() => {

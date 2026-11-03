@@ -8,12 +8,12 @@ export async function getSessionActor() {
   const __session = await verifySession();
   const userId = __session?.id || '';
   
-  if (!userId) {
+  if (!userId || __session?.mustChangePassword) {
     throw new Error('UNAUTHORIZED: No active session');
   }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
+  if (!user || user.mustChangePassword) {
     throw new Error('UNAUTHORIZED: User not found');
   }
 

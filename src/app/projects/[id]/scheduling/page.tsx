@@ -1,7 +1,9 @@
 import React from "react";
 import { prisma } from "@/lib/prisma";
 import SchedulingHubClient from "./SchedulingHubClient";
-import { getSessionActor } from "@/lib/scheduling/authUtils";
+import { checkSchedulingAccess, getSessionActor } from "@/lib/scheduling/authUtils";
+import { notFound, redirect } from "next/navigation";
+import { buildWorkPackageSummary } from "@/lib/scheduling/work-package-summary";
 
 function serializePrisma(obj: any): any {
   if (obj === null || obj === undefined) return obj;
@@ -21,6 +23,9 @@ function serializePrisma(obj: any): any {
 export default async function ProjectSchedulingHub({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = await params;
   const actor = await getSessionActor().catch(() => null);
+  if (!actor) redirect('/login');
+  const access = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canView');
+  if (!access.allowed) notFound();
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -41,7 +46,7 @@ export default async function ProjectSchedulingHub({ params }: { params: Promise
               wbs: true,
               boqAllocations: {
                 include: {
-                  awardedBoqItem: { select: { id: true, itemCode: true, description: true, quantity: true, totalCost: true, combinedUnitCost: true, directCost: true } }
+                  awardedBoqItem: { select: { id: true, itemCode: true, description: true, unit: true, quantity: true, totalCost: true, combinedUnitCost: true, directCost: true } }
                 }
               },
               predecessors: true,
@@ -119,6 +124,15 @@ export default async function ProjectSchedulingHub({ params }: { params: Promise
 
   const serializedProject = serializePrisma(project);
   const serializedBoq = serializePrisma(awardedBoq);
+  // Keep Decimal allocations intact while projecting; serializePrisma converts
+  // other legacy schedule props to numbers for the existing views.
+  const scopeBoq = selectedSchedule ? await prisma.awardedBOQItem.findMany({
+    where: { projectId },
+    select: { id: true, itemCode: true, description: true, unit: true, quantity: true, totalCost: true },
+    orderBy: { itemCode: 'asc' },
+  }) : [];
+  const workPackageSummary = selectedSchedule ? buildWorkPackageSummary(selectedSchedule, scopeBoq) : undefined;
+  const editAccess = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canEditDraft');
 
   return (
     <SchedulingHubClient 
@@ -126,6 +140,8 @@ export default async function ProjectSchedulingHub({ params }: { params: Promise
       initialSchedule={selectedSchedule ? serializePrisma(selectedSchedule) : null} 
       awardedBoq={serializedBoq}
       actor={actor}
+      workPackageSummary={workPackageSummary}
+      canEditDraft={editAccess.allowed}
     />
   );
 }

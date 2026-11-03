@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { lockProjectBOQ, deleteProject } from '@/app/actions/mutations';
 
-export default function BOQActions({ projectId, isLocked, hasBOQ }: { projectId: string, isLocked: boolean, hasBOQ: boolean }) {
+export default function BOQActions({ projectId, isLocked, hasBOQ, usesDraftApproval = false }: { projectId: string, isLocked: boolean, hasBOQ: boolean, usesDraftApproval?: boolean }) {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
@@ -44,14 +44,14 @@ export default function BOQActions({ projectId, isLocked, hasBOQ }: { projectId:
         </span>
       ) : (
         <>
-          <button 
+          {!usesDraftApproval && <button
             onClick={handleLock} 
             disabled={isLoading}
             className="btn-primary" 
             style={{ backgroundColor: '#00cc66', borderColor: '#00cc66' }}
           >
             {isLoading ? 'Processing...' : 'Lock BOQ for Consolidation'}
-          </button>
+          </button>}
           
           <button 
             onClick={handleDelete} 

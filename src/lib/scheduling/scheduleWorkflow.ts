@@ -74,6 +74,21 @@ export function assertValidTransition(currentStatus: string, targetStatus: strin
   }
 }
 
+export function hasApprovedLockedBOQPin(
+  projectIsLocked: boolean,
+  schedule: { lockedBOQVersionId?: string | null; lockedBOQChecksum?: string | null },
+  version: { id: string; status: string; checksum?: string | null } | null,
+): boolean {
+  return Boolean(
+    projectIsLocked &&
+    version &&
+    schedule.lockedBOQVersionId === version.id &&
+    ['APPROVED', 'LOCKED'].includes(version.status) &&
+    version.checksum &&
+    version.checksum === schedule.lockedBOQChecksum,
+  );
+}
+
 // ---------------------------------------------------------
 // SNAPSHOTS
 // ---------------------------------------------------------
@@ -175,6 +190,20 @@ export async function validateScheduleForReview({
   }
 
   // BOQ
+  const projectBOQState = await tx.project.findUnique({
+    where: { id: projectId },
+    select: { boqLocked: true },
+  });
+  const approvedBOQVersion = schedule.lockedBOQVersionId
+    ? await tx.projectBOQVersion.findFirst({
+        where: { id: schedule.lockedBOQVersionId, projectId },
+        select: { id: true, status: true, checksum: true },
+      })
+    : null;
+  if (!hasApprovedLockedBOQPin(Boolean(projectBOQState?.boqLocked), schedule, approvedBOQVersion)) {
+    errors.push('BOQ: An approved and locked BOQ version matching this schedule is required before review.');
+  }
+
   const pricedLines = await tx.awardedBOQItem.count({
     where: { projectId, totalCost: { gt: 0 } }
   });

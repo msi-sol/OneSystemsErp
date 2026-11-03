@@ -1025,6 +1025,10 @@ export async function deleteProcurementBenchmark(projectId: string) {
 }
 
 export async function lockProjectBOQ(projectId: string) {
+  const draftVersion = await prisma.projectBOQVersion.findFirst({ where: { projectId, status: 'DRAFT' } });
+  if (draftVersion) {
+    throw new Error('Review the draft BOQ and use Approve & Lock BOQ before locking this project.');
+  }
   await prisma.project.update({
     where: { id: projectId },
     data: { boqLocked: true }

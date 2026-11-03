@@ -276,7 +276,7 @@ export async function executeAddFinanceReviewCommentMutation({
       createdByNameSnapshot: actorNameSnapshot,
       commentType: 'FINANCIAL' as any,
       reviewRound: currentSchedule.reviewRound,
-      comment: 'Financial review confirms that the scheduled amount of PHP 43,106,674.89 equals the locked awarded contract amount, with a zero financial difference. The BOQ allocations reconcile to the approved total. This comment records financial review only and does not constitute approval or baseline activation.'
+      comment: `Financial review records a scheduled amount of PHP ${currentSchedule.scheduledAmount.toFixed(2)}, an awarded contract amount of PHP ${currentSchedule.awardedContractAmount.toFixed(2)}, and a recorded difference of PHP ${currentSchedule.differenceAmount.toFixed(2)}. This comment records financial review only and does not constitute approval or baseline activation.`
     };
 
     await tx.scheduleReviewComment.create({ data: comment });
@@ -613,8 +613,13 @@ export async function executeBaselineActivationMutation({
     }
 
     // 7. Locked BOQ checksum validation
-    if (schedule.lockedBOQChecksum !== '514c4bd4a7b188391c5ec7f04f198c2963035021a94b295a7b15d408ba831e17') {
-      throw new Error('Locked BOQ checksum does not match required baseline checksum');
+    const lockedBoq = schedule.lockedBOQVersionId ? await tx.projectBOQVersion.findFirst({
+      where: { id: schedule.lockedBOQVersionId, projectId },
+    }) : null;
+    const project = await tx.project.findUnique({ where: { id: projectId }, select: { boqLocked: true } });
+    if (!project?.boqLocked || !lockedBoq || !['APPROVED', 'LOCKED'].includes(lockedBoq.status)
+      || !lockedBoq.checksum || lockedBoq.checksum !== schedule.lockedBOQChecksum) {
+      throw new Error('Locked BOQ checksum does not match the project approved BOQ version');
     }
 
     // 8. Determine codes

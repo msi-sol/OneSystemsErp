@@ -34,8 +34,19 @@ jobs:
           node-version: 22.22.1
           cache: npm
 
+      - name: Validate migration isolation policy
+        run: node --test deploy/cicd/migration-policy.test.mjs
+
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Test production BOQ and scheduling features
+        run: |
+          npx prisma generate
+          npx jest --config jest.config.js --runInBand tests/unit/boq-draft-workflow.test.ts tests/unit/draft-schedule-editing.test.ts tests/work-package-summary.test.ts tests/unit/scheduling-session.test.ts
+        env:
+          DATABASE_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
+          DIRECT_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
 
       - name: Build Next.js and Prisma for production
         run: npm run build -- --webpack
@@ -74,6 +85,7 @@ jobs:
           cp -a apps/aws-backend/src "$stage/apps/aws-backend/src"
           cp -a artifacts/scheduling "$stage/artifacts/scheduling"
           cp prisma/schema.prisma "$stage/prisma/schema.prisma"
+          cp -a prisma/migrations "$stage/prisma/migrations"
           cp package.json package-lock.json next.config.ts tsconfig.json "$stage/"
           export NPM_VERSION="$(npm --version)"
           node --input-type=module - "$stage/deployment-manifest.json" <<'NODE'

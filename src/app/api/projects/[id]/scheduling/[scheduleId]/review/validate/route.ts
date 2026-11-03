@@ -15,9 +15,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Invalid rowVersion' }, { status: 400 });
     }
 
-    const engineer = await prisma.user.findUnique({ where: { email: 'engineer@onesystemserp.com' } });
-    const actor = { id: engineer!.id, role: 'SITE_ENGINEER' };
-    const access = { allowed: true };
+    const actor = await getSessionActor();
+    const access = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canSubmit');
+    if (!access.allowed) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
 
     const user = await prisma.user.findUnique({ where: { id: actor.id } });
     if (!user) {
@@ -43,10 +45,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const opSession = {
       userId: user.id,
       email: user.email || '',
-      sessionVersion: user.sessionVersion || 1,
+      sessionVersion: user.sessionVersion,
       accountActive: user.status === 'ACTIVE',
-      accountLocked: false,
-      mustChangePassword: (user as any).forcePasswordChange || false
+      accountLocked: Boolean(user.lockedUntil && user.lockedUntil > new Date()),
+      mustChangePassword: user.mustChangePassword
     };
 
     // STAGE A: Read-only validation outside transaction

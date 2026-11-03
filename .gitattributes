@@ -1,0 +1,2 @@
+# Prisma stores exact migration checksums; keep shared history identical on Windows/Linux.
+prisma/migrations/** text eol=lf

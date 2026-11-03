@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { assertScheduleEditable } from '@/lib/scheduling/scheduleWorkflow';
+import { getSessionActor, checkSchedulingAccess } from '@/lib/scheduling/authUtils';
+import { createDraftScheduleActivity, DraftEditingError } from '@/lib/scheduling/draft-editing';
 
-// GET: List all activities for a schedule
-// POST: Create a new activity
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+type RouteParams = { params: Promise<{ id: string }> };
+
+export async function GET(_req: Request, { params }: RouteParams) {
   try {
     const { id: projectId } = await params;
+    const actor = await getSessionActor();
+    const access = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canView');
+    if (!access.allowed) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
     const schedule = await prisma.projectSchedule.findFirst({
       where: { projectId },
       include: {
@@ -16,67 +21,39 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             assignedTo: { select: { id: true, name: true, email: true } },
             boqAllocations: { include: { awardedBoqItem: { select: { id: true, itemCode: true, description: true } } } },
             predecessors: true,
-            successors: true
+            successors: true,
           },
-          orderBy: { createdAt: 'asc' }
+          orderBy: { createdAt: 'asc' },
         },
         wbsNodes: { orderBy: { orderIndex: 'asc' } },
-        dependencies: true
-      }
+        dependencies: true,
+      },
     });
-
-    if (!schedule) {
-      return NextResponse.json({ error: 'Schedule not found' }, { status: 404 });
-    }
-
+    if (!schedule) return NextResponse.json({ error: 'Schedule not found' }, { status: 404 });
     return NextResponse.json({ schedule });
-  } catch (error: any) {
-    console.error('Error fetching activities:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('UNAUTHORIZED:')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'DATABASE_OPERATION_FAILED' }, { status: 500 });
   }
 }
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: RouteParams) {
   try {
     const { id: projectId } = await params;
-    const body = await req.json();
-    const { name, activityCode, description, wbsId, plannedDuration, plannedStartDate, plannedFinishDate, unit, plannedQuantity } = body;
-
-    const schedule = await prisma.projectSchedule.findFirst({
-      where: { projectId },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    if (!schedule) {
-      return NextResponse.json({ error: 'Schedule not found for this project' }, { status: 404 });
+    const actor = await getSessionActor();
+    const access = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canEditDraft');
+    if (!access.allowed) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'INVALID_REQUEST_BODY' }, { status: 400 });
     }
-
-    assertScheduleEditable(schedule);
-
-    const activity = await prisma.scheduleActivity.create({
-      data: {
-        scheduleId: schedule.id,
-        name,
-        activityCode: activityCode || null,
-        description: description || null,
-        wbsId: wbsId || null,
-        plannedDuration: plannedDuration || 0,
-        plannedStartDate: plannedStartDate ? new Date(plannedStartDate) : null,
-        plannedFinishDate: plannedFinishDate ? new Date(plannedFinishDate) : null,
-        unit: unit || null,
-        plannedQuantity: plannedQuantity || 0,
-        status: 'NOT_STARTED'
-      },
-      include: {
-        wbs: true,
-        predecessors: true,
-        successors: true
-      }
-    });
-
+    const activity = await createDraftScheduleActivity({ projectId, actor, body });
     return NextResponse.json({ success: true, activity });
-  } catch (error: any) {
-    console.error('Error creating activity:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    if (error instanceof DraftEditingError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof Error && error.message.startsWith('UNAUTHORIZED:')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'DATABASE_OPERATION_FAILED' }, { status: 500 });
   }
 }

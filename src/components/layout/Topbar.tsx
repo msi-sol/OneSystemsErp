@@ -5,6 +5,7 @@ import { logout } from '@/app/actions/auth';
 import ActiveProjectSelector from './ActiveProjectSelector';
 
 import PageTitle from './PageTitle';
+import styles from './topbar.module.css';
 
 export default async function Topbar() {
   const cookieStore = await cookies();
@@ -41,30 +42,19 @@ export default async function Topbar() {
   }
 
   return (
-    <header style={{
-      height: 'var(--header-height)',
-      backgroundColor: 'var(--glass-bg)',
-      backdropFilter: 'blur(10px)',
-      borderBottom: '1px solid var(--glass-border)',
-      display: 'flex',
-      alignItems: 'center',
-      padding: '0 30px',
-      position: 'sticky',
-      top: 0,
-      zIndex: 10
-    }}>
+    <header className={styles.topbar}>
       <PageTitle />
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '20px' }}>
+      <div className={styles.actions}>
         
         {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '25px' }}>
+          <div className={styles.userControls}>
             
             <ActiveProjectSelector 
               assignments={assignments} 
               activeProjectId={activeProjectId} 
             />
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', borderLeft: '1px solid var(--glass-border)', paddingLeft: '20px' }}>
+            <div className={styles.identity}>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>{user.name}</div>
                 <div style={{ fontSize: '0.75rem', color: simulatedRole ? '#ff4d4d' : 'var(--accent-color)', fontWeight: simulatedRole ? 'bold' : 'normal' }}>

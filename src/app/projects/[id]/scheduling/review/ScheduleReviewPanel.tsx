@@ -3,7 +3,7 @@
 import React, { useState, useTransition, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function ScheduleReviewPanel({ schedule, projectId, actor }: { schedule: any, projectId: string, actor?: any }) {
+export default function ScheduleReviewPanel({ schedule, projectId, actor, boqLocked = true }: { schedule: any, projectId: string, actor?: any, boqLocked?: boolean }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [comments, setComments] = useState('');
@@ -57,7 +57,7 @@ export default function ScheduleReviewPanel({ schedule, projectId, actor }: { sc
           <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
             <button 
               onClick={() => handleAction('review/validate')}
-              disabled={isPending}
+              disabled={isPending || !boqLocked}
               className="btn btn-primary"
             >
               Validate & Request Review
@@ -189,6 +189,7 @@ export default function ScheduleReviewPanel({ schedule, projectId, actor }: { sc
   return (
     <div className="glass-panel" style={{ padding: '20px', margin: '20px 0', border: '1px solid var(--glass-border)', borderRadius: '8px' }}>
       <h3 style={{ color: 'var(--accent-color)', marginTop: 0 }}>Workflow Actions</h3>
+      {!boqLocked && <p>Approve and lock the BOQ in <a href={`/projects/${projectId}?tab=awarded-boq`} style={{ color: 'var(--accent-color)', textDecoration: 'underline' }}>Contract Value &amp; BOQ</a> before submitting this plan for review.</p>}
       <div style={{ fontSize: '0.9rem', marginBottom: '10px', color: 'var(--text-secondary)' }}>
         Row Version: {schedule.rowVersion} | Revision: {schedule.revisionCode || 'N/A'} | Review Round: {schedule.reviewRound}
       </div>

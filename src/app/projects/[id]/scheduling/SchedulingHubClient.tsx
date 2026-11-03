@@ -12,21 +12,27 @@ import PERTNetworkDiagram from './pert/PERTNetworkDiagram';
 import AIScheduleIntelligence from './ai/AIScheduleIntelligence';
 import PhaseSummaryView from './PhaseSummaryView';
 import ScheduleReviewPanel from './review/ScheduleReviewPanel';
+import WorkPackageWorkspace from './WorkPackageWorkspace';
+import { buildWorkPackageSummary, type WorkPackageSummaryResult } from '@/lib/scheduling/work-package-summary';
 
 export default function SchedulingHubClient({ 
   project, 
   initialSchedule, 
   awardedBoq,
-  actor
+  actor,
+  workPackageSummary,
+  canEditDraft = false,
 }: { 
   project: any; 
   initialSchedule: any; 
   awardedBoq: any;
   actor?: any;
+  workPackageSummary?: WorkPackageSummaryResult;
+  canEditDraft?: boolean;
 }) {
   const router = useRouter();
   const [schedule, setSchedule] = useState(initialSchedule);
-  const [activeTab, setActiveTab] = useState('PHASE_SUMMARY');
+  const [activeTab, setActiveTab] = useState('WORK_PACKAGES');
   const [isDeleting, startTransition] = useTransition();
 
   const handleDeleteSchedule = () => {
@@ -79,7 +85,7 @@ export default function SchedulingHubClient({
     );
   }
 
-  if (!hasValidSchedule) {
+  if (!hasValidSchedule && activeTab !== 'WORK_PACKAGES') {
     return (
       <div style={{ maxWidth: '800px', margin: '40px auto', padding: '30px', textAlign: 'center' }} className="glass-panel">
         <h2 style={{ color: 'var(--accent-color)' }}>NO VALID PROJECT SCHEDULE</h2>
@@ -105,6 +111,7 @@ export default function SchedulingHubClient({
   }
 
   const tabs = [
+    { key: 'WORK_PACKAGES', label: 'Work Packages', icon: '' },
     { key: 'PHASE_SUMMARY', label: '📑 Phase Summary', icon: '' },
     { key: 'GANTT', label: '📊 Gantt Chart', icon: '' },
     { key: 'WBS', label: '📋 WBS & Activities', icon: '' },
@@ -116,6 +123,18 @@ export default function SchedulingHubClient({
 
   const renderTabContent = () => {
     switch (activeTab) {
+      case 'WORK_PACKAGES':
+        return <WorkPackageWorkspace
+          projectId={project.id}
+          summary={workPackageSummary ?? buildWorkPackageSummary(schedule, awardedBoq ?? [])}
+          workflowStatus={schedule.workflowStatus || schedule.status}
+          baselineCode={schedule.baselineCode}
+          boqLocked={Boolean(project.boqLocked)}
+          onPlan={() => setActiveTab('WBS')}
+          canEditDraft={canEditDraft}
+          rowVersion={schedule.rowVersion}
+          onRefresh={handleRefresh}
+        />;
       case 'PHASE_SUMMARY':
         return <PhaseSummaryView schedule={schedule} />;
       case 'GANTT':
@@ -127,6 +146,7 @@ export default function SchedulingHubClient({
             projectStartDate={schedule.currentStartDate || schedule.baselineStartDate || project.startDate || new Date().toISOString()}
             projectFinishDate={schedule.currentFinishDate || null}
             scheduleStatus={schedule.status}
+            rowVersion={schedule.rowVersion}
             onRefresh={handleRefresh}
           />
         );
@@ -136,6 +156,7 @@ export default function SchedulingHubClient({
             projectId={project.id}
             schedule={schedule}
             onRefresh={handleRefresh}
+            canEditDraft={canEditDraft}
           />
         );
       case 'DASHBOARD':
@@ -286,7 +307,9 @@ export default function SchedulingHubClient({
       </div>
 
       {/* Schedule Review Panel */}
-      <ScheduleReviewPanel schedule={schedule} projectId={project.id} actor={actor} />
+      <div id="schedule-review" tabIndex={-1}>
+        <ScheduleReviewPanel schedule={schedule} projectId={project.id} actor={actor} boqLocked={Boolean(project.boqLocked)} />
+      </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '6px', marginBottom: '15px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '8px', overflowX: 'auto' }}>

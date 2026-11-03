@@ -65,8 +65,9 @@ export async function submitDraftForReview(
   const idempotencyKeyHash = hashIdempotencyKey(idempotencyKey);
   const action = 'SUBMIT_DRAFT_FOR_REVIEW';
 
-  return prisma.$transaction(async (tx) => {
-    return transactionContext.run({ sourceProvenance: 'GATE9_WORKFLOW_ENGINE' }, async () => {
+  // Establish provenance before Prisma creates the transaction client so its
+  // extension callbacks capture the same workflow context as the service.
+  return transactionContext.run({ sourceProvenance: 'GATE9_WORKFLOW_ENGINE' }, () => prisma.$transaction(async (tx) => {
       // Idempotency Check
     const existing = await tx.scheduleWorkflowTransition.findUnique({
       where: {
@@ -160,8 +161,7 @@ export async function submitDraftForReview(
     });
 
     return { status: 'SUCCESS', transition };
-    });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
 }
 
 export async function startTechnicalReview(
