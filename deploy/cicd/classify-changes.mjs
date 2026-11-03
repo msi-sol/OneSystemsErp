@@ -11,6 +11,7 @@ const TEST_PREFIXES = ['tests/'];
 export function isApplicationPath(file) {
   const path = file.replaceAll('\\', '/').replace(/^\.\//, '');
   if (path === 'public/uploads' || path.startsWith('public/uploads/')) return false;
+  if (path === 'deploy/cicd/package-release.mjs') return true;
   if (APP_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
   if (/^package(?:-lock)?\.json$/.test(path)) return true;
   return /^(?:next\.config\.|tsconfig(?:\.|$)|postcss\.config\.|tailwind\.config\.|prisma\.config\.|auth\.|proxy\.|middleware\.|instrumentation\.|sentry\.)/.test(path);

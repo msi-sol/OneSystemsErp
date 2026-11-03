@@ -15,6 +15,7 @@ test('application classifier includes runtime inputs and excludes docs/deploy-on
 });
 
 test('test-only changes request tests but do not trigger app deployment', () => {
+  assert.equal(isApplicationPath('deploy/cicd/package-release.mjs'), true);
   assert.deepEqual(classifyPaths(['tests/unit/example.test.ts']), { appChanged: false, testsChanged: true, forceBuild: false });
   assert.equal(isTestPath('jest.config.js'), true);
 });

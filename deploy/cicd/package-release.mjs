@@ -3,6 +3,7 @@ import { cp, mkdir, readdir, stat, writeFile, access } from 'node:fs/promises';
 import { resolve, relative, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire, isBuiltin } from 'node:module';
+import { spawnSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const normalized = path => path.split(sep).join('/');
@@ -103,12 +104,13 @@ export async function packageRelease(stagePath) {
 
   // Native/wasm engines and data files are dynamic runtime assets; explicitly
   // include them rather than depending on a tracer's interpretation of globs.
-  for (const path of ['node_modules/.prisma/client', 'node_modules/prisma/build',
+  for (const path of ['node_modules/.prisma/client', 'node_modules/prisma/build', 'node_modules/@prisma/engines',
     'node_modules/pdfkit/js/data', 'node_modules/exceljs/lib', 'node_modules/xlsx',
     'prisma/schema.prisma', 'prisma/migrations', 'artifacts/scheduling', 'src/lib/scheduling/blueprints']) {
     await copyTree(join(root, path), join(stage, path));
   }
   for (const path of ['node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x',
+    'node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node',
     'node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node']) {
     await access(join(root, path));
     await mkdir(dirname(join(stage, path)), { recursive: true });
@@ -128,6 +130,16 @@ export async function packageRelease(stagePath) {
   };
   for (const name of externalImports) checkedRequire.resolve(name);
   await smokeRuntimeLibraries(checkedRequire);
+  // The CLI requires its own query engine as well as the generated client's
+  // engine. Verify both explicit production engines without database access.
+  const cliCheck = spawnSync(process.execPath, [join(stage, 'node_modules/prisma/build/index.js'), '--version'], {
+    cwd: stage, encoding: 'utf8', timeout: 30_000,
+    env: { ...process.env, PRISMA_CLI_BINARY_TARGETS: 'debian-openssl-3.0.x',
+      PRISMA_QUERY_ENGINE_LIBRARY: join(stage, 'node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node'),
+      PRISMA_SCHEMA_ENGINE_BINARY: join(stage, 'node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x') },
+  });
+  if (cliCheck.status !== 0) throw new Error('Packaged Prisma CLI and production engines failed the offline version check');
+  console.log('Packaged Prisma CLI and production engine version checks passed');
   for (const path of ['server.js', 'backend/server.mjs', '.next/BUILD_ID',
     'node_modules/prisma/build/index.js', 'node_modules/@prisma/client/package.json',
     'node_modules/pdfkit/js/data/Helvetica.afm', 'public/templates/Final_BOQ_Bid_Detailed_Cost_Breakdown_Template.xlsx']) await access(join(stage, path));

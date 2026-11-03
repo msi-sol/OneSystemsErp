@@ -201,7 +201,7 @@ jobs:
             } else {
               const appPath = (raw) => {
                 const path = raw.replaceAll('\\', '/');
-                return !path.startsWith('public/uploads/') &&
+                return path === 'deploy/cicd/package-release.mjs' || !path.startsWith('public/uploads/') &&
                   (/^(src|apps\/aws-backend|artifacts|public|prisma)\//.test(path) ||
                    /^package(?:-lock)?\.json$/.test(path) ||
                    /^(?:next\.config\.|tsconfig(?:\.|$)|postcss\.config\.|tailwind\.config\.|prisma\.config\.|auth\.|proxy\.|middleware\.|instrumentation\.|sentry\.)/.test(path));
