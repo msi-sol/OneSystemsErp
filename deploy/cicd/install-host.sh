@@ -25,6 +25,7 @@ for unit in onesystemserp.service onesystemserp-backend.service; do
 done
 install -m 0600 /home/ubuntu/onesystemserp/.env "$backup/production.env"
 install -m 0640 -o root -g onesystemserp /home/ubuntu/onesystemserp/.env /etc/onesystemserp/production.env
+/usr/bin/node --env-file=/etc/onesystemserp/production.env "$SCRIPT_DIR/prepare-certificates.mjs"
 for pair in 'public/uploads public-uploads' 'uploads backend-uploads'; do
   read -r source target <<< "$pair"
   install -d -m 0700 -o onesystemserp -g onesystemserp "/var/lib/onesystemserp/$target"

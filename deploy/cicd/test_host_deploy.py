@@ -32,6 +32,16 @@ def archive_with(extra=()):
 
 
 class ArtifactSafety(unittest.TestCase):
+    def test_command_failure_keeps_details_in_a_private_host_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = types.SimpleNamespace(returncode=1, stdout='private diagnostic')
+            with patch.object(host, 'STATE', Path(directory)), patch.object(host.subprocess, 'run', return_value=result):
+                with self.assertRaisesRegex(host.DeployError, 'system command failed') as caught:
+                    host.command(['example', 'sensitive-argument'])
+            self.assertNotIn('sensitive-argument', str(caught.exception))
+            self.assertNotIn('private diagnostic', str(caught.exception))
+            self.assertEqual((Path(directory) / 'last-command-error.log').read_text(), 'private diagnostic')
+
     def test_expected_artifact_and_internal_node_link_are_accepted(self):
         link = tarfile.TarInfo('node_modules/.bin/next')
         link.type = tarfile.SYMTYPE

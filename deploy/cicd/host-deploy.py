@@ -35,7 +35,7 @@ def command(args, *, cwd=None, timeout=90):
                             text=True, timeout=timeout)
     if result.returncode:
         diagnostic = STATE / 'last-command-error.log'
-        with diagnostic.open('w', opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
+        with open(diagnostic, 'w', opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
             stream.write(result.stdout)
         diagnostic.chmod(0o600)
         # Do not propagate command arguments, application output, or secrets to SSM logs.
