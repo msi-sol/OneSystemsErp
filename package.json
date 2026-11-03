@@ -69,6 +69,7 @@
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
+    "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-chartjs-2": "^5.3.1",
     "react-datepicker": "^9.1.0",
@@ -77,9 +78,11 @@
     "react-leaflet": "^5.0.0",
     "recharts": "^3.9.0",
     "resend": "^6.17.2",
+    "sharp": "^0.34.5",
     "sonner": "^2.0.7",
     "sql.js": "^1.14.1",
     "tailwind-merge": "^3.6.0",
+    "tsx": "^4.22.3",
     "ws": "^8.21.0",
     "xlsx": "^0.18.5",
     "zod": "^4.4.3"
@@ -100,13 +103,10 @@
     "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
-    "prisma": "^6.19.3",
     "serwist": "^9.5.11",
-    "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
-    "tsx": "^4.22.3",
     "typescript": "^5.9.3"
   },
   "prisma": {

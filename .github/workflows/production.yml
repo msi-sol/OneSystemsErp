@@ -1,0 +1,277 @@
+name: Production release
+
+on:
+  push:
+    branches: [main, master, deployment/github-production-cicd]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Linux production artifact
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check deployment script safety
+        run: python3 -m unittest discover -s deploy/cicd -p 'test_host_deploy.py'
+
+      - name: Set up production Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.1
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Next.js and Prisma for production
+        run: npm run build -- --webpack
+        env:
+          DATABASE_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
+          DIRECT_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
+          AUTH_SECRET: build-only-inert-not-for-runtime
+          AUTH_TRUST_HOST: "true"
+          NEXTAUTH_URL: https://erp.mavericksolutionsinc.ph
+          NEXT_PUBLIC_APP_URL: https://erp.mavericksolutionsinc.ph
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Retain only production dependencies
+        run: npm prune --omit=dev --no-audit --no-fund
+
+      - name: Package immutable runtime release
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/onesystemserp-release"
+          mkdir -p "$stage"
+          cp -a .next "$stage/.next"
+          rm -rf "$stage/.next/cache"
+          cp -a node_modules "$stage/node_modules"
+          cp -a public "$stage/public"
+          rm -rf "$stage/public/uploads"
+          cp -a src "$stage/src"
+          mkdir -p "$stage/apps/aws-backend" "$stage/artifacts" "$stage/prisma"
+          cp -a apps/aws-backend/src "$stage/apps/aws-backend/src"
+          cp -a artifacts/scheduling "$stage/artifacts/scheduling"
+          cp prisma/schema.prisma "$stage/prisma/schema.prisma"
+          cp package.json package-lock.json next.config.ts tsconfig.json "$stage/"
+          export NPM_VERSION="$(npm --version)"
+          node --input-type=module - "$stage/deployment-manifest.json" <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          const output = process.argv[2];
+          const manifest = {
+            format: 1,
+            repository: 'msi-sol/OneSystemsErp',
+            repositoryId: '1439613899',
+            revision: process.env.GITHUB_SHA,
+            ref: process.env.GITHUB_REF,
+            runId: `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`,
+            node: process.version,
+            npm: process.env.NPM_VERSION,
+            runner: 'ubuntu-22.04',
+            builtAt: new Date().toISOString(),
+          };
+          writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 });
+          NODE
+          archive="onesystemserp-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          tar --hard-dereference -C "$stage" -czf "$RUNNER_TEMP/$archive" .
+          sha256sum "$RUNNER_TEMP/$archive" > "$RUNNER_TEMP/$archive.sha256"
+          cp "$stage/deployment-manifest.json" "$RUNNER_TEMP/deployment-manifest.json"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 "$RUNNER_TEMP/$archive.sha256")" >> "$GITHUB_OUTPUT"
+          echo "artifact_path=$RUNNER_TEMP/$archive" >> "$GITHUB_OUTPUT"
+          echo "manifest_path=$RUNNER_TEMP/deployment-manifest.json" >> "$GITHUB_OUTPUT"
+      - name: Transfer release to isolated deploy job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-release
+          path: |
+            ${{ steps.package.outputs.artifact_path }}
+            ${{ steps.package.outputs.artifact_path }}.sha256
+            ${{ steps.package.outputs.manifest_path }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  deploy:
+    name: Deploy through the fixed SSM document
+    needs: build
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["refs/heads/main","refs/heads/master"]'), github.ref)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the built release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-release
+          path: ${{ runner.temp }}/production-release
+
+      - name: Skip a queued release if its branch has moved
+        id: branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const branch = process.env.GITHUB_REF_NAME;
+          const endpoint = `https://api.github.com/repos/msi-sol/OneSystemsErp/branches/${encodeURIComponent(branch)}`;
+          const response = await fetch(endpoint, {
+            headers: {
+              Authorization: `Bearer ${process.env.GH_TOKEN}`,
+              Accept: 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+            },
+          });
+          if (!response.ok) throw new Error(`GitHub branch head lookup failed: ${response.status}`);
+          const branchHead = (await response.json()).commit?.sha?.toLowerCase();
+          const current = process.env.GITHUB_SHA.toLowerCase();
+          const isLatest = branchHead === current;
+          appendFileSync(process.env.GITHUB_OUTPUT, `latest=${isLatest}\n`);
+          if (isLatest) console.log(`Release ${current} is still the ${branch} head.`);
+          else console.log(`Skipping stale release ${current}; ${branch} now points to ${branchHead}.`);
+          NODE
+
+      - name: Confirm immutable GitHub OIDC subject before AWS access
+        if: steps.branch.outputs.latest == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const endpoint = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+          endpoint.searchParams.set('audience', 'sts.amazonaws.com');
+          const response = await fetch(endpoint, {
+            headers: { Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+          });
+          if (!response.ok) throw new Error(`GitHub OIDC token request failed: ${response.status}`);
+          const { value } = await response.json();
+          const payloadPart = value?.split('.')[1];
+          if (!payloadPart) throw new Error('GitHub returned a malformed OIDC token.');
+          const claims = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8'));
+          const branch = process.env.GITHUB_REF;
+          const expectedSubject = `repo:msi-sol@102635697/OneSystemsErp@1439613899:ref:${branch}`;
+          if (claims.iss !== 'https://token.actions.githubusercontent.com' ||
+              claims.aud !== 'sts.amazonaws.com' ||
+              claims.sub !== expectedSubject ||
+              claims.repository !== 'msi-sol/OneSystemsErp' ||
+              claims.repository_id !== '1439613899' ||
+              claims.repository_owner_id !== '102635697' ||
+              !['refs/heads/main', 'refs/heads/master'].includes(branch)) {
+            throw new Error('GitHub OIDC claims did not match this repository, immutable subject, and deployment branch.');
+          }
+          console.log(`Verified OIDC subject: ${claims.sub}`);
+          NODE
+
+      - name: Exchange OIDC token for scoped AWS role
+        if: steps.branch.outputs.latest == 'true'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::173677044880:role/OneSystemsErpGitHubDeployRole
+          role-session-name: onesystemserp-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: us-east-1
+
+      - name: Verify artifact and upload release files
+        if: steps.branch.outputs.latest == 'true'
+        id: upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/production-release"
+          archive="$dir/onesystemserp-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          test -f "$archive"
+          expected="$(cut -d' ' -f1 "$archive.sha256")"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum --check --status
+          node --input-type=module - "$dir/deployment-manifest.json" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const m = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+          if (m.repositoryId !== '1439613899' || m.revision !== process.env.GITHUB_SHA ||
+              m.runId !== `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`) {
+            throw new Error('Release manifest identity mismatch.');
+          }
+          NODE
+          key="onesystemserp/releases/${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          aws s3 cp "$archive" "s3://onesystemserp-deploy-173677044880-us-east-1/$key" \
+            --only-show-errors --content-type application/gzip --metadata "sha256=$expected,revision=$GITHUB_SHA"
+          aws s3 cp "$archive.sha256" "s3://onesystemserp-deploy-173677044880-us-east-1/$key.sha256" \
+            --only-show-errors --content-type text/plain
+          aws s3 cp "$dir/deployment-manifest.json" "s3://onesystemserp-deploy-173677044880-us-east-1/$key.manifest.json" \
+            --only-show-errors --content-type application/json
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "sha256=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Request fixed SSM deployment
+        if: steps.branch.outputs.latest == 'true'
+        id: ssm
+        shell: bash
+        run: |
+          set -euo pipefail
+          parameters="$RUNNER_TEMP/ssm-parameters.json"
+          jq -n \
+            --arg key '${{ steps.upload.outputs.key }}' \
+            --arg sha256 '${{ steps.upload.outputs.sha256 }}' \
+            --arg revision "$GITHUB_SHA" \
+            --arg runId "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            '{ArtifactKey:[$key],Sha256:[$sha256],Revision:[$revision],RunId:[$runId]}' > "$parameters"
+          command_id="$(aws ssm send-command \
+            --document-name OneSystemsErpProductionDeploy \
+            --document-version '$DEFAULT' \
+            --instance-ids i-05dbf6853ca3ecb33 \
+            --timeout-seconds 900 \
+            --parameters "file://$parameters" \
+            --query 'Command.CommandId' --output text)"
+          echo "command_id=$command_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for deployment result
+        if: steps.branch.outputs.latest == 'true'
+        shell: bash
+        env:
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 180); do
+            status="$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id i-05dbf6853ca3ecb33 \
+              --query Status --output text 2>/dev/null || true)"
+            case "$status" in
+              Success)
+                aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id i-05dbf6853ca3ecb33 \
+                  --query StandardOutputContent --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id i-05dbf6853ca3ecb33 \
+                  --query '{Status:Status,ResponseCode:ResponseCode,Error:StandardErrorContent}' --output json
+                exit 1
+                ;;
+              *) sleep 5 ;;
+            esac
+          done
+          echo 'SSM deployment did not finish within the workflow timeout.' >&2
+          exit 1
+
+      - name: Confirm public production endpoint
+        if: steps.branch.outputs.latest == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 30 \
+            --retry 6 --retry-delay 5 --retry-all-errors \
+            --output /dev/null https://erp.mavericksolutionsinc.ph/

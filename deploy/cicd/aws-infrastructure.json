@@ -1,0 +1,260 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Least-privilege OIDC release role, private release bucket, and fixed SSM deployment document for OneSystemsErp.",
+  "Parameters": {
+    "EC2InstanceRoleName": {
+      "Type": "String",
+      "Default": "OneSystemsErpZenithArchiveRole",
+      "AllowedPattern": "^[A-Za-z0-9+=,.@_-]{1,64}$",
+      "Description": "Existing instance role to receive read-only access to the private release prefix."
+    }
+  },
+  "Resources": {
+    "GitHubOidcProvider": {
+      "Type": "AWS::IAM::OIDCProvider",
+      "Properties": {
+        "Url": "https://token.actions.githubusercontent.com",
+        "ClientIdList": ["sts.amazonaws.com"],
+        "Tags": [
+          {"Key": "Application", "Value": "OneSystemsErp"},
+          {"Key": "Purpose", "Value": "GitHubProductionDeploy"}
+        ]
+      }
+    },
+    "ArtifactBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": "onesystemserp-deploy-173677044880-us-east-1",
+        "OwnershipControls": {"Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]},
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {"ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
+          ]
+        },
+        "VersioningConfiguration": {"Status": "Enabled"},
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "ExpireProductionReleasesAfterThirtyDays",
+              "Status": "Enabled",
+              "Filter": {"Prefix": "onesystemserp/releases/"},
+              "ExpirationInDays": 30,
+              "NoncurrentVersionExpiration": {"NoncurrentDays": 30},
+              "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}
+            }
+          ]
+        },
+        "Tags": [
+          {"Key": "Application", "Value": "OneSystemsErp"},
+          {"Key": "Purpose", "Value": "ProductionReleaseArtifacts"}
+        ]
+      }
+    },
+    "DeploymentDocument": {
+      "Type": "AWS::SSM::Document",
+      "Properties": {
+        "Name": "OneSystemsErpProductionDeploy",
+        "DocumentType": "Command",
+        "TargetType": "/AWS::EC2::Instance",
+        "DocumentFormat": "JSON",
+        "Content": {
+          "schemaVersion": "2.2",
+          "description": "Deploy one checksum-verified immutable OneSystemsErp release using the fixed host installer.",
+          "parameters": {
+            "ArtifactKey": {
+              "type": "String",
+              "description": "Release object key in the private OneSystemsErp bucket.",
+              "interpolationType": "ENV_VAR",
+              "allowedPattern": "^onesystemserp/releases/[0-9a-f]{40}-[0-9]{1,20}-[0-9]{1,4}\\.tar\\.gz$"
+            },
+            "Sha256": {
+              "type": "String",
+              "description": "Expected SHA-256 of the release archive.",
+              "interpolationType": "ENV_VAR",
+              "allowedPattern": "^[0-9a-f]{64}$"
+            },
+            "Revision": {
+              "type": "String",
+              "description": "Git commit SHA represented by the release.",
+              "interpolationType": "ENV_VAR",
+              "allowedPattern": "^[0-9a-f]{40}$"
+            },
+            "RunId": {
+              "type": "String",
+              "description": "GitHub workflow run ID and attempt joined with a hyphen.",
+              "interpolationType": "ENV_VAR",
+              "allowedPattern": "^[0-9]{1,20}-[0-9]{1,4}$"
+            }
+          },
+          "mainSteps": [
+            {
+              "action": "aws:runShellScript",
+              "name": "DeployVerifiedRelease",
+              "inputs": {
+                "timeoutSeconds": "900",
+                "runCommand": [
+                  "#!/bin/bash",
+                  "set -euo pipefail",
+                  "exec /usr/local/sbin/onesystemserp-deploy --artifact-key \"$SSM_ArtifactKey\" --sha256 \"$SSM_Sha256\" --revision \"$SSM_Revision\" --run-id \"$SSM_RunId\""
+                ]
+              }
+            }
+          ]
+        },
+        "Tags": [
+          {"Key": "Application", "Value": "OneSystemsErp"},
+          {"Key": "Purpose", "Value": "FixedProductionDeployment"}
+        ]
+      }
+    },
+    "GitHubDeploymentRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "OneSystemsErpGitHubDeployRole",
+        "Description": "GitHub OIDC role limited to release uploads and the fixed OneSystemsErp SSM deployment on one EC2 instance.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {"Federated": {"Fn::GetAtt": ["GitHubOidcProvider", "Arn"]}},
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": [
+                    {"Fn::Sub": "repo:msi-sol@102635697/OneSystemsErp@1439613899:ref:refs/heads/main"},
+                    {"Fn::Sub": "repo:msi-sol@102635697/OneSystemsErp@1439613899:ref:refs/heads/master"}
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "OneSystemsErpProductionReleaseAccess",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "UploadReleaseObjectsOnly",
+                  "Effect": "Allow",
+                  "Action": "s3:PutObject",
+                  "Resource": {"Fn::Sub": "${ArtifactBucket.Arn}/onesystemserp/releases/*"}
+                },
+                {
+                  "Sid": "RunOnlyTheFixedDocumentOnTheProductionInstance",
+                  "Effect": "Allow",
+                  "Action": "ssm:SendCommand",
+                  "Resource": [
+                    {"Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/OneSystemsErpProductionDeploy"},
+                    {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-05dbf6853ca3ecb33"}
+                  ]
+                },
+                {
+                  "Sid": "ReadCommandResult",
+                  "Effect": "Allow",
+                  "Action": "ssm:GetCommandInvocation",
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {"Key": "Application", "Value": "OneSystemsErp"},
+          {"Key": "Purpose", "Value": "GitHubProductionDeploy"}
+        ]
+      }
+    },
+    "EC2ArtifactReadPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "OneSystemsErpProductionArtifactRead",
+        "Roles": [{"Ref": "EC2InstanceRoleName"}],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "s3:GetObject",
+              "Resource": {"Fn::Sub": "${ArtifactBucket.Arn}/onesystemserp/releases/*"}
+            },
+            {
+              "Sid": "AllowSystemsManagerAgentCore",
+              "Effect": "Allow",
+              "Action": [
+                "ssm:UpdateInstanceInformation",
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    },
+    "ArtifactBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {"Ref": "ArtifactBucket"},
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {"Fn::GetAtt": ["ArtifactBucket", "Arn"]},
+                {"Fn::Sub": "${ArtifactBucket.Arn}/*"}
+              ],
+              "Condition": {"Bool": {"aws:SecureTransport": "false"}}
+            },
+            {
+              "Sid": "AllowGitHubReleaseUpload",
+              "Effect": "Allow",
+              "Principal": {"AWS": {"Fn::GetAtt": ["GitHubDeploymentRole", "Arn"]}},
+              "Action": "s3:PutObject",
+              "Resource": {"Fn::Sub": "${ArtifactBucket.Arn}/onesystemserp/releases/*"}
+            },
+            {
+              "Sid": "AllowProductionInstanceReleaseRead",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${EC2InstanceRoleName}"}
+              },
+              "Action": "s3:GetObject",
+              "Resource": {"Fn::Sub": "${ArtifactBucket.Arn}/onesystemserp/releases/*"}
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "GitHubDeploymentRoleArn": {
+      "Value": {"Fn::GetAtt": ["GitHubDeploymentRole", "Arn"]},
+      "Description": "Set this exact role ARN in the production workflow after stack creation."
+    },
+    "ArtifactBucketName": {"Value": {"Ref": "ArtifactBucket"}},
+    "DeploymentDocumentName": {"Value": {"Ref": "DeploymentDocument"}},
+    "EC2InstanceRoleUpdated": {
+      "Value": {"Ref": "EC2InstanceRoleName"},
+      "Description": "Existing instance role that received scoped read access to release artifacts."
+    }
+  }
+}
