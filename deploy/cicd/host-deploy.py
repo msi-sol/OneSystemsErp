@@ -34,6 +34,10 @@ def command(args, *, cwd=None, timeout=90):
     result = subprocess.run(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, timeout=timeout)
     if result.returncode:
+        diagnostic = STATE / 'last-command-error.log'
+        with diagnostic.open('w', opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
+            stream.write(result.stdout)
+        diagnostic.chmod(0o600)
         # Do not propagate command arguments, application output, or secrets to SSM logs.
         raise DeployError('A deployment system command failed; inspect the private host logs')
     return result.stdout.strip()

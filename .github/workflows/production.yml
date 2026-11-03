@@ -17,6 +17,8 @@ jobs:
     name: Build Linux production artifact
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    env:
+      PRISMA_CLI_BINARY_TARGETS: debian-openssl-1.1.x,debian-openssl-3.0.x
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -49,6 +51,11 @@ jobs:
 
       - name: Retain only production dependencies
         run: npm prune --omit=dev --no-audit --no-fund
+
+      - name: Verify production Prisma engines are present
+        run: |
+          test -f node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node
+          test -x node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
 
       - name: Package immutable runtime release
         id: package

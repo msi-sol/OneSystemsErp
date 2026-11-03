@@ -19,7 +19,7 @@ try {
 } catch {
   throw new Error('Production database read check failed');
 } finally {
-  await db.$disconnect();
+  await db.$disconnect().catch(() => {});
 }
 const diff = spawnSync(process.execPath, [
   resolve('node_modules/prisma/build/index.js'), 'migrate', 'diff',
@@ -27,7 +27,8 @@ const diff = spawnSync(process.execPath, [
   '--to-schema-datamodel', resolve('prisma/schema.prisma'), '--exit-code',
 ], { env: { ...process.env, DIRECT_URL: process.env.DATABASE_URL }, encoding: 'utf8', timeout: 120_000 });
 const hash = value => createHash('sha256').update(value.replaceAll('\r\n', '\n').trim()).digest('hex');
-const schemaSha256 = hash(readFileSync('prisma/schema.prisma', 'utf8'));
+// Generator targets select native binaries; they do not alter MySQL tables.
+const schemaSha256 = hash(readFileSync('prisma/schema.prisma', 'utf8').replace(/generator\s+\w+\s*\{[^}]*\}/g, ''));
 const differenceSha256 = hash(diff.stdout || '');
 if (process.argv.includes('--capture-baseline')) {
   if (![0, 2].includes(diff.status)) throw new Error('Cannot capture a failed database comparison');

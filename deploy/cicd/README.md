@@ -5,6 +5,7 @@ A push to `main` or `master` builds a Linux release in GitHub Actions and deploy
 ## What happens
 
 1. Install the committed npm lockfile with Node **22.22.1**, run deployment safety tests, generate the MySQL Prisma client, and build Next.js with webpack/Serwist.
+   Both the Prisma client and CLI include EC2's Debian/OpenSSL 3 engine, and packaging verifies those binaries before upload. Native-binary generator options are excluded from the database compatibility fingerprint because they do not change tables.
 2. Package the built frontend, backend source, required runtime data, and production dependencies. Production `.env` files, uploads, Git metadata, and build caches are excluded.
 3. Obtain short-lived AWS credentials through GitHub OIDC. The trust policy accepts only this repository's immutable identity and `main`/`master` refs.
 4. Upload a checksum-verified release to a private, encrypted S3 bucket and invoke the fixed Systems Manager document on the one production instance. No SSH private key or production database password is stored in GitHub.
