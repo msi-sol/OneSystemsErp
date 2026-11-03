@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider  = "mysql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
@@ -11,7 +11,7 @@ datasource db {
 model User {
   id                           String                        @id @default(cuid())
   name                         String?
-  email                        String?                       @unique
+  email                        String?                       @unique @db.VarChar(320)
   password                     String?
   emailVerified                DateTime?
   image                        String?
@@ -118,8 +118,8 @@ model SystemRole {
 model Project {
   id                              String                           @id @default(cuid())
   name                            String
-  description                     String?
-  location                        String?
+  description                     String? @db.LongText
+  location                        String? @db.LongText
   startDate                       DateTime?
   endDate                         DateTime?
   status                          String                           @default("PLANNING")
@@ -215,7 +215,7 @@ model ProjectUserAssignment {
   assignedBy       String?
   dateAssigned     DateTime  @default(now())
   dateRemoved      DateTime?
-  remarks          String?
+  remarks          String? @db.LongText
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -232,7 +232,7 @@ model AwardedBOQItem {
   id                             String                        @id @default(cuid())
   itemCode                       String
   category                       String?
-  description                    String
+  description                    String @db.LongText
   unit                           String
   quantity                       Float
   directCost                     Float                         @default(0)
@@ -293,7 +293,7 @@ model ProcurementBenchmarkItem {
   id          String       @id @default(cuid())
   itemCode    String
   category    String?
-  description String
+  description String @db.LongText
   unit        String
   quantity    Float
   unitCost    Float
@@ -308,7 +308,7 @@ model ConsolidatedBOQItem {
   id                           String                        @id @default(cuid())
   itemCode                     String
   category                     String?
-  description                  String
+  description                  String @db.LongText
   unit                         String
   quantity                     Float
   unitCost                     Float
@@ -369,7 +369,7 @@ model BOQMapping {
   mappingType                String
   allocationPercentage       Float?
   allocationQuantity         Float?
-  remarks                    String?
+  remarks                    String? @db.LongText
   aiConfidenceScore          Float?
   status                     String                    @default("APPROVED")
   awardedBoqItemId           String?
@@ -389,10 +389,10 @@ model Supplier {
   contactPerson   String?
   contactNumber   String?
   email           String?
-  address         String?
+  address         String? @db.LongText
   paymentTerms    String?
   website         String?
-  plantLocation   String?
+  plantLocation   String? @db.LongText
   isVatable       Boolean             @default(true)
   isSeedData      Boolean             @default(false)
   createdAt       DateTime            @default(now())
@@ -411,12 +411,12 @@ model MaterialRequest {
   preparerId        String?
   checkerId         String?
   approverId        String?
-  purpose           String?
+  purpose           String? @db.LongText
   priority          String                @default("NORMAL")
-  locationOfUse     String?
-  remarks           String?
+  locationOfUse     String? @db.LongText
+  remarks           String? @db.LongText
   aiValidationRisk  String?
-  aiValidationNotes String?
+  aiValidationNotes String? @db.LongText
   dateNeeded        DateTime?
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
@@ -487,7 +487,7 @@ model Expense {
   totalBreakdownAmount  Float                  @default(0)
   date                  DateTime
   category              String
-  description           String
+  description           String @db.LongText
   receiptRef            String?
   supplierName          String?
   isAccrued             Boolean                @default(false)
@@ -523,7 +523,7 @@ model Expense {
 model ExpenseBreakdownItem {
   id                  String             @id @default(cuid())
   expenseId           String
-  description         String
+  description         String @db.LongText
   specification       String?
   quantity            Float
   unit                String
@@ -533,7 +533,7 @@ model ExpenseBreakdownItem {
   purchaseReferenceNo String?
   receiptInvoiceNo    String?
   purchaseDate        DateTime?
-  remarks             String?
+  remarks             String? @db.LongText
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   expense             Expense            @relation(fields: [expenseId], references: [id], onDelete: Cascade)
@@ -564,11 +564,11 @@ model ExpenseAIValidation {
   expenseId            String   @unique
   validationStatus     String
   validationScore      Float?
-  findings             String?
-  recommendations      String?
+  findings             String? @db.LongText
+  recommendations      String? @db.LongText
   duplicateWarning     Boolean  @default(false)
   budgetWarning        Boolean  @default(false)
-  scopeAlignmentResult String?
+  scopeAlignmentResult String? @db.LongText
   createdAt            DateTime @default(now())
   expense              Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
 }
@@ -578,7 +578,7 @@ model ExpenseApprovalLog {
   expenseId      String
   action         String
   actionByUserId String
-  comments       String?
+  comments       String? @db.LongText
   previousStatus String?
   newStatus      String?
   createdAt      DateTime @default(now())
@@ -611,7 +611,7 @@ model PettyCashExpense {
   id                    String                  @id @default(cuid())
   date                  DateTime
   payee                 String
-  purpose               String
+  purpose               String @db.LongText
   category              String
   amount                Float
   isVat                 Boolean                 @default(false)
@@ -621,7 +621,7 @@ model PettyCashExpense {
   receiptNumber         String?
   attachmentUrl         String?
   isNoReceipt           Boolean                 @default(false)
-  remarks               String?
+  remarks               String? @db.LongText
   status                String                  @default("PENDING")
   expenseId             String?                 @unique
   accountId             String
@@ -675,8 +675,8 @@ model Worker {
   gender                          String?
   civilStatus                     String?
   mobileNumber                    String?
-  emailAddress                    String?
-  completeAddress                 String?
+  emailAddress                    String? @db.VarChar(320)
+  completeAddress                 String? @db.LongText
   emergencyContactName            String?
   emergencyContactNumber          String?
   emergencyContactRelation        String?
@@ -700,7 +700,7 @@ model Worker {
   dailyRate                       Float                           @default(0)
   hourlyRate                      Float                           @default(0)
   pieceRate                       Float                           @default(0)
-  unitDescription                 String?
+  unitDescription                 String? @db.LongText
   contractAmount                  Float                           @default(0)
   professionalFee                 Float                           @default(0)
   paymentBasis                    String?
@@ -725,7 +725,7 @@ model Worker {
   otherGovernmentDeductionEnabled Boolean                         @default(false)
   taxClassification               String                          @default("COMPENSATION_EMPLOYEE")
   withholdingTaxType              String                          @default("COMPENSATION_WITHHOLDING_TAX")
-  taxExemptionReason              String?
+  taxExemptionReason              String? @db.LongText
   birFormType                     String?
   registeredBusinessName          String?
   officialReceiptRequired         Boolean                         @default(false)
@@ -738,7 +738,7 @@ model Worker {
   gcashNumber                     String?
   checkPayeeName                  String?
   billingPayeeName                String?
-  billingAddress                  String?
+  billingAddress                  String? @db.LongText
   projectId                       String?
   createdAt                       DateTime                        @default(now())
   updatedAt                       DateTime                        @updatedAt
@@ -755,7 +755,7 @@ model Worker {
   gcashSupportingAttachment       String?
   gcashUpdatedBy                  String?
   gcashVerificationStatus         String?                         @default("Pending")
-  paymentHoldReason               String?
+  paymentHoldReason               String? @db.LongText
   paymentProfileStatus            String?                         @default("Pending")
   paymentRemarks                  String?
   payrollCategory                 String?                         @default("Other")
@@ -781,10 +781,10 @@ model AIWorkerValidationResult {
   workerId     String
   category     String
   severity     String
-  message      String
+  message      String @db.LongText
   fieldRef     String?
   status       String   @default("OPEN")
-  ignoreReason String?
+  ignoreReason String? @db.LongText
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   worker       Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
@@ -797,7 +797,7 @@ model WorkerDocument {
   category     String
   fileUrl      String
   expiryDate   DateTime?
-  remarks      String?
+  remarks      String? @db.LongText
   uploadedById String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -823,7 +823,7 @@ model DailyTimeRecord {
   absenceStatus    String?
   sourceFile       String?
   validationStatus String         @default("PENDING")
-  remarks          String?
+  remarks          String? @db.LongText
   status           String         @default("DRAFT")
   encodedById      String?
   payrollPeriodId  String?
@@ -849,7 +849,7 @@ model PayrollPeriod {
   payrollDate         DateTime
   status              String                  @default("DRAFT")
   projectId           String?
-  notes               String?
+  notes               String? @db.LongText
   createdById         String?
   approvedById        String?
   cancelledAt         DateTime?
@@ -861,7 +861,7 @@ model PayrollPeriod {
   dummyField          String?
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
-  destinationAddress  String?
+  destinationAddress  String? @db.LongText
   destinationLat      Float?
   destinationLng      Float?
   dtrs                DailyTimeRecord[]
@@ -921,10 +921,10 @@ model Payroll {
   lateUndertimeAmount     Float              @default(0)
   totalDeductions         Float              @default(0)
   netPay                  Float              @default(0)
-  remarks                 String?
+  remarks                 String? @db.LongText
   paymentMethod           String?
   paymentStatus           String             @default("PENDING")
-  paymentHoldReason       String?
+  paymentHoldReason       String? @db.LongText
   paymentBatchId          String?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
@@ -945,7 +945,7 @@ model PayrollEarning {
   earningType   String
   amount        Float
   taxableStatus Boolean @default(true)
-  remarks       String?
+  remarks       String? @db.LongText
   payroll       Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
 }
 
@@ -956,7 +956,7 @@ model PayrollDeduction {
   amount                   Float
   recurringStatus          Boolean @default(false)
   governmentMandatedStatus Boolean @default(false)
-  remarks                  String?
+  remarks                  String? @db.LongText
   payroll                  Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
 }
 
@@ -968,7 +968,7 @@ model PayrollApproval {
   approverRole    String
   approvalStatus  String        @default("PENDING")
   approvalDate    DateTime?
-  remarks         String?
+  remarks         String? @db.LongText
   approverUser    User          @relation("PayrollApproverLog", fields: [approverUserId], references: [id], onDelete: Cascade)
   payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
 }
@@ -981,7 +981,7 @@ model DeductionLedger {
   deductionPerPayroll Float
   balance             Float
   status              String         @default("ACTIVE")
-  remarks             String?
+  remarks             String? @db.LongText
   approvedById        String?
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
@@ -1063,7 +1063,7 @@ model BIRWithholdingTaxTable {
   updatedBy        String?
   approvedBy       String?
   approvedAt       DateTime?
-  remarks          String?
+  remarks          String? @db.LongText
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 }
@@ -1078,7 +1078,7 @@ model PayrollAuditLog {
   oldValue   String?
   newValue   String?
   ipAddress  String?
-  remarks    String?
+  remarks    String? @db.LongText
   timestamp  DateTime @default(now())
 }
 
@@ -1110,7 +1110,7 @@ model Delivery {
   proofFileUrl  String?
   hasProof      Boolean          @default(true)
   isMismatch    Boolean          @default(false)
-  mismatchNotes String?
+  mismatchNotes String? @db.LongText
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   payable       AccountsPayable?
@@ -1127,7 +1127,7 @@ model DeliveryItem {
   quantity              Float
   deliveryId            String
   consolidatedBoqItemId String
-  remarks               String?
+  remarks               String? @db.LongText
   drQuantity            Float?
   consolidatedBoqItem   ConsolidatedBOQItem @relation(fields: [consolidatedBoqItemId], references: [id], onDelete: Cascade)
   delivery              Delivery            @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
@@ -1136,7 +1136,7 @@ model DeliveryItem {
 model ConsumptionLog {
   id          String            @id @default(cuid())
   date        DateTime          @default(now())
-  description String?
+  description String? @db.LongText
   projectId   String
   loggedById  String
   createdAt   DateTime          @default(now())
@@ -1192,7 +1192,7 @@ model MaterialReturn {
   id             String           @id @default(cuid())
   mrsNumber      String           @unique
   status         String           @default("PENDING")
-  remarks        String?
+  remarks        String? @db.LongText
   issuanceId     String
   projectId      String
   foremanId      String
@@ -1243,7 +1243,7 @@ model AccountsPayable {
 
 model BOQLotBreakdown {
   id               String         @id @default(cuid())
-  description      String
+  description      String @db.LongText
   weightPercentage Float
   boqItemId        String
   boqItem          AwardedBOQItem @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
@@ -1253,7 +1253,7 @@ model Accomplishment {
   id                 String               @id @default(cuid())
   billingPeriod      String
   accomplishmentDate DateTime
-  remarks            String?
+  remarks            String? @db.LongText
   preparedById       String?
   status             String               @default("DRAFT")
   approvedAmount     Float?
@@ -1269,7 +1269,7 @@ model Accomplishment {
 model AccomplishmentItem {
   id                          String         @id @default(cuid())
   workCategory                String?
-  descriptionOfWork           String?
+  descriptionOfWork           String? @db.LongText
   previousQuantity            Float          @default(0)
   currentQuantityClaimed      Float          @default(0)
   approvedQuantity            Float?
@@ -1283,7 +1283,7 @@ model AccomplishmentItem {
   aiValidationStatus          String         @default("PENDING")
   inspectionStatus            String         @default("PENDING")
   approvalStatus              String         @default("PENDING")
-  remarks                     String?
+  remarks                     String? @db.LongText
   accomplishmentId            String
   boqItemId                   String
   boqItem                     AwardedBOQItem @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
@@ -1297,13 +1297,13 @@ model Inspection {
   actualQuantityVerified  Float              @default(0)
   approvedQuantity        Float              @default(0)
   approvedPercentage      Float              @default(0)
-  inspectionFindings      String?
+  inspectionFindings      String? @db.LongText
   deficiencies            String?
   punchlistItems          String?
   inspectorName           String?
   dateInspected           DateTime?
   approvalStatus          String             @default("PENDING")
-  remarks                 String?
+  remarks                 String? @db.LongText
   accomplishmentItemId    String
   createdAt               DateTime           @default(now())
   accomplishmentItem      AccomplishmentItem @relation(fields: [accomplishmentItemId], references: [id], onDelete: Cascade)
@@ -1387,7 +1387,7 @@ model Payment {
   orNumber                String?
   ewtCertificateReference String?
   paymentStatus           String
-  remarks                 String?
+  remarks                 String? @db.LongText
   billingId               String
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
@@ -1403,8 +1403,8 @@ model VariationOrder {
   variationType                    String
   variationCategory                String?
   sourceOfVariation                String?
-  reasonForVariation               String?
-  detailedDescription              String?
+  reasonForVariation               String? @db.LongText
+  detailedDescription              String? @db.LongText
   affectedLocation                 String?
   affectedFloorZone                String?
   originalContractAmount           Float     @default(0)
@@ -1431,11 +1431,11 @@ model VariationOrder {
   costEstimateReference            String?
   supplierQuotationReference       String?
   subcontractorQuotationReference  String?
-  aiValidationResult               String?
+  aiValidationResult               String? @db.LongText
   aiRiskRating                     String?
   currentStatus                    String    @default("DRAFT")
   approvalHistory                  String?
-  remarks                          String?
+  remarks                          String? @db.LongText
   approvedForImplementation        Boolean   @default(false)
   approvedForProcurement           Boolean   @default(false)
   approvedForSubcontracting        Boolean   @default(false)
@@ -1460,8 +1460,8 @@ model VariationOrderItem {
   voItemNumber                    String
   itemClassification              String
   workCategory                    String?
-  location                        String?
-  description                     String
+  location                        String? @db.LongText
+  description                     String @db.LongText
   unit                            String
   originalQuantity                Float           @default(0)
   previouslyApprovedQuantity      Float           @default(0)
@@ -1495,7 +1495,7 @@ model VariationOrderItem {
   accomplishmentStatus            String          @default("PENDING")
   billingStatus                   String          @default("PENDING")
   approvalStatus                  String          @default("PENDING")
-  remarks                         String?
+  remarks                         String? @db.LongText
   variationOrderId                String
   originalBoqItemId               String?
   createdAt                       DateTime        @default(now())
@@ -1510,7 +1510,7 @@ model VariationOrderDocument {
   fileType         String
   fileUrl          String
   documentCategory String
-  remarks          String?
+  remarks          String? @db.LongText
   uploadedById     String?
   variationOrderId String
   createdAt        DateTime       @default(now())
@@ -1523,7 +1523,7 @@ model VariationOrderApproval {
   stage            String
   action           String
   actionById       String?
-  remarks          String?
+  remarks          String? @db.LongText
   variationOrderId String
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -1533,10 +1533,10 @@ model VariationOrderApproval {
 model AIVariationOrderValidation {
   id                  String         @id @default(cuid())
   validationType      String
-  result              String
+  result              String @db.LongText
   confidenceLevel     String
   riskLevel           String
-  findings            String?
+  findings            String? @db.LongText
   missingRequirements String?
   duplicateWarnings   String?
   recommendedAction   String?
@@ -1558,7 +1558,7 @@ model EvidenceFile {
   gpsLongitude     Float?
   dateTaken        DateTime?
   metadataStatus   String?
-  description      String?
+  description      String? @db.LongText
   versionNumber    Int                    @default(1)
   projectId        String
   boqItemId        String?
@@ -1581,7 +1581,7 @@ model ProjectCamera {
   gpsLongitude     Float?
   installationDate DateTime?
   status           String               @default("ACTIVE")
-  remarks          String?
+  remarks          String? @db.LongText
   projectId        String
   snapshots        LiveCameraSnapshot[]
   project          Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -1608,7 +1608,7 @@ model AIValidationRun {
   planMatchScore     Float?
   duplicateRiskScore Float?
   recommendation     String?
-  summaryFindings    String?
+  summaryFindings    String? @db.LongText
   createdById        String?
   completedAt        DateTime?
   projectId          String
@@ -1648,7 +1648,7 @@ model AIValidationFinding {
   id                 String          @id @default(cuid())
   findingCategory    String
   findingTitle       String
-  findingDescription String?
+  findingDescription String? @db.LongText
   severity           String
   confidenceScore    Float?
   relatedFileId      String?
@@ -1668,7 +1668,7 @@ model AIDuplicatePhotoCheck {
   matchType                String
   previousBillingId        String?
   previousAccomplishmentId String?
-  result                   String
+  result                   String @db.LongText
   createdAt                DateTime @default(now())
 }
 
@@ -1677,8 +1677,8 @@ model AIHumanReview {
   reviewerId        String
   reviewerRole      String
   decision          String
-  remarks           String?
-  overrideReason    String?
+  remarks           String? @db.LongText
+  overrideReason    String? @db.LongText
   aiValidationRunId String
   reviewedAt        DateTime        @default(now())
   aiValidationRun   AIValidationRun @relation(fields: [aiValidationRunId], references: [id], onDelete: Cascade)
@@ -1689,7 +1689,7 @@ model Subcontractor {
   name                  String
   businessName          String?
   businessType          BusinessType
-  address               String?
+  address               String? @db.LongText
   contactPerson         String?
   contactNumber         String?
   email                 String?
@@ -1709,7 +1709,7 @@ model Subcontractor {
   docExpiries           Json?
   safetyRecords         Json?
   evaluationRating      Int?
-  remarks               String?
+  remarks               String? @db.LongText
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   backCharges           BackCharge[]
@@ -1723,7 +1723,7 @@ model ProgramOfWorks {
   id               String               @id @default(cuid())
   packageId        String
   title            String
-  description      String?
+  description      String? @db.LongText
   startDate        DateTime?
   endDate          DateTime?
   activities       Json?
@@ -1749,7 +1749,7 @@ model SubcontractorBOQItem {
 model AccomplishmentRecord {
   id                String              @id @default(cuid())
   jobOrderId        String
-  description       String?
+  description       String? @db.LongText
   quantityCompleted Float?
   completedAt       DateTime            @default(now())
   photos            Json?
@@ -1793,8 +1793,8 @@ model SubcontractPackage {
   contractType          ContractType
   awardedBoqItemId      String?
   masterBoqItemId       String?
-  scopeOfWork           String
-  location              String
+  scopeOfWork           String @db.LongText
+  location              String @db.LongText
   floorBuildingZone     String?
   quantity              Float
   unit                  String
@@ -1812,7 +1812,7 @@ model SubcontractPackage {
   attachments           Json?
   status                PackageStatus               @default(DRAFT)
   isLocked              Boolean                     @default(false)
-  remarks               String?
+  remarks               String? @db.LongText
   createdAt             DateTime                    @default(now())
   updatedAt             DateTime                    @updatedAt
   backCharges           BackCharge[]
@@ -1835,9 +1835,9 @@ model JobOrder {
   projectId                  String
   subcontractorId            String?
   packageId                  String?
-  description                String
+  description                String @db.LongText
   boqReferenceId             String?
-  location                   String
+  location                   String @db.LongText
   contractAmount             Float
   paymentBasis               PaymentTerms
   startDate                  DateTime?
@@ -1851,7 +1851,7 @@ model JobOrder {
   reviewedBy                 String?
   approvedBy                 String?
   status                     JobOrderStatus              @default(DRAFT)
-  remarks                    String?
+  remarks                    String? @db.LongText
   createdAt                  DateTime                    @default(now())
   updatedAt                  DateTime                    @updatedAt
   accomplishmentRecords      AccomplishmentRecord[]
@@ -1868,8 +1868,8 @@ model SubcontractAccomplishment {
   id                String               @id @default(uuid())
   packageId         String?
   jobOrderId        String?
-  workDescription   String
-  location          String
+  workDescription   String @db.LongText
+  location          String @db.LongText
   prevPercent       Float
   currentPercent    Float
   cumulativePercent Float
@@ -1883,7 +1883,7 @@ model SubcontractAccomplishment {
   qaQcStatus        String?
   materialIssuedRef String?
   deliveryRef       String?
-  remarks           String?
+  remarks           String? @db.LongText
   preparedBy        String?
   verifiedBy        String?
   approvedBy        String?
@@ -1937,7 +1937,7 @@ model BackCharge {
   subcontractorId  String
   packageId        String?
   jobOrderId       String?
-  description      String
+  description      String @db.LongText
   incidentDate     DateTime?
   costComputation  Float
   photos           Json?
@@ -1975,7 +1975,7 @@ model KnowledgeRecord {
   id              String                @id @default(cuid())
   knowledgeId     String                @unique @default(cuid())
   title           String
-  description     String?
+  description     String? @db.LongText
   notebookType    String
   notebookUrl     String?
   relatedModule   String?
@@ -1991,8 +1991,8 @@ model KnowledgeRecord {
   dateApproved    DateTime?
   tags            String?
   uploadedFileUrl String?
-  summary         String?
-  remarks         String?
+  summary         String? @db.LongText
+  remarks         String? @db.LongText
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   auditTrails     KnowledgeAuditTrail[]
@@ -2019,7 +2019,7 @@ model KnowledgeAuditTrail {
   performedBy       String?
   oldValue          String?
   newValue          String?
-  reason            String?
+  reason            String? @db.LongText
   timestamp         DateTime        @default(now())
   knowledgeRecord   KnowledgeRecord @relation(fields: [knowledgeRecordId], references: [id], onDelete: Cascade)
 }
@@ -2042,7 +2042,7 @@ model PayrollBankAccount {
   createdById             String
   approvedById            String?
   dateCreated             DateTime                @default(now())
-  remarks                 String?
+  remarks                 String? @db.LongText
   paymentBatches          PaymentBatch[]
   ledgers                 PayrollBankLedger[]
   fundingRequests         PayrollFundingRequest[]
@@ -2057,7 +2057,7 @@ model PayrollBankLedger {
   balanceAfter         Float
   referenceId          String?
   referenceNumber      String?
-  remarks              String?
+  remarks              String? @db.LongText
   createdById          String
   account              PayrollBankAccount @relation(fields: [payrollBankAccountId], references: [id], onDelete: Cascade)
 }
@@ -2081,7 +2081,7 @@ model PayrollFundingRequest {
   dateFunded                 DateTime?
   fundingBankReferenceNumber String?
   proofOfTransferUrl         String?
-  remarks                    String?
+  remarks                    String? @db.LongText
   createdAt                  DateTime           @default(now())
   updatedAt                  DateTime           @updatedAt
   destinationAccount         PayrollBankAccount @relation(fields: [destinationAccountId], references: [id], onDelete: Cascade)
@@ -2108,7 +2108,7 @@ model PaymentBatch {
   releasedById           String?
   dateReleased           DateTime?
   reconciliationFileUrl  String?
-  remarks                String?
+  remarks                String? @db.LongText
   aiRiskLevel            String?
   aiAuditNotes           String?
   createdAt              DateTime           @default(now())
@@ -2132,21 +2132,21 @@ model PaymentBatchRow {
   recipientAccountName          String?
   gcashMobileNumber             String?
   gcashAccountName              String?
-  remarks                       String?
+  remarks                       String? @db.LongText
   senderReferenceId             String?      @unique
   idempotencyKey                String?      @unique
   originalInstaPayReference     String?
   unionBankTransactionReference String?
   providerResponseCode          String?
-  providerResponseMessage       String?
-  failureReason                 String?
+  providerResponseMessage       String? @db.LongText
+  failureReason                 String? @db.LongText
   retryCount                    Int          @default(0)
   expectedSettlementDate        DateTime?
   datePaid                      DateTime?
   rawApiResponseReference       String?
   status                        String       @default("PENDING")
   transactionReference          String?
-  exceptionReason               String?
+  exceptionReason               String? @db.LongText
   reconciledAt                  DateTime?
   worker                        Worker       @relation(fields: [workerId], references: [id], onDelete: Cascade)
   payroll                       Payroll      @relation(fields: [payrollId], references: [id], onDelete: Cascade)
@@ -2159,14 +2159,14 @@ model PaymentException {
   payrollId                 String?
   workerId                  String
   requiredPaymentMethod     String?
-  exceptionReason           String
+  exceptionReason           String @db.LongText
   correctiveAction          String?
   assignedToId              String?
   status                    String    @default("OPEN")
   approvedById              String?
   dateResolved              DateTime?
   reprocessedTransactionRef String?
-  remarks                   String?
+  remarks                   String? @db.LongText
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
   amount                    Float?
@@ -2210,7 +2210,7 @@ model PaymentProvider {
   approvedById            String?
   dateCreated             DateTime       @default(now())
   dateActivated           DateTime?
-  remarks                 String?
+  remarks                 String? @db.LongText
   createdAt               DateTime       @default(now())
   updatedAt               DateTime       @updatedAt
   batches                 PaymentBatch[]
@@ -2237,13 +2237,13 @@ model PaymentFallbackRecommendation {
   amount                Float
   originalIntendedRoute String    @default("InstaPay")
   fallbackRoute         String    @default("PESONet")
-  fallbackReason        String
+  fallbackReason        String @db.LongText
   originalInstaPayRef   String?
   recommendedBy         String
   approvalStatus        String    @default("PENDING")
   approvedById          String?
   approvalDate          DateTime?
-  remarks               String?
+  remarks               String? @db.LongText
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   worker                Worker    @relation(fields: [workerId], references: [id], onDelete: Cascade)
@@ -2279,7 +2279,7 @@ model ProjectAccomplishmentFile {
   uploadedById     String?
   status           String                             @default("ACTIVE")
   isLockedOriginal Boolean                            @default(true)
-  remarks          String?
+  remarks          String? @db.LongText
   createdAt        DateTime                           @default(now())
   updatedAt        DateTime                           @updatedAt
   userId           String?
@@ -2297,7 +2297,7 @@ model ProjectAccomplishmentFileVersion {
   filePath      String
   savedBy       String?
   savedAt       DateTime                  @default(now())
-  remarks       String?
+  remarks       String? @db.LongText
   file          ProjectAccomplishmentFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 }
 
@@ -2309,7 +2309,7 @@ model ProjectAccomplishmentAIFinding {
   findingType    String
   sheetName      String?
   cellReference  String?
-  description    String
+  description    String @db.LongText
   severity       String                    @default("INFO")
   recommendation String?
   createdAt      DateTime                  @default(now())
@@ -2323,7 +2323,7 @@ model KnowledgeRuleReference {
   moduleName       String
   ruleCategory     String
   ruleTitle        String
-  ruleDescription  String
+  ruleDescription  String @db.LongText
   affectedProcess  String?
   validationType   String?
   severity         String    @default("BLOCK")
@@ -2343,12 +2343,12 @@ model KnowledgeRuleAuditLog {
   moduleName         String
   notebookName       String
   ruleApplied        String
-  validationResult   String
+  validationResult   String @db.LongText
   actionTaken        String
   userAction         String?
   overrideRequested  Boolean  @default(false)
   overrideApprovedBy String?
-  overrideReason     String?
+  overrideReason     String? @db.LongText
   timestamp          DateTime @default(now())
 }
 
@@ -2356,7 +2356,7 @@ model Role {
   id              String           @id @default(cuid())
   roleName        String           @unique
   roleCode        String           @unique
-  description     String?
+  description     String? @db.LongText
   isActive        Boolean          @default(true)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -2379,7 +2379,7 @@ model UserRole {
 model Module {
   id              String           @id @default(cuid())
   moduleName      String           @unique
-  description     String?
+  description     String? @db.LongText
   isActive        Boolean          @default(true)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -2424,7 +2424,7 @@ model RolePermission {
 model WorkflowTemplate {
   id          String         @id @default(cuid())
   moduleName  String         @unique
-  description String?
+  description String? @db.LongText
   isActive    Boolean        @default(true)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -2466,7 +2466,7 @@ model TransactionWorkflow {
   dateRecommended   DateTime?
   dateApproved      DateTime?
   datePaid          DateTime?
-  remarks           String?
+  remarks           String? @db.LongText
   auditReference    String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -2483,7 +2483,7 @@ model AuditLog {
   actionType    String
   oldValue      String?
   newValue      String?
-  remarks       String?
+  remarks       String? @db.LongText
   ipAddress     String?
   deviceInfo    String?
   createdAt     DateTime @default(now())
@@ -2497,9 +2497,9 @@ model AIValidationLog {
   userId           String?
   userRole         String?
   validationType   String
-  validationResult String
+  validationResult String @db.LongText
   riskLevel        String?
-  aiFindings       String?
+  aiFindings       String? @db.LongText
   aiRecommendation String?
   createdAt        DateTime @default(now())
   user             User?    @relation("AIValidationLogs", fields: [userId], references: [id], onDelete: Cascade)
@@ -2511,7 +2511,7 @@ model LockedRecord {
   transactionId String
   lockedBy      String?
   lockedAt      DateTime @default(now())
-  reason        String?
+  reason        String? @db.LongText
 
   @@unique([moduleName, transactionId])
 }
@@ -2521,7 +2521,7 @@ model RevisionRequest {
   moduleName    String
   transactionId String
   requestedBy   String
-  reason        String
+  reason        String @db.LongText
   status        String    @default("PENDING")
   reviewedBy    String?
   reviewedAt    DateTime?
@@ -2555,7 +2555,7 @@ model RoleConflictRule {
   role1Code   String
   role2Code   String
   severity    String
-  description String?
+  description String? @db.LongText
   createdAt   DateTime @default(now())
 }
 
@@ -2579,7 +2579,7 @@ model AINotebookReference {
   approvedDate      DateTime?
   isLocked          Boolean   @default(false)
   aiIndexingStatus  String    @default("PENDING")
-  aiSummary         String?
+  aiSummary         String? @db.LongText
   keywords          String?
   validationUseCase String?
   fileHash          String?
@@ -2591,7 +2591,7 @@ model NotebookReference {
   id                String                         @id @default(cuid())
   referenceCode     String                         @unique
   title             String
-  description       String?
+  description       String? @db.LongText
   fileName          String
   fileType          String
   filePath          String
@@ -2627,7 +2627,7 @@ model NotebookReferenceVersion {
   fileName          String
   filePath          String
   extractedText     String?
-  aiSummary         String?
+  aiSummary         String? @db.LongText
   aiKeywords        String?
   fileHash          String?
   status            String                    @default("ACTIVE")
@@ -2669,7 +2669,7 @@ model NotebookReferenceApprovalLog {
   action           String
   actionByUserId   String
   actionByUserRole String?
-  comments         String?
+  comments         String? @db.LongText
   previousStatus   String?
   newStatus        String?
   createdAt        DateTime          @default(now())
@@ -2680,7 +2680,7 @@ model NotebookReferenceIndexLog {
   id          String            @id @default(cuid())
   referenceId String
   status      String
-  details     String?
+  details     String? @db.LongText
   createdAt   DateTime          @default(now())
   reference   NotebookReference @relation(fields: [referenceId], references: [id], onDelete: Cascade)
 }
@@ -2688,7 +2688,7 @@ model NotebookReferenceIndexLog {
 model AIValidationRule {
   id          String   @id @default(cuid())
   ruleCode    String   @unique
-  description String
+  description String @db.LongText
   moduleName  String
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -2706,7 +2706,7 @@ model AITransactionValidation {
   referenceVersionId String?
   validationStatus   String
   riskLevel          String
-  aiFindings         String?
+  aiFindings         String? @db.LongText
   aiRecommendation   String?
   blockingFlag       Boolean                   @default(false)
   overrideAllowed    Boolean                   @default(false)
@@ -2723,7 +2723,7 @@ model AIValidationOverride {
   moduleName           String
   overriddenBy         String
   overriddenByRole     String
-  overrideReason       String
+  overrideReason       String @db.LongText
   supportingAttachment String?
   approvedBy           String?
   approvedByRole       String?
@@ -2737,7 +2737,7 @@ model AIRiskScore {
   moduleName    String
   riskLevel     String
   score         Float
-  reasons       String?
+  reasons       String? @db.LongText
   createdAt     DateTime @default(now())
 }
 
@@ -2745,7 +2745,7 @@ model AIModulePrompt {
   id             String   @id @default(cuid())
   category       String
   moduleName     String
-  promptTemplate String
+  promptTemplate String @db.LongText
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -2756,7 +2756,7 @@ model AIAuditFinding {
   transactionId String?
   moduleName    String?
   findingType   String
-  description   String
+  description   String @db.LongText
   riskLevel     String
   detectedAt    DateTime @default(now())
 }
@@ -2765,7 +2765,7 @@ model AISearchLog {
   id          String   @id @default(cuid())
   userId      String
   userRole    String
-  searchQuery String
+  searchQuery String @db.LongText
   moduleScope String?
   createdAt   DateTime @default(now())
 }
@@ -2774,7 +2774,7 @@ model AINotification {
   id         String   @id @default(cuid())
   userId     String
   userRole   String
-  message    String
+  message    String @db.LongText
   moduleName String?
   isRead     Boolean  @default(false)
   createdAt  DateTime @default(now())
@@ -2798,7 +2798,7 @@ model CanvassForm {
   projectId             String
   preparedById          String?
   recommendedSupplierId String?
-  aiSummary             String?
+  aiSummary             String? @db.LongText
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
   preparedBy            User?               @relation("CanvassPreparedBy", fields: [preparedById], references: [id], onDelete: Cascade)
@@ -2844,7 +2844,7 @@ model QuotationItem {
   quantityAvailable Float
   totalCost         Float
   brand             String?
-  remarks           String?
+  remarks           String? @db.LongText
   quotationId       String
   canvassItemId     String
   canvassItem       CanvassItem       @relation(fields: [canvassItemId], references: [id], onDelete: Cascade)
@@ -2893,13 +2893,13 @@ model EquipmentDeployment {
   dateDeployed       DateTime?
   dateReturned       DateTime?
   status             String    @default("REQUESTED")
-  purpose            String?
-  notes              String?
+  purpose            String? @db.LongText
+  notes              String? @db.LongText
   requestedById      String?
   approvedById       String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
-  destinationAddress String?
+  destinationAddress String? @db.LongText
   destinationLat     Float?
   destinationLng     Float?
   approvedBy         User?     @relation("DeploymentApprovedBy", fields: [approvedById], references: [id], onDelete: Cascade)
@@ -2916,7 +2916,7 @@ model EquipmentUtilization {
   date            DateTime
   hoursUsed       Float     @default(0)
   fuelConsumed    Float     @default(0)
-  taskDescription String?
+  taskDescription String? @db.LongText
   loggedBy        String
   source          String    @default("MANUAL")
   createdAt       DateTime  @default(now())
@@ -2932,7 +2932,7 @@ model EquipmentMaintenance {
   scheduledDate DateTime?
   completedDate DateTime?
   cost          Float     @default(0)
-  description   String?
+  description   String? @db.LongText
   status        String    @default("SCHEDULED")
   fmsFaultCode  String?
   createdAt     DateTime  @default(now())
@@ -2956,7 +2956,7 @@ model EquipmentTelemetry {
   heading        Float?
   ignitionStatus Boolean?
   locationSource String?
-  rawPayloadJson String?
+  rawPayloadJson String? @db.LongText
   receivedAt     DateTime? @default(now())
   satelliteCount Int?
   equipment      Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
@@ -2969,8 +2969,8 @@ model EquipmentAIValidation {
   equipmentId     String
   type            String
   severity        String
-  findings        String
-  recommendations String
+  findings        String @db.LongText
+  recommendations String @db.LongText
   status          String    @default("OPEN")
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -3002,7 +3002,7 @@ model HikvisionDevice {
   status               String     @default("ACTIVE")
   lastSeenAt           DateTime?
   lastGpsAt            DateTime?
-  remarks              String?
+  remarks              String? @db.LongText
   equipmentId          String?    @unique
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
@@ -3024,13 +3024,13 @@ model FleetEvent {
   speedKph         Float?
   heading          Float?
   title            String
-  description      String?
+  description      String? @db.LongText
   status           String          @default("NEW")
   acknowledgedById String?
   acknowledgedAt   DateTime?
   resolvedById     String?
   resolvedAt       DateTime?
-  rawPayloadJson   String?
+  rawPayloadJson   String? @db.LongText
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
   aiReviews        FleetAIReview[]
@@ -3068,16 +3068,16 @@ model FleetTrip {
   startLongitude       Float?
   endLatitude          Float?
   endLongitude         Float?
-  startAddress         String?
-  endAddress           String?
+  startAddress         String? @db.LongText
+  endAddress           String? @db.LongText
   totalDistanceKm      Float?
   maxSpeedKph          Float?
   averageSpeedKph      Float?
   idleDurationMinutes  Float?
   tripStatus           String              @default("ONGOING")
   projectId            String?
-  purpose              String?
-  remarks              String?
+  purpose              String? @db.LongText
+  remarks              String? @db.LongText
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
   subcontractPackageId String?
@@ -3091,8 +3091,8 @@ model Geofence {
   id                   String              @id @default(cuid())
   name                 String
   type                 String              @default("PROJECT_SITE")
-  polygonOrRadiusJson  String
-  address              String?
+  polygonOrRadiusJson  String @db.LongText
+  address              String? @db.LongText
   projectId            String?
   alertOnEntry         Boolean             @default(true)
   alertOnExit          Boolean             @default(true)
@@ -3109,7 +3109,7 @@ model FleetAIReview {
   fleetEventId       String
   equipmentId        String?
   driverId           String?
-  aiSummary          String
+  aiSummary          String @db.LongText
   aiRiskScore        Float?
   aiRecommendation   String?
   aiValidationStatus String     @default("PENDING")
@@ -3136,7 +3136,7 @@ model ExecutiveAlertLog {
   projectId           String?
   severity            String
   title               String
-  description         String
+  description         String @db.LongText
   sourceModule        String?
   sourceTransactionId String?
   financialImpact     Float?
@@ -3167,12 +3167,12 @@ model AIExecutiveQuery {
   id               String    @id @default(cuid())
   userId           String
   userRole         String
-  queryText        String
+  queryText        String @db.LongText
   scopeType        String?
   projectId        String?
   dateRangeStart   DateTime?
   dateRangeEnd     DateTime?
-  aiResponse       String
+  aiResponse       String @db.LongText
   sourceReferences String?
   createdAt        DateTime  @default(now())
   user             User      @relation("AIExecutiveQueries", fields: [userId], references: [id], onDelete: Cascade)
@@ -3192,9 +3192,9 @@ model AIGeneratedReport {
   reviewedById      String?
   approvedById      String?
   status            String                     @default("DRAFT")
-  aiSummary         String?
-  aiFindings        String?
-  aiRecommendations String?
+  aiSummary         String? @db.LongText
+  aiFindings        String? @db.LongText
+  aiRecommendations String? @db.LongText
   sourceReferences  String?
   filePdfUrl        String?
   fileExcelUrl      String?
@@ -3212,9 +3212,9 @@ model AIGeneratedReportVersion {
   reportId          String
   versionNumber     Int
   editedById        String
-  aiSummary         String?
-  aiFindings        String?
-  aiRecommendations String?
+  aiSummary         String? @db.LongText
+  aiFindings        String? @db.LongText
+  aiRecommendations String? @db.LongText
   managementRemarks String?
   sourceReferences  String?
   filePdfUrl        String?
@@ -3250,7 +3250,7 @@ model AIValidationRecord {
   relatedBoqItemId  String?
   evidenceType      String
   evidenceFileUrl   String?
-  aiFindings        String
+  aiFindings        String @db.LongText
   aiConfidenceScore Float
   riskLevel         String
   recommendation    String?
@@ -3259,9 +3259,9 @@ model AIValidationRecord {
   reviewedById      String?
   reviewedAt        DateTime?
   approvalAction    String?
-  overrideReason    String?
+  overrideReason    String? @db.LongText
   auditTrailRef     String?
-  findingsData      String?
+  findingsData      String? @db.LongText
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   reviewedBy        User?     @relation("ValidationReviewedBy", fields: [reviewedById], references: [id], onDelete: Cascade)
@@ -3294,11 +3294,11 @@ model ValidationEvidencePack {
   projectId             String
   relatedBillingId      String?
   relatedAccomplishId   String?
-  executiveSummary      String?
+  executiveSummary      String? @db.LongText
   claimedAccomplish     Float?
   aiValidatedAccomplish Float?
   billingAmount         Float?
-  riskFindings          String?
+  riskFindings          String? @db.LongText
   finalRecommendation   String?
   filePdfUrl            String?
   fileExcelUrl          String?
@@ -3557,7 +3557,7 @@ model SubcontractorVariationOrder {
   proposedAdditionalAmt  Float    @default(0)
   revisedSubcontractQty  Float    @default(0)
   revisedSubcontractAmt  Float    @default(0)
-  reason                 String?
+  reason                 String? @db.LongText
   costImpact             String?
   scheduleImpact         String?
   profitabilityImpact    String?
@@ -3581,7 +3581,7 @@ model ClientVariationOrder {
   cvoNumber        String   @unique
   projectId        String
   status           String   @default("PENDING")
-  description      String?
+  description      String? @db.LongText
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   awardedBoqItemId String?
@@ -3594,7 +3594,7 @@ model ValueEngineeringRecord {
   id                    String   @id @default(cuid())
   veNumber              String   @unique
   projectId             String
-  description           String?
+  description           String? @db.LongText
   currentCost           Float    @default(0)
   proposedCost          Float    @default(0)
   estimatedSavings      Float    @default(0)
@@ -3625,7 +3625,7 @@ model ProjectSchedule {
   id                 String    @id @default(cuid())
   projectId          String
   name               String
-  description        String?
+  description        String? @db.LongText
   baselineStartDate  DateTime?
   baselineFinishDate DateTime?
   currentStartDate   DateTime?
@@ -3636,7 +3636,7 @@ model ProjectSchedule {
   calendarDays       Int       @default(0)
   workingDays        Int       @default(0)
   holidays           String? // JSON string of dates
-  workDaysConfig     String? // JSON e.g. ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+  workDaysConfig     String? @db.LongText // JSON e.g. ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
   lockedBOQVersionId     String?
   lockedBOQChecksum      String?
@@ -3649,8 +3649,8 @@ model ProjectSchedule {
   generatedAt            DateTime?
   approvedAt             DateTime?
   generationRulesVersion String?
-  validationMetrics      String?   @db.Text
-  feasibilityFlags       String?   @db.Text
+  validationMetrics      String?   @db.LongText
+  feasibilityFlags       String?   @db.LongText
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3723,7 +3723,7 @@ model ScheduleWBS {
   parentId    String?
   code        String
   name        String
-  description String?
+  description String? @db.LongText
   level       Int
   orderIndex  Int      @default(0)
   createdAt   DateTime @default(now())
@@ -3741,7 +3741,7 @@ model ScheduleActivity {
   wbsId                 String?
   activityCode          String?
   name                  String
-  description           String?
+  description           String? @db.LongText
   discipline            String?
   plannedStartDate      DateTime?
   plannedFinishDate     DateTime?
@@ -3798,7 +3798,7 @@ model ScheduleDependency {
   successorId   String
   type          String  @default("FS") // FS, SS, FF, SF
   lagDays       Int     @default(0)
-  remarks       String?
+  remarks       String? @db.LongText
 
   schedule    ProjectSchedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   predecessor ScheduleActivity @relation("PredecessorActivity", fields: [predecessorId], references: [id], onDelete: Cascade)
@@ -3809,7 +3809,7 @@ model ScheduleMilestone {
   id          String    @id @default(cuid())
   scheduleId  String
   name        String
-  description String?
+  description String? @db.LongText
   targetDate  DateTime
   actualDate  DateTime?
   status      String    @default("PENDING") // PENDING, ACHIEVED, DELAYED
@@ -3836,7 +3836,7 @@ model ScheduleBOQAllocation {
   allocatedPercentage Decimal?
   awardedAmount       Decimal?
   allocatedAmount     Decimal?
-  allocationReason    String?
+  allocationReason    String? @db.LongText
 
   activity            ScheduleActivity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
   awardedBoqItem      AwardedBOQItem       @relation(fields: [awardedBoqItemId], references: [id], onDelete: Cascade)
@@ -3861,7 +3861,7 @@ model ScheduleProgressUpdate {
   updateDate       DateTime
   progressPercent  Float
   actualQuantity   Float    @default(0)
-  remarks          String?
+  remarks          String? @db.LongText
   reportedById     String?
   accomplishmentId String?
   createdAt        DateTime @default(now())
@@ -3908,7 +3908,7 @@ model ScheduleRecoveryPlan {
 model ScheduleRevisionRequest {
   id            String   @id @default(cuid())
   scheduleId    String
-  reason        String
+  reason        String @db.LongText
   delayImpact   Int      @default(0)
   costImpact    Float    @default(0)
   status        String   @default("PENDING") // PENDING, APPROVED, REJECTED
@@ -3923,7 +3923,7 @@ model AiKnowledgeSource {
   id                   String    @id @default(cuid())
   sourceType           String // e.g., 'uploaded_file', 'database_schema', 'module_policy'
   title                String
-  description          String?
+  description          String? @db.LongText
   moduleName           String?
   projectId            String?
   filePath             String?
@@ -3949,7 +3949,7 @@ model AiKnowledgeChunk {
   sourceId             String
   chunkIndex           Int
   chunkText            String
-  chunkSummary         String?
+  chunkSummary         String? @db.LongText
   moduleName           String?
   projectId            String?
   allowedRoles         String? // Inherited from source
@@ -3980,8 +3980,8 @@ model AiChatMessage {
   sessionId             String
   userId                String
   role                  String // user, assistant, system
-  message               String
-  authorizedContextUsed String? // JSON of chunk IDs used
+  message               String @db.LongText
+  authorizedContextUsed String? @db.LongText // JSON of chunk IDs used
   citedSources          String? // JSON of source IDs
   projectId             String?
   createdAt             DateTime @default(now())
@@ -3997,7 +3997,7 @@ model AiAccessAuditLog {
   projectId        String?
   question         String
   answerStatus     String   @default("SUCCESS") // SUCCESS, DENIED, ERROR
-  denialReason     String?
+  denialReason     String? @db.LongText
   sourcesRetrieved Int      @default(0)
   sourcesDenied    Int      @default(0)
   tokensUsed       Int      @default(0)
@@ -4015,7 +4015,7 @@ model AiIndexingJob {
   status       String    @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
   sourceCount  Int       @default(0)
   chunkCount   Int       @default(0)
-  errorMessage String?
+  errorMessage String? @db.LongText
   startedAt    DateTime?
   completedAt  DateTime?
   createdAt    DateTime  @default(now())
@@ -4051,7 +4051,7 @@ model AiRagKeywordRegistry {
   relatedTerms             String? // JSON or comma separated
   exampleUserQuestions     String? // JSON
   requiredRoleAccess       String? // JSON array of roles
-  requiredModulePermission String? // JSON array
+  requiredModulePermission String? @db.LongText // JSON array
   confidentialityLevel     String  @default("PUBLIC") // PUBLIC, INTERNAL, RESTRICTED, CONFIDENTIAL
   projectScoped            Boolean @default(false)
   documentScoped           Boolean @default(false)
@@ -4062,7 +4062,7 @@ model AiRagKeywordRegistry {
   // Deduplication Tracking
   mergedIntoId  String?
   mergedAt      DateTime?
-  cleanupNotes  String?
+  cleanupNotes  String? @db.LongText
   sourceOrigin  String?
   generatedBy   String?
   adminApproved Boolean   @default(false)
@@ -4084,7 +4084,7 @@ model AiRagSchemaMap {
   tableName          String
   fieldName          String
   fieldAlias         String?
-  fieldDescription   String?
+  fieldDescription   String? @db.LongText
   dataType           String
   relationshipTable  String?
   relationshipField  String?
@@ -4094,7 +4094,7 @@ model AiRagSchemaMap {
   aggregatable       Boolean  @default(false)
   confidential       Boolean  @default(false)
   requiredAccessRole String? // JSON
-  requiredPermission String? // JSON
+  requiredPermission String? @db.LongText // JSON
   projectScoped      Boolean  @default(true)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -4108,12 +4108,12 @@ model AiRagEmbedding {
   sourceModule             String?
   sourceRecordId           String?
   sourceTitle              String
-  sourceTextChunk          String
+  sourceTextChunk          String @db.LongText
   embeddingVector          String // JSON array of floats representing the embedding
-  metadataJson             String? // JSON
+  metadataJson             String? @db.LongText // JSON
   accessLevel              String   @default("PUBLIC") // PUBLIC, RESTRICTED
   projectId                String?
-  modulePermissionRequired String? // JSON
+  modulePermissionRequired String? @db.LongText // JSON
   confidentialityLevel     String   @default("PUBLIC")
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
@@ -4144,7 +4144,7 @@ model AiKnowledgeMap {
   sampleQuestions    String? // JSON
   accessLevel        String    @default("PUBLIC")
   requiredRole       String? // JSON
-  requiredPermission String? // JSON
+  requiredPermission String? @db.LongText // JSON
   projectScoped      Boolean   @default(false)
   confidential       Boolean   @default(false)
   searchable         Boolean   @default(false)
@@ -4169,8 +4169,8 @@ model AiComparisonMap {
   relatedTables       String? // JSON
   relatedFields       String? // JSON
   comparisonLogic     String // e.g., "SUBTRACT", "VARIANCE_PERCENTAGE", "CROSS_MODULE_SUM"
-  calculationFormula  String?
-  requiredPermission  String? // JSON
+  calculationFormula  String? @db.LongText
+  requiredPermission  String? @db.LongText // JSON
   projectScoped       Boolean  @default(true)
   confidential        Boolean  @default(false)
   isActive            Boolean  @default(true)
@@ -4210,7 +4210,7 @@ model AiRagNoiseExclusion {
   id             String   @id @default(cuid())
   noiseTerm      String
   normalizedTerm String   @unique
-  reason         String?
+  reason         String? @db.LongText
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
@@ -4260,14 +4260,14 @@ model SecurityEvent {
   actionAttempted     String?
   resourceType        String?
   resourceId          String?
-  payloadSummary      String?
+  payloadSummary      String? @db.LongText
   fieldsAttempted     String?
-  rbacResult          String?
-  pbacResult          String?
+  rbacResult          String? @db.LongText
+  pbacResult          String? @db.LongText
   dataClassification  String?
   threatDetected      String?
-  systemResponse      String?
-  result              String?
+  systemResponse      String? @db.LongText
+  result              String? @db.LongText
   status              String
   dataExposure        String?
   adminActionRequired String?
@@ -4279,13 +4279,13 @@ model SecurityEvent {
   environment         String?
   userAgent           String?
   sessionId           String?
-  message             String?
+  message             String? @db.LongText
   blocked             Boolean   @default(false)
 
   // Simulation Tracking Fields
   simulationRunId  String?
-  expectedResponse String?
-  actualResponse   String?
+  expectedResponse String? @db.LongText
+  actualResponse   String? @db.LongText
   simulationPassed Boolean?
   simulationRun    SecuritySimulationRun? @relation(fields: [simulationRunId], references: [id])
 
@@ -4298,7 +4298,7 @@ model SecurityEvent {
 model SecurityIncident {
   id                    String    @id @default(cuid())
   title                 String
-  description           String
+  description           String @db.LongText
   severity              String
   status                String
   assignedTo            String?
@@ -4307,15 +4307,15 @@ model SecurityIncident {
   affectedModule        String?
   sourceIp              String?
   countermeasure        String?
-  result                String?
+  result                String? @db.LongText
   dataExposure          String?
   relatedEventIds       String? // JSON Array
-  timelineJson          String?
-  evidenceJson          String?
+  timelineJson          String? @db.LongText
+  evidenceJson          String? @db.LongText
   linkedSimulationRunId String?
   rootCause             String?
-  resolutionNotes       String?
-  adminNotes            String?
+  resolutionNotes       String? @db.LongText
+  adminNotes            String? @db.LongText
   openedAt              DateTime  @default(now())
   closedAt              DateTime?
   createdBy             String?
@@ -4328,7 +4328,7 @@ model SecurityIncident {
 model SecurityRule {
   id             String   @id @default(cuid())
   name           String
-  description    String?
+  description    String? @db.LongText
   category       String
   enabled        Boolean  @default(true)
   severity       String
@@ -4345,7 +4345,7 @@ model UserSessionSecurityLog {
   sourceIp            String?
   userAgent           String?
   device              String?
-  approximateLocation String?
+  approximateLocation String? @db.LongText
   loginAt             DateTime  @default(now())
   lastActivityAt      DateTime  @default(now())
   revokedAt           DateTime?
@@ -4360,12 +4360,12 @@ model AIQuerySecurityLog {
   userId                 String
   role                   String?
   projectScope           String?
-  query                  String
-  normalizedQuery        String?
+  query                  String @db.LongText
+  normalizedQuery        String? @db.LongText
   detectedThreat         String?
   blocked                Boolean  @default(false)
-  retrievedDocumentIds   String?
-  blockedDocumentIds     String?
+  retrievedDocumentIds   String? @db.LongText
+  blockedDocumentIds     String? @db.LongText
   dataClassificationUsed String?
   responseStatus         String?
   tokenUsage             Int?
@@ -4405,7 +4405,7 @@ model ThreatIp {
   attemptCount Int      @default(0)
   severity     String?
   status       String   @default("NEW")
-  notes        String?
+  notes        String? @db.LongText
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -4414,11 +4414,11 @@ model CountermeasureLog {
   id                 String   @id @default(cuid())
   securityEventId    String?
   countermeasureType String
-  description        String
-  result             String?
+  description        String @db.LongText
+  result             String? @db.LongText
   responseTimeMs     Int?
-  expectedResult     String?
-  actualResult       String?
+  expectedResult     String? @db.LongText
+  actualResult       String? @db.LongText
   passed             Boolean?
   performedBySystem  Boolean  @default(true)
   performedByUserId  String?
@@ -4439,14 +4439,14 @@ model SensitiveExportLog {
   sourceIp           String?
   approved           Boolean  @default(true)
   blocked            Boolean  @default(false)
-  reason             String?
+  reason             String? @db.LongText
   createdAt          DateTime @default(now())
 }
 
 model SecuritySimulationScenario {
   id                     String   @id @default(cuid())
   name                   String
-  description            String?
+  description            String? @db.LongText
   category               String
   severity               String
   targetModule           String
@@ -4473,9 +4473,9 @@ model SecuritySimulationScenario {
 model SecuritySimulationCampaign {
   id                   String   @id @default(cuid())
   name                 String
-  description          String?
+  description          String? @db.LongText
   severity             String
-  scenarioSequenceJson String
+  scenarioSequenceJson String @db.LongText
   status               String
   createdBy            String?
   createdAt            DateTime @default(now())
@@ -4498,8 +4498,8 @@ model SecuritySimulationRun {
   responseScore  Float?
   evidenceScore  Float?
   finalScore     Float?
-  overallResult  String?
-  notes          String?
+  overallResult  String? @db.LongText
+  notes          String? @db.LongText
 
   scenario  SecuritySimulationScenario? @relation(fields: [scenarioId], references: [id])
   campaign  SecuritySimulationCampaign? @relation(fields: [campaignId], references: [id])
@@ -4527,8 +4527,8 @@ model SecuritySimulationArchive {
   responseScore                Float?
   evidenceScore                Float?
   finalScore                   Float?
-  overallResult                String?
-  archiveJson                  String?   @db.Text
+  overallResult                String? @db.LongText
+  archiveJson                  String?   @db.LongText
   exportedPdfUrl               String?
   exportedExcelUrl             String?
   createdAt                    DateTime  @default(now())
@@ -4555,7 +4555,7 @@ model UploadedWorkbookFile {
   extractionStatus         String   @default("PENDING")
   commitStatus             String   @default("PENDING")
   onlyOfficeDocumentKey    String?
-  metadataJson             String?  @db.Text
+  metadataJson             String?  @db.LongText
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
@@ -4580,7 +4580,7 @@ model WorkbookVersion {
   fileHash               String
   createdBy              String
   createdAt              DateTime @default(now())
-  remarks                String?
+  remarks                String? @db.LongText
 
   file     UploadedWorkbookFile @relation(fields: [uploadedWorkbookFileId], references: [id], onDelete: Cascade)
   sessions OnlyOfficeSession[]
@@ -4595,8 +4595,8 @@ model OnlyOfficeSession {
   mode                   String    @default("view")
   userId                 String
   userName               String?
-  permissionsJson        String?   @db.Text
-  configJson             String?   @db.Text
+  permissionsJson        String?   @db.LongText
+  configJson             String?   @db.LongText
   status                 String    @default("ACTIVE")
   createdAt              DateTime  @default(now())
   expiresAt              DateTime?
@@ -4631,7 +4631,7 @@ model BOQExtractedItem {
   sheetName              String?
   sourceRowNumber        Int?
   itemNumber             String?
-  description            String
+  description            String @db.LongText
   unit                   String?
   quantity               Float?
   materialUnitCost       Float?
@@ -4645,9 +4645,9 @@ model BOQExtractedItem {
   unitCost               Float?
   amount                 Float?
   percentage             Float?
-  formulaMapJson         String?  @db.Text
+  formulaMapJson         String?  @db.LongText
   validationStatus       String   @default("PENDING")
-  validationErrorsJson   String?  @db.Text
+  validationErrorsJson   String?  @db.LongText
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -4669,7 +4669,7 @@ model WorkbookFormulaValidation {
   actualValue            Float?
   severity               String   @default("INFO")
   validationStatus       String   @default("PENDING")
-  message                String?
+  message                String? @db.LongText
   createdAt              DateTime @default(now())
 
   file UploadedWorkbookFile @relation(fields: [uploadedWorkbookFileId], references: [id], onDelete: Cascade)
@@ -4685,7 +4685,7 @@ model WorkbookTemplateValidation {
   actualValue            String?
   severity               String   @default("INFO")
   status                 String   @default("PENDING")
-  message                String?
+  message                String? @db.LongText
   createdAt              DateTime @default(now())
 
   file UploadedWorkbookFile @relation(fields: [uploadedWorkbookFileId], references: [id], onDelete: Cascade)
@@ -4705,7 +4705,7 @@ model ProjectBOQVersion {
   totalDirectCost              Float?
   totalIndirectCost            Float?
   totalAmount                  Float?
-  remarks                      String?
+  remarks                      String? @db.LongText
 
   // Phase 3D-C1: Structured Checksum fields
   checksum          String?
@@ -4738,7 +4738,7 @@ model ScheduleGenerationAudit {
   responseTimestamp      DateTime?
   tokenUsage             String? // JSON { prompt, completion, total }
   resultStatus           String?
-  validationResults      String? // JSON
+  validationResults      String? @db.LongText // JSON
   correctionAttemptCount Int       @default(0)
   timestamp              DateTime  @default(now())
 
@@ -4752,8 +4752,8 @@ model WorkbookExtractionAudit {
   projectId              String
   action                 String
   status                 String   @default("SUCCESS")
-  message                String?
-  detailsJson            String?  @db.Text
+  message                String? @db.LongText
+  detailsJson            String?  @db.LongText
   performedBy            String?
   performedByRole        String?
   performedAt            DateTime @default(now())
@@ -4882,7 +4882,7 @@ model ScheduleApproval {
   reviewerId           String
   reviewerNameSnapshot String
   reviewerRoleSnapshot String
-  comments             String?                  @db.Text
+  comments             String?                  @db.LongText
   validationSnapshot   Json?
   snapshotVersion      String
   scheduleSnapshotHash String?
@@ -4909,13 +4909,13 @@ model ScheduleReviewComment {
   activityId            String?
   phaseId               String?
   commentType           ScheduleCommentType
-  comment               String                @db.Text
+  comment               String                @db.LongText
   status                ScheduleCommentStatus @default(OPEN)
   createdById           String
   createdByNameSnapshot String
   createdByRoleSnapshot String
   resolvedById          String?
-  resolutionComment     String?               @db.Text
+  resolutionComment     String?               @db.LongText
   createdAt             DateTime              @default(now())
   resolvedAt            DateTime?
 
@@ -4944,7 +4944,7 @@ model BaselineActivation {
   requestId               String?
   isAuthoritative         Boolean   @default(false)
   invalidatedAt           DateTime?
-  invalidationReason      String?
+  invalidationReason      String? @db.LongText
 
   schedule    ProjectSchedule @relation(fields: [scheduleId, projectId], references: [id, projectId], onDelete: Restrict)
   activatedBy User            @relation("BaselineActivationActor", fields: [activatedById], references: [id], onDelete: Restrict)
@@ -4954,7 +4954,7 @@ model FinancialDataWaiver {
   id                      String                @id @default(cuid())
   projectId               String
   scheduleId              String
-  reason                  String                @db.Text
+  reason                  String                @db.LongText
   affectedFields          Json
   normalizationMethod     String
   migrationDeadline       DateTime?
@@ -4969,7 +4969,7 @@ model FinancialDataWaiver {
   status                  FinancialWaiverStatus @default(PENDING)
   createdAt               DateTime              @default(now())
   revokedAt               DateTime?
-  revocationReason        String?               @db.Text
+  revocationReason        String?               @db.LongText
 
   schedule    ProjectSchedule @relation(fields: [scheduleId, projectId], references: [id, projectId], onDelete: Restrict)
   requestedBy User            @relation("FinancialWaiverRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
@@ -4982,8 +4982,8 @@ model ScheduleRevisionReason {
   scheduleId            String
   parentScheduleId      String?
   revisionType          ScheduleRevisionType
-  reason                String               @db.Text
-  supportingReference   String?
+  reason                String               @db.LongText
+  supportingReference   String? @db.LongText
   createdById           String
   createdByNameSnapshot String
   createdByRoleSnapshot String
@@ -5012,7 +5012,7 @@ model ScheduleWorkflowTransition {
   idempotencyKeyHash  String
   correlationId       String?
   occurredAt          DateTime                      @default(now())
-  metadata            String?                       @db.Text
+  metadata            String?                       @db.LongText
 
   project  Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
   schedule ProjectSchedule @relation(fields: [scheduleId, projectId], references: [id, projectId], onDelete: Restrict)

@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming prisma client is available at this path
 import ExcelJS from 'exceljs'; // ExcelJS is used for modifying and creating Excel files
 
 const router = Router();

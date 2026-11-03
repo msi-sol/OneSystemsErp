@@ -1,0 +1,23 @@
+[Unit]
+Description=OneSystemsErp private backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/onesystemserp
+EnvironmentFile=/home/ubuntu/onesystemserp/.env
+Environment=ERP_BACKEND_STANDALONE=true
+Environment=ERP_BACKEND_PORT=4000
+ExecStart=/usr/bin/node --import tsx /home/ubuntu/onesystemserp/apps/aws-backend/src/index.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

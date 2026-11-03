@@ -2,7 +2,7 @@
 import React from 'react';
 import Link from 'next/link';
 
-export default function PaymentBatchDetails({ params }: { params: { id: string } }) {
+export default function PaymentBatchDetails({ params }: { params: Promise<{ id: string }> }) {
   return (
     <div style={{ padding: '20px', color: '#fff', maxWidth: '1200px', margin: '0 auto' }}>
       {/* Header */}

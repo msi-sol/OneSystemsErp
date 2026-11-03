@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Basic fetchWithAuth definition (adjust as per your actual implementation)
@@ -14,7 +15,7 @@ async function fetchWithAuth(url: string, options: RequestInit) {
     ...options.headers,
   };
 
-  const response = await fetch(process.env.NEXT_PUBLIC_API_BASE_URL + url, {
+  const response = await backendFetch(url, {
     ...options,
     headers,
   });

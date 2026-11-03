@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
@@ -16,7 +17,7 @@ async function fetchWithAuth(url: string, options: FetchWithAuthOptions = {}) {
     ...options.headers,
   };
 
-  const response = await fetch(url, {
+  const response = await backendFetch(url, {
     ...options,
     headers,
   });

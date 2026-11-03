@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming prisma is available relative to this file
-
 const router = Router();
 
 router.post('/validatePaymentBatchWithAI', async (req, res) => {

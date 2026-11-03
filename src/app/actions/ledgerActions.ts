@@ -1,18 +1,14 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath, revalidateTag } from 'next/cache';
 
 async function fetchWithAuth(url: string, options?: RequestInit): Promise<Response> {
-  const BACKEND_API_URL = process.env.BACKEND_API_URL;
-
-  if (!BACKEND_API_URL) {
-    throw new Error('BACKEND_API_URL is not defined in environment variables.');
-  }
 
   const headers = new Headers(options?.headers);
   headers.set('Content-Type', 'application/json');
 
-  return fetch(`${BACKEND_API_URL}${url}`, {
+  return backendFetch(`${url}`, {
     ...options,
     headers,
   });

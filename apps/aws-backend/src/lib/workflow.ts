@@ -1,7 +1,6 @@
+import { prisma } from './prisma';
 import { PrismaClient } from '@prisma/client';
 import { requirePermission } from './permissions';
-
-const prisma = new PrismaClient();
 
 export async function submitTransaction(
   userId: string, 

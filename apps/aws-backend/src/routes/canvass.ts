@@ -1,10 +1,9 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 
 const router = Router();
-const prisma = new PrismaClient();
-
 function getPbacContext(req: any) {
   return {
     userId: req.headers['x-user-session'] as string | undefined,
@@ -154,6 +153,8 @@ router.post('/:id/generate-po', async (req, res) => {
     });
 
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
+
+    if (!canvass.mrId) return res.status(409).json({ success: false, error: 'Link this canvass to a material request before generating a purchase order.' });
 
     const quotation = await prisma.supplierQuotation.findFirst({
       where: { canvassFormId: id, supplierId: supplierId },

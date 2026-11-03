@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
@@ -31,7 +32,7 @@ async function fetchWithAuth(url: string, options: RequestInit) {
     body = JSON.stringify({ userId: session, simulatedRole }); // Case for empty original body
   }
 
-  const response = await fetch(`${(process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL)}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
     body,

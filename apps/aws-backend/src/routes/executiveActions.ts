@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path based on your AWS backend setup
 import { requirePermission } from '../lib/permissions'; // Adjust path based on your AWS backend setup
 
 const router = Router();

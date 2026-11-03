@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Placeholder for fetchWithAuth. In a real app, this would handle authentication tokens
@@ -10,12 +11,9 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
     // 'Authorization': `Bearer ${yourAuthToken}`, // Add actual auth token here
     ...options?.headers,
   };
-
-  // Ensure NEXT_PUBLIC_AWS_BACKEND_URL is defined in your .env.local or environment variables.
   // This example uses a fallback for local development.
-  const baseUrl = (process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL) || 'http://localhost:3001'; // Example fallback
 
-  const response = await fetch(`${baseUrl}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
   });

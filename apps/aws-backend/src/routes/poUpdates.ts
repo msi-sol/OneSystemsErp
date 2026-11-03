@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming prisma client is configured and available in your AWS backend
-
 const router = Router();
 
 router.post('/updatePOStatus', async (req, res) => {

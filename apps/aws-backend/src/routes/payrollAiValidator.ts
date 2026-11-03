@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming @/lib/prisma is accessible in your AWS env
-
 const router = Router();
 
 router.post('/validatePayrollPreSubmission', async (req, res) => {

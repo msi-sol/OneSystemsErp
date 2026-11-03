@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path as needed for your backend structure
 import fs from 'fs';
 import path from 'path';
 
@@ -14,33 +14,16 @@ const router = Router();
 
 router.post('/resetTransactionData', async (req, res) => {
   try {
-    const { confirmationText, sessionId, simulatedRole } = req.body; // sessionId/simulatedRole expected from proxy
+    const { confirmationText, sessionId } = req.body; // Identity is replaced by authenticated middleware.
 
     if (confirmationText !== 'RESET TRANSACTION DATA ONLY') {
       return res.status(400).json({ success: false, error: 'Invalid confirmation text.' });
     }
 
-    let currentUser = null;
-    if (sessionId) {
-      currentUser = await prisma.user.findUnique({ where: { id: sessionId }});
-    } else {
-      // Fallback for development if session not present, find any user for testing
-      // In a production AWS backend, you'd likely reject unauthenticated requests or
-      // get user info from an auth token (e.g., from Cognito).
-      currentUser = await prisma.user.findFirst();
-    }
-
-    const userCount = await prisma.user.count();
-    let effectiveRole = simulatedRole;
-
-    if (userCount > 0) {
-      if (!currentUser) throw new Error('User not found');
-      effectiveRole = simulatedRole || currentUser.role;
-      
-      if (effectiveRole !== 'SUPER_ADMIN') {
-        throw new Error('Unauthorized Action: Only SUPER_ADMIN can perform a master reset.');
-      }
-    }
+    if (typeof sessionId !== 'string' || !sessionId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+    const currentUser = await prisma.user.findUnique({ where: { id: sessionId } });
+    if (!currentUser || currentUser.role !== 'SUPER_ADMIN') return res.status(403).json({ success: false, error: 'Only SUPER_ADMIN can perform a master reset.' });
+    const currentUserId = currentUser.id;
 
     // 1. Create a Backup First
     // IMPORTANT: Adjust paths for AWS environment. This assumes local file system.
@@ -207,7 +190,7 @@ router.post('/resetTransactionData', async (req, res) => {
       await tx.scheduleDelayRecord.deleteMany({});
       await tx.scheduleProgressUpdate.deleteMany({});
       await tx.schedulePOWMapping.deleteMany({});
-      await tx.scheduleBOQMapping.deleteMany({});
+      await tx.scheduleBOQAllocation.deleteMany({});
       await tx.scheduleMilestone.deleteMany({});
       await tx.scheduleDependency.deleteMany({});
       await tx.scheduleActivity.deleteMany({});
@@ -319,7 +302,7 @@ router.post('/resetTransactionData', async (req, res) => {
       // Log the reset action
       await tx.auditLog.create({
         data: {
-          user: { connect: { id: currentUser.id } },
+          user: { connect: { id: currentUserId } },
           remarks: 'MASTER RESET: All transactional and master data wiped. Only Users, System Roles, Access Matrix, and Knowledge Base preserved.',
           moduleName: 'SYSTEM_SETTINGS',
           actionType: 'DELETE'

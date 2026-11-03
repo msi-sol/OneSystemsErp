@@ -5,10 +5,11 @@ export const dynamic = 'force-dynamic';
 export default async function AiAuditPage({
   searchParams,
 }: {
-  searchParams: { filter?: string; tab?: string };
+  searchParams: Promise<{ filter?: string; tab?: string }>;
 }) {
-  const filter = searchParams.filter || 'ALL';
-  const tab = searchParams.tab || 'transactions';
+  const query = await searchParams;
+  const filter = query.filter || 'ALL';
+  const tab = query.tab || 'transactions';
   
   const logs = await getAIAuditLogs(filter);
   const chatbotLogs = await getChatbotAuditLogs();

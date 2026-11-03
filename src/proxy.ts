@@ -1,10 +1,22 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { auth } from '@/auth';
+import { verifySession } from '@/lib/dal/auth';
+
+const PRODUCTION_SETUP_ROUTES = new Set([
+  '/api/auth/debug', '/api/debug-db', '/api/debug-perms', '/api/fix-users',
+  '/api/test', '/api/test-prisma', '/api/seed-permissions',
+  '/api/admin/seed', '/api/admin/clear-seed', '/api/admin/create-admin',
+]);
 
 export default async function proxy(request: NextRequest) {
   // Extract path
   const pathname = request.nextUrl.pathname;
+  const normalizedPath = pathname.toLowerCase().replace(/\/+$/, '');
+  if (process.env.NODE_ENV === 'production' &&
+      (PRODUCTION_SETUP_ROUTES.has(normalizedPath) || normalizedPath.startsWith('/api/internal/'))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   const PUBLIC_ROUTES = ['/login', '/forgot-password', '/reset-password'];
   
@@ -33,6 +45,13 @@ export default async function proxy(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized Access. Please log in.' }, { status: 401 });
     }
     return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  if (normalizedPath.startsWith('/api/admin/')) {
+    const actor = await verifySession();
+    if (!actor || actor.mustChangePassword || !['SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(actor.role)) {
+      return NextResponse.json({ error: 'Administrator access required' }, { status: 403 });
+    }
   }
 
   // If user IS logged in

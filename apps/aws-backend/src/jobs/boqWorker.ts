@@ -1,12 +1,10 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import ExcelJS from "exceljs";
 import { PrismaClient } from "@prisma/client";
 import { uploadFileToS3 as put } from "../services/s3.service";
 import fs from "fs";
 import path from "path";
-
-const prisma = new PrismaClient();
-
 function normalizeHeader(text: string) {
   if (!text) return "";
   return text
@@ -119,16 +117,8 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
       }
     }
 
-    // Update Project with Letterhead
-    await prisma.project.update({
-      where: { id: targetProjectId },
-      data: {
-        letterheadLine1: line1,
-        letterheadLine2: line2,
-        letterheadLine3: line3,
-        ...(logoData && { letterheadLogo: logoData }),
-      }
-    });
+    // The uploaded workbook retains its letterhead. Project has no letterhead storage fields;
+    // return extracted metadata in the report instead of issuing an invalid database write.
 
     // Step 2: Locate BOQ Table Anchor
     let anchorRowNumber = -1;
@@ -394,6 +384,7 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
         projectName,
         location,
         subject,
+        letterhead: { line1, line2, line3, logo: logoData },
         ocmRate,
         cpRate,
         vatRate,
@@ -415,5 +406,3 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
     };
   }
 }
-
-

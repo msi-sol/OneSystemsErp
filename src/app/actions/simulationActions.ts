@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath, revalidateTag } from 'next/cache'; // Required imports even if not used in this specific scenario
 
 // Define SimulationMode if it's not globally available or needs explicit import in this file
@@ -13,12 +14,8 @@ type SimulationMode = 'dryRun' | 'live'; // Example definition if not imported
  * or the AWS backend uses other means of authentication (e.g., API Gateway IAM).
  */
 async function fetchWithAuth(url: string, options: RequestInit) {
-  const backendApiUrl = process.env.BACKEND_API_URL; // Ensure this env variable is set
-  if (!backendApiUrl) {
-    throw new Error('BACKEND_API_URL environment variable is not set.');
-  }
 
-  const response = await fetch(backendApiUrl + url, {
+  const response = await backendFetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

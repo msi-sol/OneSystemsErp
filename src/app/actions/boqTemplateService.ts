@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { cookies } from "next/headers";
 
 // Standard fetchWithAuth wrapper
@@ -13,7 +14,7 @@ const fetchWithAuth = async (url: string, options?: RequestInit) => {
   }
   headers.set('Content-Type', 'application/json'); // Ensure JSON content type
 
-  const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
     cache: 'no-store' // Server Actions typically don't cache, unless explicitly desired

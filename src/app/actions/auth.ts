@@ -16,7 +16,8 @@ export async function login(formData: FormData) {
 
   try {
     const user = await prisma.user.findFirst({
-      where: { email: { equals: email, mode: 'insensitive' } },
+      // MySQL applies the configured case-insensitive collation to email.
+      where: { email: { equals: email } },
       select: { role: true },
     });
 

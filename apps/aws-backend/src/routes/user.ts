@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming this path is correct for your AWS environment
-
 const router = Router();
 
 // Internal helper to avoid code duplication and internal HTTP calls
@@ -174,7 +173,7 @@ router.post('/createUser', async (req, res) => {
 
     const finalRole = await _internalCreateSystemRole(data.role); // Use internal helper
     if (!finalRole || !finalRole.success) {
-      return res.status(500).json({ success: false, error: finalRole?.error || 'Failed to resolve system role.' });
+      return res.status(500).json({ success: false, error: 'Failed to resolve system role.' });
     }
 
     await prisma.user.create({
@@ -209,7 +208,7 @@ router.post('/updateUser', async (req, res) => {
 
     const finalRole = await _internalCreateSystemRole(data.role); // Use internal helper
     if (!finalRole || !finalRole.success) {
-      return res.status(500).json({ success: false, error: finalRole?.error || 'Failed to resolve system role.' });
+      return res.status(500).json({ success: false, error: 'Failed to resolve system role.' });
     }
 
     const updateData: any = {

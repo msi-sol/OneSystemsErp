@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import {
@@ -18,9 +19,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
     ...options?.headers,
   };
 
-  const awsBackendUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL) || 'http://localhost:3001';
-
-  const response = await fetch(`${awsBackendUrl}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
   });

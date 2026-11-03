@@ -1,14 +1,10 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Placeholder for fetchWithAuth - replace with actual implementation for auth if needed.
-// Assumes NEXT_PUBLIC_API_URL environment variable is set to your AWS backend URL.
 const fetchWithAuth = async <T = any>(endpoint: string, options?: RequestInit): Promise<T> => {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (!apiUrl) {
-    throw new Error('NEXT_PUBLIC_API_URL is not defined. Please set it in your environment variables.');
-  }
 
   const headers = {
     'Content-Type': 'application/json',
@@ -17,7 +13,7 @@ const fetchWithAuth = async <T = any>(endpoint: string, options?: RequestInit): 
     ...options?.headers,
   };
 
-  const response = await fetch(`${apiUrl}${endpoint}`, {
+  const response = await backendFetch(`${endpoint}`, {
     ...options,
     headers,
     cache: options?.cache || 'no-store' // Server Actions typically want fresh data

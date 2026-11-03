@@ -1,11 +1,10 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 // @ts-nocheck
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
-
-const BACKEND_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL) || 'http://localhost:4000';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies();
@@ -20,7 +19,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   if (simulatedRole) headers.set('x-simulated-role', simulatedRole);
   headers.set('Content-Type', 'application/json');
 
-  const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+  const res = await backendFetch(`${endpoint}`, {
     ...options,
     headers,
   });
@@ -84,8 +83,8 @@ export async function deleteCanvass(canvassId: string) {
   return result;
 }
 
-export async function updateSupplierQuotation(quotationId: string, supplierId: string, items: any[]) {
-  return await fetchWithAuth(`/api/canvass/quotations/${quotationId}`, {
+export async function updateSupplierQuotation(canvassId: string, quotationId: string, supplierId: string, items: any[]) {
+  return await fetchWithAuth(`/api/canvass/${canvassId}/quotations/${quotationId}`, {
     method: 'PUT',
     body: JSON.stringify({ supplierId, items })
   });

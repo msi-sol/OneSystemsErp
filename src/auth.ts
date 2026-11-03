@@ -51,7 +51,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = credentials.password as string;
 
         const user = await prisma.user.findFirst({
-          where: { email: { equals: email, mode: 'insensitive' } },
+          // MySQL applies the configured case-insensitive collation to email.
+          where: { email: { equals: email } },
         });
 
         console.log("LOGIN ATTEMPT:", email, "Found user:", !!user);

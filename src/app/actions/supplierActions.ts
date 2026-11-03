@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 // The original `cookies()` and `sessionId` check is removed here,
 // as `fetchWithAuth` is expected to handle authentication.
@@ -10,7 +11,6 @@ import { revalidatePath } from 'next/cache';
  * session tokens from `cookies()` or a session context.
  */
 async function fetchWithAuth(url: string, options?: RequestInit) {
-  const baseUrl = (process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL) || 'http://localhost:3001'; // Replace with your actual AWS backend URL
 
   const headers = {
     'Content-Type': 'application/json',
@@ -21,7 +21,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
   // Example: const authToken = cookies().get('authToken')?.value;
   // if (authToken) { headers['Authorization'] = `Bearer ${authToken}`; }
 
-  const response = await fetch(`${baseUrl}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers
   });

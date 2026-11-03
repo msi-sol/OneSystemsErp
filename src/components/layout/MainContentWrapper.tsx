@@ -4,7 +4,7 @@ import React from 'react';
 import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 
-const PUBLIC_AUTH_ROUTES = ['/login', '/forgot-password', '/reset-password'];
+const AUTH_SCREEN_ROUTES = ['/login', '/forgot-password', '/reset-password', '/change-password'];
 
 export default function MainContentWrapper({ 
   children, 
@@ -20,7 +20,7 @@ export default function MainContentWrapper({
   const pathname = usePathname();
 
   // Render public auth routes without any protected shell
-  const isPublicAuth = PUBLIC_AUTH_ROUTES.some(
+  const isPublicAuth = AUTH_SCREEN_ROUTES.some(
     (route) => pathname === route || pathname?.startsWith(route + '?')
   );
   if (isPublicAuth) {

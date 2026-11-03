@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
-
 const router = Router();
 
 router.post('/getProjectCostLedger', async (req, res) => {

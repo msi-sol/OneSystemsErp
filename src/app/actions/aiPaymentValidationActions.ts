@@ -1,18 +1,16 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 // Standard fetchWithAuth definition for making API calls.
-// In a production environment, `process.env.AWS_API_GATEWAY_URL` should be configured
 // with the actual URL of your deployed AWS Express backend.
 const fetchWithAuth = async (url: string, options?: RequestInit) => {
-  const baseUrl = process.env.AWS_API_GATEWAY_URL || 'http://localhost:3001'; // Default for local dev
-  const response = await fetch(`${baseUrl}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,
       // For server-to-server authentication (Server Action to AWS Backend),
       // consider using an API Key or other secure methods.
-      // e.g., 'X-API-Key': process.env.BACKEND_API_KEY,
     },
   });
 
@@ -30,7 +28,7 @@ const fetchWithAuth = async (url: string, options?: RequestInit) => {
   return response.json();
 };
 
-const API_ROUTE_PREFIX = '/aiPaymentValidationActions'; // As specified in the instructions
+const API_ROUTE_PREFIX = '/api/aiPaymentValidationActions'; // As specified in the instructions
 
 export async function validatePaymentBatchWithAI(batchId: string) {
   try {

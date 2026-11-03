@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -6,8 +7,6 @@ import { generateText } from 'ai';
 import { google } from '@ai-sdk/google';
 
 const router = Router();
-const prisma = new PrismaClient();
-
 function getPbacContext(req: any) {
   return {
     userId: req.headers['x-user-session'] as string | undefined,

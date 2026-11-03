@@ -1,11 +1,12 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // A placeholder for fetchWithAuth, which would typically handle authentication headers
 // and base URL resolution in a real application.
 async function fetchWithAuth(url: string, options?: RequestInit) {
-  const response = await fetch(process.env.NEXT_PUBLIC_API_BASE_URL + url, {
+  const response = await backendFetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

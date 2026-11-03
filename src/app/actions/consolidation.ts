@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
@@ -6,7 +7,6 @@ import { cookies } from 'next/headers';
 import * as xlsx from 'xlsx';
 import { uploadToS3 as put } from '@/lib/s3'; // S3 upload utility remains in Next.js Server Action
 
-const BACKEND_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL) || 'http://localhost:4000';
 const API_ROUTE_PREFIX = '/api/consolidation'; // The base route name for the AWS backend
 
 // fetchWithAuth wrapper to handle session/project headers and backend response structure
@@ -26,7 +26,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+  const res = await backendFetch(`${endpoint}`, {
     ...options,
     headers,
   });

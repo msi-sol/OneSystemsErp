@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Placeholder for fetchWithAuth - replace with your actual implementation
@@ -14,10 +15,7 @@ const fetchWithAuth = async (
     // 'Authorization': `Bearer ${YOUR_AUTH_TOKEN}`,
     ...options.headers,
   };
-
-  // Ensure process.env.NEXT_PUBLIC_API_BASE_URL is defined in your .env file (e.g., http://localhost:3001)
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001'; // Default for development
-  const response = await fetch(baseUrl + url, {
+  const response = await backendFetch(url, {
     ...options,
     headers,
   });

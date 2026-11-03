@@ -1,9 +1,8 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import * as express from 'express'; // Required for express.json()
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
-
 const router = Router();
 
 // Middleware to parse JSON body for this router specifically.
@@ -118,19 +117,8 @@ router.post('/updateJobOrderStatus', async (req, res) => {
   }
 });
 
-router.post('/unlockJobOrder', async (req, res) => {
-  try {
-    const { id } = req.body;
-    // Assuming a 'locked' field in your JobOrder schema that can be set to false to unlock.
-    const jobOrder = await prisma.jobOrder.update({
-      where: { id },
-      data: { locked: false }, // Placeholder: adjust field name based on your schema
-    });
-    res.json({ success: true, data: jobOrder });
-  } catch (error: any) {
-    console.error("Error unlocking job order:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
+router.post('/unlockJobOrder', (_req, res) => {
+  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: This legacy job-order unlock action has no supported lock field. Use the authorized job-order workflow instead. No changes were saved.' });
 });
 
 export default router;

@@ -1,9 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient(); // Assuming prisma client is initialized here or imported from '@/lib/prisma'
-
 const router = Router();
 
 // Endpoint for uploadDocumentTemplate

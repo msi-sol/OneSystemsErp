@@ -13,14 +13,7 @@ const subModules = [
   { name: 'Subcontractors & Accreditation', href: '/subcontracting/subcontractors', icon: '🏢', description: 'Manage and accredit subcontractors' },
   { name: 'Create Subcontract Hub', href: '/subcontracting/create', icon: '📝', description: 'Unified wizard for Package, POW & BOQ' },
   { name: 'Progress & Payments Hub', href: '/subcontracting/progress-hub', icon: '📈', description: 'Unified Accomplishments, Billings & Payments' },
-  { name: 'Retention', href: '/subcontracting/retention', icon: '🔒', description: 'Retention payables' },
-  { name: 'Advances', href: '/subcontracting/advances', icon: '💰', description: 'Advance recoupment' },
-  { name: 'Back Charges', href: '/subcontracting/back-charges', icon: '⚠️', description: 'Manage back charges' },
   { name: 'Variations', href: '/subcontracting/variations', icon: '🔄', description: 'Variation orders' },
-  { name: 'Closeout', href: '/subcontracting/closeout', icon: '🏁', description: 'Final project closeout' },
-  { name: 'AI Validation Center', href: '/subcontracting/ai-center', icon: '🤖', description: 'AI flags & audits' },
-  { name: 'Reports', href: '/subcontracting/reports', icon: '📊', description: 'Generate reports' },
-  { name: 'Settings', href: '/subcontracting/settings', icon: '⚙️', description: 'Module settings' }
 ];
 
 const joModules = [

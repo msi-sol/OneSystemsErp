@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import styles from '../../projects/page.module.css';
 import Link from 'next/link';
 
-export default async function ExpenseDetailsPage({ params }: { params: { id: string } }) {
+export default async function ExpenseDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   const expense = await prisma.expense.findUnique({

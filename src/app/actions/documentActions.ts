@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
@@ -6,7 +7,6 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/prisma'; // Prisma is used here for uploaderId lookup
 
 // Placeholder for your actual backend URL
-const AWS_BACKEND_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL) || 'http://localhost:3001';
 
 // IMPORTANT: Implement your actual authentication logic here.
 // This is a placeholder function that assumes auth is handled by cookies/headers
@@ -19,7 +19,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
   // if (sessionToken) {
   //   headers.set('Authorization', `Bearer ${sessionToken}`);
   // }
-  const response = await fetch(`${AWS_BACKEND_BASE_URL}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
   });

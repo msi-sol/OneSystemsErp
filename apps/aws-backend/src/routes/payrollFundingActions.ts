@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
 import { submitTransaction, approveTransaction } from '../lib/workflow';
 import { requirePermission } from '../lib/permissions';
 

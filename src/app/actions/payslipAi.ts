@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 // Basic fetchWithAuth definition
 // In a real application, this would typically be a shared utility
 // that handles authentication headers (e.g., JWT, session token).
@@ -18,10 +19,8 @@ async function fetchWithAuth(url: string, options: RequestInit = {}) {
   // }
 
   // Use an environment variable for the backend API base URL
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || ''; 
-  const fullUrl = `${apiBaseUrl}${url}`;
 
-  const res = await fetch(fullUrl, options);
+  const res = await backendFetch(`${url}`, options);
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ message: res.statusText }));

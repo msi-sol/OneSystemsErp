@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path as per your backend project structure
-
 const router = Router();
 
 router.post('/updateProfile', async (req: Request, res: Response) => {

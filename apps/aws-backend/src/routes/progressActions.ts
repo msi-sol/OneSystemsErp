@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path to your prisma client
-
 const router = Router();
 
 // Helper for common try/catch
@@ -89,91 +88,28 @@ router.post('/processPayment', asyncHandler(async (req, res) => {
   return res.json({ success: true, data: result });
 }));
 
-router.post('/submitBillingToPM', asyncHandler(async (req, res) => {
-  const { id } = req.body;
-  if (!id) {
-    throw new Error('Billing ID is required');
-  }
-  const result = await prisma.subcontractBilling.update({
-    where: { id },
-    data: { status: 'SUBMITTED_TO_PM' }
-  });
-  return res.json({ success: true, data: result });
-}));
+router.post('/submitBillingToPM', (_req, res) => {
+  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: Billing submission to the project manager is unavailable because this legacy workflow is not supported by the current database schema. No changes were saved.' });
+});
 
-router.post('/endorseBillingToPD', asyncHandler(async (req, res) => {
-  const { id } = req.body;
-  if (!id) {
-    throw new Error('Billing ID is required');
-  }
-  const result = await prisma.subcontractBilling.update({
-    where: { id },
-    data: { status: 'ENDORSED_TO_PD' }
-  });
-  return res.json({ success: true, data: result });
-}));
+router.post('/endorseBillingToPD', (_req, res) => {
+  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: Billing endorsement to the project director is unavailable because this legacy workflow is not supported by the current database schema. No changes were saved.' });
+});
 
-router.post('/approvePaymentRequest', asyncHandler(async (req, res) => {
-  const { id } = req.body;
-  if (!id) {
-    throw new Error('Billing ID is required');
-  }
-  const result = await prisma.subcontractBilling.update({
-    where: { id },
-    data: { status: 'APPROVED_BY_PD' }
-  });
-  return res.json({ success: true, data: result });
-}));
+router.post('/approvePaymentRequest', (_req, res) => {
+  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: Payment-request approval is unavailable because this legacy workflow is not supported by the current database schema. No changes were saved.' });
+});
 
-router.post('/endorseSubcontractPayment', asyncHandler(async (req, res) => {
-  const { billingId, paymentData } = req.body;
-  if (!billingId || !paymentData) {
-    throw new Error('Billing ID and payment data are required');
-  }
-  const newPayment = await prisma.subcontractPayment.create({
-    data: {
-      ...paymentData,
-      billingId,
-      status: 'ENDORSED_BY_FINANCE'
-    }
-  });
-  await prisma.subcontractBilling.update({
-    where: { id: billingId },
-    data: { status: 'ENDORSED_FOR_PAYMENT' }
-  });
-  return res.json({ success: true, data: newPayment });
-}));
+router.post('/endorseSubcontractPayment', (_req, res) => {
+  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: Subcontract payment endorsement is unavailable because this legacy workflow is not supported by the current database schema. No changes were saved.' });
+});
 
-router.post('/approveSubcontractPayment', asyncHandler(async (req, res) => {
-  const { billingId } = req.body;
-  if (!billingId) {
-    throw new Error('Billing ID is required');
-  }
-  await prisma.subcontractPayment.updateMany({
-    where: { billingId, status: 'ENDORSED_BY_FINANCE' },
-    data: { status: 'APPROVED_BY_MANAGEMENT' }
-  });
-  const result = await prisma.subcontractBilling.update({
-    where: { id: billingId },
-    data: { status: 'APPROVED_FOR_PAYMENT' }
-  });
-  return res.json({ success: true, data: result });
-}));
+router.post('/approveSubcontractPayment', (_req, res) => {
+  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: Subcontract payment approval is unavailable because this legacy workflow is not supported by the current database schema. No changes were saved.' });
+});
 
-router.post('/rejectSubcontractPayment', asyncHandler(async (req, res) => {
-  const { billingId } = req.body;
-  if (!billingId) {
-    throw new Error('Billing ID is required');
-  }
-  await prisma.subcontractPayment.updateMany({
-    where: { billingId, status: 'ENDORSED_BY_FINANCE' },
-    data: { status: 'REJECTED_BY_MANAGEMENT' }
-  });
-  const result = await prisma.subcontractBilling.update({
-    where: { id: billingId },
-    data: { status: 'REJECTED_PAYMENT' }
-  });
-  return res.json({ success: true, data: result });
-}));
+router.post('/rejectSubcontractPayment', (_req, res) => {
+  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: Subcontract payment rejection is unavailable because this legacy workflow is not supported by the current database schema. No changes were saved.' });
+});
 
 export default router;

@@ -7,7 +7,7 @@ import IssuePaymentForm from './IssuePaymentForm';
 import styles from '../../projects/page.module.css';
 import { getUserPermissions } from '@/lib/permissions';
 
-export default async function PayableDetailsPage({ params, searchParams }: { params: { id: string }, searchParams: { origin?: string } }) {
+export default async function PayableDetailsPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ origin?: string }> }) {
   const { origin } = await searchParams;
   const cookieStore = await cookies();
   const __session = await verifySession();

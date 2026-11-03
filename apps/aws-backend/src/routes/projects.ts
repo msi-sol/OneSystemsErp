@@ -1,10 +1,9 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 
 const router = Router();
-const prisma = new PrismaClient();
-
 // Helper to extract PBAC context from headers
 function getPbacContext(req: any) {
   return {

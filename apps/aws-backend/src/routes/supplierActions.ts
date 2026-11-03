@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming prisma is accessible from this path in AWS environment
-
 const router = Router();
 
 router.post('/createSupplier', async (req, res) => {

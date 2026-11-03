@@ -1,10 +1,18 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { requirePermission } from '../lib/permissions';
 
 const router = Router();
-const prisma = new PrismaClient();
+function parseBoqReferenceIds(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.every((item: unknown) => typeof item === 'string')) return parsed;
+  } catch { /* Older records may contain one plain BOQ ID. */ }
+  return [value];
+}
 
 function getPbacContext(req: any) {
   return {
@@ -37,6 +45,7 @@ router.post('/job-orders', async (req, res) => {
     }
 
     const boqReferenceIds = data.boqReferenceIds || [];
+    if (!Array.isArray(boqReferenceIds) || !boqReferenceIds.every((id: unknown) => typeof id === 'string')) return res.status(400).json({ success: false, error: 'BOQ references must be a list of IDs.' });
     if (boqReferenceIds.length > 0) {
       const pureBoqIds = boqReferenceIds.filter((id: string) => id !== '1_LOT');
       if (pureBoqIds.length > 0) {
@@ -52,7 +61,7 @@ router.post('/job-orders', async (req, res) => {
     });
 
     const isDuplicate = existingJOs.some(jo => {
-      const existingIds = Array.isArray(jo.boqReferenceIds) ? jo.boqReferenceIds : [];
+      const existingIds = parseBoqReferenceIds(jo.boqReferenceId);
       if (existingIds.length === boqReferenceIds.length && existingIds.length > 0) {
         const sortedExisting = [...existingIds].sort();
         const sortedIncoming = [...boqReferenceIds].sort();
@@ -64,7 +73,7 @@ router.post('/job-orders', async (req, res) => {
     if (isDuplicate) throw new Error("Duplicate Error: A Job Order for this Subcontractor with the exact same BOQ scope already exists.");
 
     const { durationDays, boqReferenceIds: _, jobOrderType, ...prismaData } = data;
-    prismaData.boqReferenceId = boqReferenceIds;
+    prismaData.boqReferenceId = JSON.stringify(boqReferenceIds);
 
     const result = await prisma.jobOrder.create({ data: prismaData });
     res.json({ success: true, data: result });
@@ -101,8 +110,9 @@ router.put('/job-orders/:id', async (req, res) => {
     }
 
     const boqReferenceId = data.boqReferenceIds || [];
+    if (!Array.isArray(boqReferenceId) || !boqReferenceId.every((id: unknown) => typeof id === 'string')) return res.status(400).json({ success: false, error: 'BOQ references must be a list of IDs.' });
     const { durationDays, project, subcontractor, subcontractAccomplishments, subcontractBillings, boqReferenceIds: _, jobOrderType, ...prismaData } = data;
-    prismaData.boqReferenceId = boqReferenceId;
+    prismaData.boqReferenceId = JSON.stringify(boqReferenceId);
 
     const result = await prisma.jobOrder.update({ where: { id }, data: prismaData });
     res.json({ success: true, data: result });
@@ -381,9 +391,9 @@ router.put('/packages/:id/unlock', async (req, res) => {
     let isAuthorized = false;
     
     if (hasCompletedPayments) {
-      isAuthorized = user?.email === 'pd@gmail.com' || user?.role === 'PROJECT_DIRECTOR' || user?.role === 'SUPER_ADMIN' || user?.userRoles?.some(ur => ['SUPER_ADMIN', 'PROJECT_DIRECTOR'].includes(ur.role.roleCode));
+      isAuthorized = user?.email === 'pd@gmail.com' || user?.role === 'PROJECT_DIRECTOR' || user?.role === 'SUPER_ADMIN' || (user?.userRoles?.some(ur => ['SUPER_ADMIN', 'PROJECT_DIRECTOR'].includes(ur.role.roleCode)) ?? false);
     } else {
-      isAuthorized = user?.email === 'pd@gmail.com' || user?.role === 'PROJECT_DIRECTOR' || user?.role === 'PROJECT_MANAGER' || user?.role === 'SUPER_ADMIN' || user?.userRoles?.some(ur => ['SUPER_ADMIN', 'PROJECT_DIRECTOR', 'PROJECT_MANAGER'].includes(ur.role.roleCode));
+      isAuthorized = user?.email === 'pd@gmail.com' || user?.role === 'PROJECT_DIRECTOR' || user?.role === 'PROJECT_MANAGER' || user?.role === 'SUPER_ADMIN' || (user?.userRoles?.some(ur => ['SUPER_ADMIN', 'PROJECT_DIRECTOR', 'PROJECT_MANAGER'].includes(ur.role.roleCode)) ?? false);
     }
 
     if (!isAuthorized) {

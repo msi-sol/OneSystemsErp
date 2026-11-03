@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming prisma is available via this path or similar
-
 const router = Router();
 
 router.post('/holdPayslip', async (req, res) => {

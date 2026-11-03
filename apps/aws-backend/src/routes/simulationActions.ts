@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path as per your AWS backend structure
 import { SimulationEngine, SimulationMode } from '../../../../src/lib/simulationEngine'; // Adjust path as per your AWS backend structure
 
 const router = Router();

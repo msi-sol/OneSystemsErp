@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
@@ -9,7 +10,6 @@ import { uploadToS3 as put } from '@/lib/s3';
 import fs from 'fs';
 
 const PDFParse = require('pdf-parse');
-const BACKEND_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL) || 'http://localhost:4000';
 const API_ROUTE_PREFIX = '/api/progressActions'; // The agreed-upon route name for the API
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
@@ -29,7 +29,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+  const res = await backendFetch(`${endpoint}`, {
     ...options,
     headers,
   });

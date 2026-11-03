@@ -1,7 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
+import { prisma } from '@/lib/prisma';
 const NOISE_TERMS = [
   'none detected', 'no items', 'no matching items', 'all types', 'all logs', 
   'basic info', 'back to upload', 'analysis failed', 'no active project selected',

@@ -1,11 +1,11 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 
 // Define the backend URL for the Server Action context
-const BACKEND_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL) || 'http://localhost:4000';
 
 // fetchWithAuth wrapper points to the new backend API routes
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
@@ -22,7 +22,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   headers.set('Content-Type', 'application/json');
 
   // Construct the full backend API URL including the route name 'accomplishmentFileActions'
-  const res = await fetch(`${BACKEND_URL}/api/accomplishmentFileActions${endpoint}`, {
+  const res = await backendFetch(`/api/accomplishmentFileActions${endpoint}`, {
     ...options,
     headers,
     method: 'POST', // Enforce POST as per instructions for router endpoints

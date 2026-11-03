@@ -71,7 +71,7 @@ import variationOrderActionsRoutes from './routes/variationOrderActions';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.ERP_BACKEND_PORT || 4000);
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -82,6 +82,9 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Every API router, including legacy action proxies, requires signed internal context.
+app.use('/api', requireAuth);
 
 app.use('/api/s3', s3Routes);
 app.use('/api/accomplishmentFileActions', accomplishmentFileActionsRoutes);
@@ -132,9 +135,6 @@ app.use('/api/user-roles', userRolesRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/variationOrderActions', variationOrderActionsRoutes);
 
-// Apply auth middleware to all other API routes
-app.use('/api', requireAuth);
-
 app.use('/api/projects', projectsRoutes);
 app.use('/api/procurement', procurementRoutes);
 app.use('/api/canvass', canvassRoutes);
@@ -165,8 +165,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-if (!process.env.VERCEL) {
-  app.listen(PORT, () => {
+if (process.env.ERP_BACKEND_STANDALONE === 'true') {
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error('Invalid ERP_BACKEND_PORT');
+  app.listen(PORT, '127.0.0.1', () => {
     console.log(`OneSystemsERP AWS Backend listening on port ${PORT}`);
   });
 }

@@ -1,11 +1,10 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import ExcelJS from "exceljs";
 import path from "path";
 import fs from "fs";
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path to prisma client as needed for AWS environment
-
 const router = Router();
 
 router.post('/generateBOQTemplate', async (req, res) => {

@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
 import {
   VariationOrder,
   VariationOrderItem,
@@ -12,7 +12,7 @@ import {
   ScheduleWBS,
   ProjectSchedule,
   ScheduleActivity,
-  ScheduleBOQMapping,
+  ScheduleBOQAllocation,
   CommitmentLedger
 } from '@prisma/client';
 
@@ -234,9 +234,12 @@ async function applyVariationOrderToSchedule(voId: string) {
     });
     if (!vo) return;
 
-    const schedule = await prisma.projectSchedule.findUnique({
-      where: { projectId: vo.projectId }
+    const schedules = await prisma.projectSchedule.findMany({
+      where: { projectId: vo.projectId },
+      take: 2,
     });
+    if (schedules.length > 1) throw new Error('CHOOSE_SCHEDULE: This project has multiple schedule revisions. Apply the variation through the selected schedule workflow.');
+    const schedule = schedules[0];
     if (!schedule) return;
 
     let voWbs = await prisma.scheduleWBS.findFirst({
@@ -283,7 +286,7 @@ async function applyVariationOrderToSchedule(voId: string) {
         });
 
         if (newAwardedBoqItem) {
-          await prisma.scheduleBOQMapping.create({
+          await prisma.scheduleBOQAllocation.create({
             data: {
               activityId: newActivity.id,
               awardedBoqItemId: newAwardedBoqItem.id,

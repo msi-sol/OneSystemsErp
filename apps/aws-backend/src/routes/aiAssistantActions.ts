@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path as needed for your AWS setup
 import { generateText } from 'ai';
 import { google } from '@ai-sdk/google';
 

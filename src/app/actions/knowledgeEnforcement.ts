@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath, revalidateTag } from 'next/cache'; // Included for completeness, though not used in original
 
 // Placeholder for `fetchWithAuth` function
@@ -14,7 +15,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
     ...(options?.headers || {})
   };
 
-  const response = await fetch(url, {
+  const response = await backendFetch(url, {
     ...options,
     headers
   });

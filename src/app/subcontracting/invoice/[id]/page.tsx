@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default async function InvoicePage({ params }: { params: { id: string } }) {
+export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   
   const billing = await prisma.subcontractBilling.findUnique({

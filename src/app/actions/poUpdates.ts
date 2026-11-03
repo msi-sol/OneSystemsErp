@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
@@ -9,9 +10,8 @@ async function fetchWithAuth(url: string, options: RequestInit) {
   // In a real application, this would handle authentication tokens (e.g., from cookies, JWT, etc.)
   // For this example, we'll just forward the request, ensuring JSON content type.
   // Replace '/api' with your actual AWS backend API endpoint if it's different.
-  const API_BASE_URL = process.env.NEXT_PUBLIC_AWS_API_BASE_URL || 'http://localhost:3001'; // Example base URL
 
-  const response = await fetch(`${API_BASE_URL}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -49,7 +49,7 @@ export async function updatePOStatus(poId: string, status: string) {
     body.approverId = sessionId; // Pass the sessionId as approverId to the backend
   }
 
-  const result = await fetchWithAuth('/poUpdates/updatePOStatus', {
+  const result = await fetchWithAuth('/api/poUpdates/updatePOStatus', {
     method: 'POST',
     body: JSON.stringify(body),
   });

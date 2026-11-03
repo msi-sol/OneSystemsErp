@@ -1,11 +1,12 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Basic fetchWithAuth definition - replace with your actual implementation
 // This function should handle authentication (e.g., attaching a token)
 // and standard error handling for API calls.
-async function fetchWithAuth(input: RequestInfo, init?: RequestInit) {
+async function fetchWithAuth(input: string | URL, init?: RequestInit) {
   const headers = {
     'Content-Type': 'application/json',
     ...(init?.headers || {})
@@ -13,7 +14,7 @@ async function fetchWithAuth(input: RequestInfo, init?: RequestInit) {
     // 'Authorization': `Bearer ${await getSessionToken()}`
   };
 
-  const response = await fetch(input, { ...init, headers });
+  const response = await backendFetch(input, { ...init, headers });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ message: response.statusText }));

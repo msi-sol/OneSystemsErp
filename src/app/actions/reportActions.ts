@@ -1,16 +1,12 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 // This `fetchWithAuth` function acts as a proxy to your AWS backend.
-// It assumes NEXT_PUBLIC_AWS_BACKEND_URL is configured in your Next.js environment variables
 // (e.g., .env.local, .env.production) and points to your AWS Express.js API base URL.
 async function fetchWithAuth(urlPath: string, options?: RequestInit) {
-  const backendUrl = (process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL);
-  if (!backendUrl) {
-    throw new Error("NEXT_PUBLIC_AWS_BACKEND_URL is not defined in your environment.");
-  }
 
-  const response = await fetch(`${backendUrl}${urlPath}`, {
+  const response = await backendFetch(`${urlPath}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -45,7 +41,7 @@ export async function getFinancialReport() {
   const activeProjectId = cookieStore.get('activeProjectId')?.value || null;
 
   // Call the AWS backend through the fetchWithAuth proxy
-  const response = await fetchWithAuth('/reportActions/getFinancialReport', {
+  const response = await fetchWithAuth('/api/reportActions/getFinancialReport', {
     method: 'POST',
     body: JSON.stringify({ sessionId, activeProjectId })
   });
@@ -64,7 +60,7 @@ export async function getProjectReport() {
   const sessionId = __session?.id || '';
   const activeProjectId = cookieStore.get('activeProjectId')?.value || null;
 
-  const response = await fetchWithAuth('/reportActions/getProjectReport', {
+  const response = await fetchWithAuth('/api/reportActions/getProjectReport', {
     method: 'POST',
     body: JSON.stringify({ sessionId, activeProjectId })
   });
@@ -80,7 +76,7 @@ export async function getInventoryReport() {
   const sessionId = __session?.id || '';
   const activeProjectId = cookieStore.get('activeProjectId')?.value || null;
 
-  const response = await fetchWithAuth('/reportActions/getInventoryReport', {
+  const response = await fetchWithAuth('/api/reportActions/getInventoryReport', {
     method: 'POST',
     body: JSON.stringify({ sessionId, activeProjectId })
   });

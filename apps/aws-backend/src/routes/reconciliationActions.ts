@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path as per your AWS backend structure
-
 const router = Router();
 
 // Mock reconciliation that simulates updating batch rows based on a file upload

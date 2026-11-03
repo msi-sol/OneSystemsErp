@@ -1,9 +1,9 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Standard fetchWithAuth definition
-// Assuming process.env.BACKEND_API_URL is configured
 async function fetchWithAuth(url: string, options?: RequestInit) {
   const token = 'YOUR_AUTH_TOKEN_LOGIC_HERE'; // Replace with actual token retrieval logic (e.g., from a cookie, session)
   const headers = {
@@ -12,7 +12,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
     ...options?.headers,
   };
 
-  const response = await fetch(`${process.env.BACKEND_API_URL}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
   });

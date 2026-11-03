@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
@@ -22,9 +23,8 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
 
   // IMPORTANT: Configure this environment variable to point to your AWS Express backend URL.
   // Example: 'https://your-aws-lambda-api-gateway-url.amazonaws.com'
-  const baseUrl = (process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL) || 'http://localhost:3001'; 
 
-  const response = await fetch(`${baseUrl}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
   });
@@ -47,7 +47,7 @@ async function getUserId() {
 }
 
 // Define the API route prefix for this service
-const API_ROUTE_PREFIX = '/hikvisionDeviceService'; 
+const API_ROUTE_PREFIX = '/api/hikvisionDeviceService';
 
 export async function getHikvisionDevices() {
   // Obtain userId from Next.js context and pass to backend for permission check

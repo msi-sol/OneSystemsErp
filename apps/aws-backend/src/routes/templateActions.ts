@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming prisma is available in the AWS environment, adjust path as needed
-
 const router = Router();
 
 router.post('/saveTemplateAction', async (req, res) => {

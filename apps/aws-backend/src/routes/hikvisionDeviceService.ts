@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path as needed for your backend setup
 import crypto from 'crypto';
 
 // Use a fallback secret for local dev if not in env

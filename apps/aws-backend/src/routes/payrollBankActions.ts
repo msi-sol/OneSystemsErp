@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Ensure this path correctly points to your Prisma client in the AWS environment
-
 const router = Router();
 
 router.post('/createPayrollAccount', async (req, res) => {

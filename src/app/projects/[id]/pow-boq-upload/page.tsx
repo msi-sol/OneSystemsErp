@@ -1,6 +1,6 @@
 import TemplateUploadCenter from './TemplateUploadCenter';
 
-export default async function PowBoqUploadPage({ params }: { params: { id: string } }) {
+export default async function PowBoqUploadPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   
   return (

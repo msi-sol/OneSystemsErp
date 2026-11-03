@@ -7,7 +7,8 @@ async function run() {
   const targetProjectId = 'cmrirhhw30000ic0406v47smb';
   const actorEmail = 'j.burns2372@gmail.com';
 
-  const actors = await prisma.user.findMany({ where: { email: { equals: actorEmail, mode: 'insensitive' } } });
+  // MySQL applies the configured case-insensitive collation to email.
+  const actors = await prisma.user.findMany({ where: { email: { equals: actorEmail } } });
   if (actors.length === 0) {
     console.log('ACTOR_NOT_FOUND');
     return;
@@ -103,4 +104,3 @@ run().catch(e => {
   console.error(e);
   process.exit(1);
 }).finally(() => prisma.$disconnect());
-

@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Basic fetchWithAuth definition (replace with your actual implementation)
@@ -10,7 +11,7 @@ type FetchWithAuthOptions = RequestInit & {
 };
 
 async function fetchWithAuth(
-  input: RequestInfo | URL,
+  input: string | URL,
   init?: FetchWithAuthOptions
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
@@ -23,7 +24,7 @@ async function fetchWithAuth(
   // e.g., from cookies, session, or server-side auth providers.
   // Example: headers.set('Authorization', `Bearer ${await getAuthToken()}`);
 
-  const response = await fetch(input, {
+  const response = await backendFetch(input, {
     ...init,
     headers,
   });
@@ -38,8 +39,6 @@ async function fetchWithAuth(
   return response;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_AWS_API_URL || 'http://localhost:3000'; // Define your AWS API base URL
-
 export async function uploadDocumentTemplate(formData: FormData) {
   try {
     // Convert FormData to a plain object to send as JSON
@@ -52,7 +51,7 @@ export async function uploadDocumentTemplate(formData: FormData) {
     };
 
     const response = await fetchWithAuth(
-      `${API_BASE_URL}/api/documentTemplateActions/uploadDocumentTemplate`,
+      `/api/documentTemplateActions/uploadDocumentTemplate`,
       {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -75,7 +74,7 @@ export async function uploadDocumentTemplate(formData: FormData) {
 export async function fetchActiveTemplates() {
   try {
     const response = await fetchWithAuth(
-      `${API_BASE_URL}/api/documentTemplateActions/fetchActiveTemplates`,
+      `/api/documentTemplateActions/fetchActiveTemplates`,
       {
         method: 'POST',
         body: JSON.stringify({}), // No arguments needed, but POST typically expects a body

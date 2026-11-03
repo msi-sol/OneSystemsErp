@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
 import { uploadToS3 as put } from '../../../../src/lib/s3';
 import ExcelJS from "exceljs";
 import fs from 'fs';
@@ -161,6 +161,7 @@ router.post('/createWorkingCopyAction', async (req, res) => {
     });
 
     if (!fileRecord) return res.status(404).json({ success: false, error: "File not found" });
+
     if (fileRecord.workingFilePath) return res.json({ success: true, message: "Working copy already exists", workingFilePath: fileRecord.workingFilePath });
 
     const uniqueId = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -215,6 +216,8 @@ router.post('/saveFileEditAction', async (req, res) => {
 
     if (!fileRecord) return res.status(404).json({ success: false, error: "File not found" });
 
+    if (fileRecord.isLockedOriginal) return res.status(409).json({ success: false, error: 'This billing document is locked. Create a successive billing to make changes.' });
+
     const uniqueId = Date.now() + "-" + Math.round(Math.random() * 1e9);
     const sanitizedFileName = fileRecord.fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
     const newFileName = `v${fileRecord.fileVersion + 1}-${uniqueId}-${sanitizedFileName}`;
@@ -230,7 +233,6 @@ router.post('/saveFileEditAction', async (req, res) => {
         fileId: fileRecord.id,
         versionNumber,
         filePath: publicPath,
-        isLocked,
       }
     });
 
@@ -240,6 +242,7 @@ router.post('/saveFileEditAction', async (req, res) => {
             fileVersion: versionNumber,
             workingFilePath: publicPath,
             fileSize: buffer.length,
+            ...(isLocked === true ? { isLockedOriginal: true, status: 'BILLING' } : {}),
         }
     });
 

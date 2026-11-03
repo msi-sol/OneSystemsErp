@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -6,8 +7,6 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const router = Router();
-const prisma = new PrismaClient();
-
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY,
 });

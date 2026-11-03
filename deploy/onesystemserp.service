@@ -1,0 +1,23 @@
+[Unit]
+Description=OneSystemsErp
+After=network-online.target
+Wants=network-online.target
+Wants=onesystemserp-backend.service
+After=onesystemserp-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/onesystemserp
+EnvironmentFile=/home/ubuntu/onesystemserp/.env
+ExecStart=/usr/bin/node /home/ubuntu/onesystemserp/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

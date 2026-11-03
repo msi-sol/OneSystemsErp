@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 // Standard fetchWithAuth definition
@@ -12,7 +13,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
     // 'Authorization': `Bearer ${await getAuthToken()}`
   };
 
-  const response = await fetch(process.env.NEXT_PUBLIC_API_BASE_URL + url, {
+  const response = await backendFetch(url, {
     ...options,
     headers: { ...defaultHeaders, ...options?.headers },
     cache: 'no-store' // Typically for mutations

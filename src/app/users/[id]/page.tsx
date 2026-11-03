@@ -7,7 +7,7 @@ import ProjectAccessClient from './ProjectAccessClient';
 
 export const dynamic = 'force-dynamic';
 
-export default async function EditUserPage({ params }: { params: { id: string } }) {
+export default async function EditUserPage({ params }: { params: Promise<{ id: string }> }) {
   // Await params to avoid Next.js 15 sync access warnings
   const { id } = await params;
 

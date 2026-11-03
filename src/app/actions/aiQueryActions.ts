@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
@@ -11,9 +12,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
     'Content-Type': 'application/json',
     ...(options?.headers || {}),
   };
-
-  // Assume NEXT_PUBLIC_AWS_BACKEND_URL is set in your Next.js environment variables
-  const response = await fetch(`${(process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL)}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
     // Ensure cookies are forwarded if needed by the backend for session management

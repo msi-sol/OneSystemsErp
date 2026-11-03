@@ -78,7 +78,7 @@ export default async function RootLayout({
           <MainContentWrapper permissions={permissions} user={user} topbar={userId ? <Topbar /> : null}>
             {children}
             <Toaster position="top-right" richColors />
-            {userId && <FloatingAIAssistant />}
+            {userId && !__session?.mustChangePassword && <FloatingAIAssistant />}
           </MainContentWrapper>
         </OfflineSyncProvider>
       </body>

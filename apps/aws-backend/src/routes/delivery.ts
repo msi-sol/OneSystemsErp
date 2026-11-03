@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -7,8 +8,6 @@ import { validateTransactionWithAI, verifyDeliveryDocumentWithAI } from '../lib/
 import { uploadFileToS3 } from '../services/s3.service';
 
 const router = Router();
-const prisma = new PrismaClient();
-
 function getPbacContext(req: any) {
   return {
     userId: req.headers['x-user-session'] as string | undefined,

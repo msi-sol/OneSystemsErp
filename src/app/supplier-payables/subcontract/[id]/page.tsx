@@ -11,8 +11,8 @@ export default async function SubcontractPayableDetailsPage({
   params,
   searchParams
 }: {
-  params: { id: string },
-  searchParams: { origin?: string }
+  params: Promise<{ id: string }>,
+  searchParams: Promise<{ origin?: string }>
 }) {
   const { origin } = await searchParams;
   const cookieStore = await cookies();

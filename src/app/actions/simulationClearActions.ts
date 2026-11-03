@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 // This is a placeholder for `fetchWithAuth`. In a real application, this would typically
 // handle authentication (e.g., attaching an auth token from a session or cookie),
 // set default headers like 'Content-Type', and define the base URL for your backend.
@@ -13,10 +14,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
   //   headers.set('Authorization', `Bearer ${session.accessToken}`);
   // }
 
-  // Ensure BACKEND_API_BASE_URL is set in your .env file (e.g., http://localhost:3001 for a local Express app)
-  const backendBaseUrl = process.env.BACKEND_API_BASE_URL || 'http://localhost:3001'; 
-
-  const response = await fetch(`${backendBaseUrl}${url}`, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
   });

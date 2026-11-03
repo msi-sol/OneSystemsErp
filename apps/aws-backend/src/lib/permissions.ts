@@ -1,6 +1,5 @@
+import { prisma } from './prisma';
 import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
 
 const MASTER_ADMIN_MODULES = [
   'DASHBOARD', 'PROJECT_MANAGEMENT', 'AI_COMMAND_CENTER', 'PROCUREMENT', 'INVENTORY',

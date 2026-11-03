@@ -1,9 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient(); // Initialize Prisma client for AWS backend
-
 const router = Router();
 
 router.post('/runPBACMigration', async (req, res) => {

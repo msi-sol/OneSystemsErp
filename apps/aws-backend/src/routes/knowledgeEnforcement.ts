@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust path as per your Express app structure
-
 const router = Router();
 
 /**
@@ -74,7 +73,7 @@ router.post('/getRecentAuditLogsForModule', async (req, res) => {
     });
     return res.json({ success: true, data: logs });
   } catch (error: any) {
-    console.error(`Failed to fetch audit logs for module ${moduleName} from backend:`, error);
+    console.error('Failed to fetch module audit logs from backend:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

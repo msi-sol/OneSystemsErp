@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Assuming prisma is accessible like this in an AWS context
-
 const router = Router();
 
 // Helper for consistent error handling

@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
@@ -6,7 +7,6 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 // Base URL for the AWS backend API. This should point to your AWS Express.js application.
-const BACKEND_API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_API_BASE_URL || 'http://localhost:3001'; // Default for local development
 
 /**
  * A wrapper around fetch that includes authentication headers and handles API responses.
@@ -30,9 +30,8 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
 
   // Construct the full URL for the backend endpoint
   // The `url` parameter here will be like '/api/user-roles/functionName'
-  const fullUrl = `${BACKEND_API_BASE_URL}${url}`;
 
-  const response = await fetch(fullUrl, {
+  const response = await backendFetch(`${url}`, {
     ...options,
     headers,
     // Prevent Next.js from aggressively caching fetch requests in Server Actions

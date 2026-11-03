@@ -1,8 +1,7 @@
+import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient(); // Adjust this import path based on your AWS project structure
-
 const router = Router();
 
 router.post('/getProjectProfitability', async (req: Request, res: Response) => {

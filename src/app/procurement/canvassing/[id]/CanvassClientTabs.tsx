@@ -86,7 +86,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
     }));
 
     const res = editQuotationId 
-      ? await updateSupplierQuotation(editQuotationId, selectedSupplier, items)
+      ? await updateSupplierQuotation(canvass.id, editQuotationId, selectedSupplier, items)
       : await addSupplierQuotation(canvass.id, selectedSupplier, items);
 
     if (res.success) {

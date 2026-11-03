@@ -1,4 +1,5 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
@@ -8,7 +9,7 @@ import { cookies } from 'next/headers';
 // that handles token retrieval (e.g., from cookies/session), error parsing,
 // and potentially token refreshing.
 async function fetchWithAuth(url: string, options?: RequestInit) {
-  const response = await fetch(url, {
+  const response = await backendFetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

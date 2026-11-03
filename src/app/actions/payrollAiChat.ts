@@ -1,14 +1,10 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 // Standard fetchWithAuth wrapper. This would typically handle authentication headers.
-// The AWS_BACKEND_BASE_URL environment variable should point to your Express backend's base URL (e.g., 'https://your-api-gateway-id.execute-api.us-east-1.amazonaws.com/prod').
 async function fetchWithAuth(url: string, options?: RequestInit) {
-  const backendBaseUrl = process.env.AWS_BACKEND_BASE_URL;
-  if (!backendBaseUrl) {
-    throw new Error('AWS_BACKEND_BASE_URL is not defined in environment variables.');
-  }
 
-  const response = await fetch(backendBaseUrl + url, {
+  const response = await backendFetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

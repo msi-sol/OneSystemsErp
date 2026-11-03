@@ -1,5 +1,6 @@
 'use server';
 
+import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
 
 /**
@@ -9,7 +10,7 @@ import { revalidatePath } from 'next/cache';
  * targeting a Next.js API route that may then proxy to an external backend.
  */
 async function fetchWithAuth(url: string, options?: RequestInit) {
-  const response = await fetch(url, {
+  const response = await backendFetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

@@ -1,12 +1,11 @@
 'use server';
+import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { generateText } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-
-const BACKEND_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_AWS_BACKEND_URL || process.env.AWS_BACKEND_URL) || 'http://localhost:4000';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies();
@@ -21,7 +20,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   if (simulatedRole) headers.set('x-simulated-role', simulatedRole);
   headers.set('Content-Type', 'application/json');
 
-  const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+  const res = await backendFetch(`${endpoint}`, {
     ...options,
     headers,
   });
