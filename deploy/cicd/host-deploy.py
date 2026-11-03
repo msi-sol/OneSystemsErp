@@ -20,6 +20,8 @@ STATE = Path('/var/lib/onesystemserp')
 CONFIG = Path('/etc/onesystemserp')
 LEGACY = Path('/home/ubuntu/onesystemserp')
 USER = 'onesystemserp'
+MIGRATOR = 'onesystemserp-migrator'
+MIGRATION_CONFIG = Path('/etc/onesystemserp-migrations')
 UNITS = ('onesystemserp-backend.service', 'onesystemserp.service')
 BUCKET = 'onesystemserp-deploy-173677044880-us-east-1'
 INSTANCE = 'i-05dbf6853ca3ecb33'
@@ -57,7 +59,7 @@ def validate_arguments(key, checksum, revision, run_id):
 def validate_archive(archive):
     """Reject traversal, links outside the release, credentials and special files."""
     seen = set()
-    allowed = {'node_modules', '.next', 'public', 'apps', 'src', 'artifacts', 'prisma',
+    allowed = {'node_modules', '.next', 'public', 'apps', 'src', 'artifacts', 'prisma', 'backend', 'server.js',
                'package.json', 'package-lock.json', 'next.config.ts', 'tsconfig.json',
                'next-env.d.ts', 'deployment-manifest.json'}
     for member in archive.getmembers():
@@ -88,10 +90,11 @@ def validate_archive(archive):
                 depth += -1 if part == '..' else (0 if part == '.' else 1)
                 if depth < 0:
                     raise DeployError('Artifact symlink escapes release')
-    required = {'package.json', '.next/BUILD_ID', 'prisma/schema.prisma',
-                'deployment-manifest.json', 'apps/aws-backend/src/index.ts'}
+    required = {'package.json', '.next/BUILD_ID', 'prisma/schema.prisma', 'deployment-manifest.json'}
     if not required.issubset(seen):
         raise DeployError('Incomplete production artifact')
+    if 'apps/aws-backend/src/index.ts' not in seen and not {'backend/server.mjs', 'server.js'}.issubset(seen):
+        raise DeployError('Missing production frontend/backend entrypoints')
 
 
 def atomic_text(path, text, mode=0o600):
@@ -150,6 +153,58 @@ def systemd_properties():
             '--property=UMask=0077']
 
 
+def compact_release(release):
+    manifest = release / 'deployment-manifest.json'
+    return manifest.exists() and json.loads(manifest.read_text()).get('format') == 2
+
+
+def frontend_command(release, port):
+    if compact_release(release):
+        return ['/usr/bin/node', str(release / 'server.js')]
+    return ['/usr/bin/node', str(release / 'node_modules/next/dist/bin/next'), 'start',
+            '--hostname', '127.0.0.1', '--port', str(port)]
+
+
+def backend_command(release):
+    if compact_release(release):
+        return ['/usr/bin/node', str(release / 'backend/server.mjs')]
+    return ['/usr/bin/node', '--import', 'tsx', str(release / 'apps/aws-backend/src/index.ts')]
+
+
+def migrate_release(release, run_id):
+    baseline_path = CONFIG / 'schema-compatibility.json'
+    baseline = json.loads(baseline_path.read_text())
+    result = command(['systemd-run', '--quiet', '--wait', '--pipe', '--collect',
+                      '--unit=onesystemserp-migrate-' + run_id,
+                      '--property=User=' + MIGRATOR, '--property=Group=' + MIGRATOR,
+                      '--property=EnvironmentFile=' + str(MIGRATION_CONFIG / 'migration.env'),
+                      '--property=NoNewPrivileges=yes', '--property=PrivateTmp=yes',
+                      '--property=ProtectHome=yes', '--property=ProtectSystem=strict',
+                      '--property=IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128',
+                      '--property=ReadWritePaths=' + str(STATE / 'migrations'),
+                      '--property=RuntimeMaxSec=510', '--property=UMask=0077',
+                      '--working-directory=' + str(release), '/usr/bin/node',
+                      '/usr/local/lib/onesystemserp/migrate-release.mjs',
+                      '--id', release.name, '--schema-sha', baseline['schemaSha256'],
+                      '--difference-sha', baseline['differenceSha256']], timeout=540)
+    rows = [line.removeprefix('MIGRATION_RESULT ') for line in result.splitlines() if line.startswith('MIGRATION_RESULT ')]
+    if len(rows) != 1:
+        raise DeployError('Migration verification result is missing')
+    checked = json.loads(rows[0])
+    source = (release / 'prisma/schema.prisma').read_text()
+    fingerprint = hashlib.sha256(re.sub(r'generator\s+\w+\s*\{[^}]*\}', '', source).replace('\r\n', '\n').strip().encode()).hexdigest()
+    if checked.get('differenceSha256') != baseline['differenceSha256'] or checked.get('schemaSha256') != fingerprint:
+        raise DeployError('Migration result did not match the approved schema boundary')
+    # SQL remains forward-only if app activation fails. Keep its independently
+    # verified schema snapshot so a corrective app release can retry safely.
+    atomic_text(MIGRATION_CONFIG / 'applied-schema.prisma', source, 0o640)
+    command(['chown', 'root:' + MIGRATOR, str(MIGRATION_CONFIG / 'applied-schema.prisma')])
+    baseline['schemaSha256'] = fingerprint
+    atomic_text(baseline_path, json.dumps(baseline) + '\n', 0o640)
+    command(['chown', 'root:' + USER, str(baseline_path)])
+    print('Scoped migrations verified:', checked.get('pending', 0), 'applied; other schemas have no granted write access', flush=True)
+
+
 def candidate(release, run_id):
     names = [f'onesystemserp-preview-backend-{run_id}', f'onesystemserp-preview-frontend-{run_id}']
     try:
@@ -157,12 +212,10 @@ def candidate(release, run_id):
             '--working-directory=' + str(release),
             '--property=ReadWritePaths=' + str(release / '.next/cache')]
         command(common + ['--unit=' + names[0], '--setenv=ERP_BACKEND_STANDALONE=true',
-                         '--setenv=ERP_BACKEND_PORT=14000', '/usr/bin/node', '--import', 'tsx',
-                         str(release / 'apps/aws-backend/src/index.ts')])
+                         '--setenv=ERP_BACKEND_PORT=14000'] + backend_command(release))
         command(common + ['--unit=' + names[1], '--setenv=BACKEND_INTERNAL_URL=http://127.0.0.1:14000',
-                         '--setenv=AWS_BACKEND_URL=http://127.0.0.1:14000', '/usr/bin/node',
-                         str(release / 'node_modules/next/dist/bin/next'), 'start',
-                         '--hostname', '127.0.0.1', '--port', '13000'])
+                         '--setenv=AWS_BACKEND_URL=http://127.0.0.1:14000',
+                         '--setenv=PORT=13000', '--setenv=HOSTNAME=127.0.0.1'] + frontend_command(release, 13000))
         if not healthy(13000, 14000):
             raise DeployError('Candidate health check failed; production was left running')
     finally:
@@ -171,12 +224,18 @@ def candidate(release, run_id):
 
 def unit_override(unit):
     backend = unit == UNITS[0]
-    execute = ('/usr/bin/node --import tsx ' + str(BASE / 'current/apps/aws-backend/src/index.ts')) if backend else (
-        '/usr/bin/node ' + str(BASE / 'current/node_modules/next/dist/bin/next') +
-        ' start --hostname 127.0.0.1 --port 3000')
+    if compact_release(BASE / 'current'):
+        # Next standalone changes cwd to its entrypoint directory. Execute
+        # through the stable bind-mounted pathname so persisted upload paths
+        # never include an expiring release directory.
+        entry = LEGACY / ('backend/server.mjs' if backend else 'server.js')
+        execute = '/usr/bin/node ' + str(entry)
+    else:
+        execute = ' '.join(backend_command(BASE / 'current') if backend else frontend_command(BASE / 'current', 3000))
     return '\n'.join(['[Service]', 'User=' + USER, 'Group=' + USER,
                       'WorkingDirectory=' + str(LEGACY), 'EnvironmentFile=',
                       'EnvironmentFile=' + str(CONFIG / 'production.env'), 'ExecStart=', 'ExecStart=' + execute,
+                      'Environment=PORT=3000 HOSTNAME=127.0.0.1',
                       'NoNewPrivileges=true', 'PrivateTmp=true', 'ProtectHome=tmpfs', 'ProtectSystem=strict',
                       'BindReadOnlyPaths=' + str(BASE / 'current') + ':' + str(LEGACY),
                       'ReadWritePaths=' + str(STATE) + ' ' + str(BASE / 'current/.next/cache'), ''])
@@ -278,6 +337,8 @@ def deploy(args):
                 raise DeployError('Artifact manifest does not match the requested GitHub run')
             if metadata.get('node') != command(['/usr/bin/node', '--version']):
                 raise DeployError('Node runtime differs from the build runtime')
+            if metadata.get('format') not in (1, 2):
+                raise DeployError('Unsupported release format')
             if 'provider = "mysql"' not in (release / 'prisma/schema.prisma').read_text():
                 # Whitespace-insensitive fallback for Prisma formatting.
                 if not re.search(r'provider\s*=\s*"mysql"', (release / 'prisma/schema.prisma').read_text()):
@@ -294,6 +355,9 @@ def deploy(args):
             (release / '.env').symlink_to(CONFIG / 'production.env')
             (release / 'public/uploads').symlink_to(STATE / 'public-uploads')
             (release / 'uploads').symlink_to(STATE / 'backend-uploads')
+            if config.get('automatic_migrations') is True:
+                print('Applying committed migrations with the schema-restricted account', flush=True)
+                migrate_release(release, args.run_id)
             print('Checking database compatibility without changing data', flush=True)
             try:
                 command(['systemd-run', '--quiet', '--wait', '--pipe', '--collect',

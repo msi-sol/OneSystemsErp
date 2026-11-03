@@ -101,6 +101,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
+    "@vercel/nft": "1.11.0",
+    "esbuild": "0.28.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "serwist": "^9.5.11",

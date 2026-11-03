@@ -19,28 +19,60 @@ jobs:
     timeout-minutes: 60
     env:
       PRISMA_CLI_BINARY_TARGETS: debian-openssl-1.1.x,debian-openssl-3.0.x
+    outputs:
+      app_changed: ${{ steps.classify.outputs.app_changed }}
+      tests_changed: ${{ steps.classify.outputs.tests_changed }}
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Check deployment script safety
-        run: python3 -m unittest discover -s deploy/cicd -p 'test_host_deploy.py'
+      - name: Classify app and test changes
+        id: classify
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before || 'workflow_dispatch' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          node deploy/cicd/classify-changes.mjs --base "$BEFORE_SHA" --event "$EVENT_NAME" > "$RUNNER_TEMP/change-classification.json"
+          node --input-type=module - "$RUNNER_TEMP/change-classification.json" >> "$GITHUB_OUTPUT" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const result = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+          for (const [name, value] of Object.entries({
+            app_changed: result.appChanged,
+            tests_changed: result.testsChanged,
+            fingerprint: result.fingerprint,
+          })) console.log(`${name}=${value}`);
+          console.error(`Changed app paths: ${result.appChanged}; tests changed: ${result.testsChanged}; base resolved: ${result.baseResolved}`);
+          NODE
 
       - name: Set up production Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.22.1
-          cache: npm
+          cache: ${{ (steps.classify.outputs.app_changed == 'true' || steps.classify.outputs.tests_changed == 'true') && 'npm' || '' }}
+
+      - name: Check deployment script safety
+        run: python3 -m unittest discover -s deploy/cicd -p 'test_host_deploy.py'
 
       - name: Validate migration isolation policy
         run: node --test deploy/cicd/migration-policy.test.mjs
 
+      - name: Test app-change classifier
+        run: node --test deploy/cicd/classify-changes.test.mjs
+
+      - name: Test immutable release packager
+        run: node --test deploy/cicd/package-release.test.mjs
+
       - name: Install locked dependencies
+        if: steps.classify.outputs.app_changed == 'true' || steps.classify.outputs.tests_changed == 'true'
         run: npm ci --no-audit --no-fund
 
       - name: Test production BOQ and scheduling features
+        if: steps.classify.outputs.app_changed == 'true' || steps.classify.outputs.tests_changed == 'true'
         run: |
           npx prisma generate
           npx jest --config jest.config.js --runInBand tests/unit/boq-draft-workflow.test.ts tests/unit/draft-schedule-editing.test.ts tests/work-package-summary.test.ts tests/unit/scheduling-session.test.ts
@@ -48,7 +80,17 @@ jobs:
           DATABASE_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
           DIRECT_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
 
+      - name: Restore Next.js build cache
+        if: steps.classify.outputs.app_changed == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: .next/cache
+          key: next-cache-${{ runner.os }}-node22.22.1-${{ hashFiles('package-lock.json') }}-${{ steps.classify.outputs.fingerprint }}
+          restore-keys: |
+            next-cache-${{ runner.os }}-node22.22.1-${{ hashFiles('package-lock.json') }}-
+
       - name: Build Next.js and Prisma for production
+        if: steps.classify.outputs.app_changed == 'true'
         run: npm run build -- --webpack
         env:
           DATABASE_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
@@ -60,51 +102,15 @@ jobs:
           NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
           NEXT_TELEMETRY_DISABLED: "1"
 
-      - name: Retain only production dependencies
-        run: npm prune --omit=dev --no-audit --no-fund
-
-      - name: Verify production Prisma engines are present
-        run: |
-          test -f node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node
-          test -x node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
-
       - name: Package immutable runtime release
         id: package
+        if: steps.classify.outputs.app_changed == 'true'
         shell: bash
         run: |
           set -euo pipefail
           stage="$RUNNER_TEMP/onesystemserp-release"
           mkdir -p "$stage"
-          cp -a .next "$stage/.next"
-          rm -rf "$stage/.next/cache"
-          cp -a node_modules "$stage/node_modules"
-          cp -a public "$stage/public"
-          rm -rf "$stage/public/uploads"
-          cp -a src "$stage/src"
-          mkdir -p "$stage/apps/aws-backend" "$stage/artifacts" "$stage/prisma"
-          cp -a apps/aws-backend/src "$stage/apps/aws-backend/src"
-          cp -a artifacts/scheduling "$stage/artifacts/scheduling"
-          cp prisma/schema.prisma "$stage/prisma/schema.prisma"
-          cp -a prisma/migrations "$stage/prisma/migrations"
-          cp package.json package-lock.json next.config.ts tsconfig.json "$stage/"
-          export NPM_VERSION="$(npm --version)"
-          node --input-type=module - "$stage/deployment-manifest.json" <<'NODE'
-          import { writeFileSync } from 'node:fs';
-          const output = process.argv[2];
-          const manifest = {
-            format: 1,
-            repository: 'msi-sol/OneSystemsErp',
-            repositoryId: '1439613899',
-            revision: process.env.GITHUB_SHA,
-            ref: process.env.GITHUB_REF,
-            runId: `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`,
-            node: process.version,
-            npm: process.env.NPM_VERSION,
-            runner: 'ubuntu-22.04',
-            builtAt: new Date().toISOString(),
-          };
-          writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 });
-          NODE
+          node deploy/cicd/package-release.mjs "$stage"
           archive="onesystemserp-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
           tar --hard-dereference -C "$stage" -czf "$RUNNER_TEMP/$archive" .
           python3 - "$RUNNER_TEMP/$archive" <<'PY'
@@ -127,6 +133,7 @@ jobs:
           echo "artifact_path=$RUNNER_TEMP/$archive" >> "$GITHUB_OUTPUT"
           echo "manifest_path=$RUNNER_TEMP/deployment-manifest.json" >> "$GITHUB_OUTPUT"
       - name: Transfer release to isolated deploy job
+        if: steps.classify.outputs.app_changed == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-release
@@ -141,7 +148,7 @@ jobs:
   deploy:
     name: Deploy through the fixed SSM document
     needs: build
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["refs/heads/main","refs/heads/master"]'), github.ref)
+    if: needs.build.outputs.app_changed == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["refs/heads/main","refs/heads/master"]'), github.ref)
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     permissions:
@@ -154,7 +161,7 @@ jobs:
           name: production-release
           path: ${{ runner.temp }}/production-release
 
-      - name: Skip a queued release if its branch has moved
+      - name: Skip a queued release if newer app changes are on its branch
         id: branch
         shell: bash
         env:
@@ -175,10 +182,37 @@ jobs:
           if (!response.ok) throw new Error(`GitHub branch head lookup failed: ${response.status}`);
           const branchHead = (await response.json()).commit?.sha?.toLowerCase();
           const current = process.env.GITHUB_SHA.toLowerCase();
-          const isLatest = branchHead === current;
-          appendFileSync(process.env.GITHUB_OUTPUT, `latest=${isLatest}\n`);
-          if (isLatest) console.log(`Release ${current} is still the ${branch} head.`);
-          else console.log(`Skipping stale release ${current}; ${branch} now points to ${branchHead}.`);
+          let hasNewerAppChanges = false;
+          if (branchHead !== current) {
+            const compareUrl = `https://api.github.com/repos/msi-sol/OneSystemsErp/compare/${current}...${branchHead}`;
+            const compared = await fetch(compareUrl, {
+              headers: {
+                Authorization: `Bearer ${process.env.GH_TOKEN}`,
+                Accept: 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+            });
+            if (!compared.ok) throw new Error(`GitHub app-change comparison failed: ${compared.status}`);
+            const comparison = await compared.json();
+            if (!Array.isArray(comparison.files)) throw new Error('GitHub comparison omitted changed files.');
+            if (comparison.files.length >= 300) {
+              hasNewerAppChanges = true;
+              console.log('GitHub comparison reached its 300-file response limit; skipping conservatively.');
+            } else {
+              const appPath = (raw) => {
+                const path = raw.replaceAll('\\', '/');
+                return !path.startsWith('public/uploads/') &&
+                  (/^(src|apps\/aws-backend|artifacts|public|prisma)\//.test(path) ||
+                   /^package(?:-lock)?\.json$/.test(path) ||
+                   /^(?:next\.config\.|tsconfig(?:\.|$)|postcss\.config\.|tailwind\.config\.|prisma\.config\.|auth\.|proxy\.|middleware\.|instrumentation\.|sentry\.)/.test(path));
+              };
+              hasNewerAppChanges = comparison.status !== 'ahead' || comparison.files.some((file) => appPath(file.filename));
+            }
+          }
+          const latest = !hasNewerAppChanges;
+          appendFileSync(process.env.GITHUB_OUTPUT, `latest=${latest}\n`);
+          if (latest) console.log(`No newer app changes supersede ${current}; docs-only branch updates are safe.`);
+          else console.log(`Skipping stale app release ${current}; ${branch} contains newer app changes.`);
           NODE
 
       - name: Confirm immutable GitHub OIDC subject before AWS access

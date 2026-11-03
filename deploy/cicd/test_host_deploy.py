@@ -32,6 +32,34 @@ def archive_with(extra=()):
 
 
 class ArtifactSafety(unittest.TestCase):
+    def test_compact_release_runs_fixed_node_entrypoints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release / 'deployment-manifest.json').write_text(json.dumps({'format': 2}))
+            self.assertEqual(host.backend_command(release), ['/usr/bin/node', str(release / 'backend/server.mjs')])
+            self.assertEqual(host.frontend_command(release, 3000), ['/usr/bin/node', str(release / 'server.js')])
+
+    def test_migration_result_cannot_approve_new_database_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, migration_config, release = root / 'config', root / 'migration-config', root / 'release'
+            config.mkdir(); migration_config.mkdir(); (release / 'prisma').mkdir(parents=True)
+            source = 'datasource db { provider = "mysql" }\n'
+            (release / 'prisma/schema.prisma').write_text(source)
+            original = {'schemaSha256': 'a' * 64, 'differenceSha256': 'b' * 64, 'diffStatus': 2}
+            baseline = config / 'schema-compatibility.json'
+            baseline.write_text(json.dumps(original))
+            returned = {'schemaSha256': host.hashlib.sha256(source.strip().encode()).hexdigest(), 'differenceSha256': 'c' * 64}
+            with patch.object(host, 'CONFIG', config), patch.object(host, 'MIGRATION_CONFIG', migration_config), \
+                 patch.object(host, 'command', return_value='MIGRATION_RESULT ' + json.dumps(returned)) as invoked:
+                with self.assertRaisesRegex(host.DeployError, 'approved schema boundary'):
+                    host.migrate_release(release, '1-1')
+            self.assertEqual(json.loads(baseline.read_text()), original)
+            args = invoked.call_args.args[0]
+            self.assertIn('--property=User=onesystemserp-migrator', args)
+            self.assertIn('--property=EnvironmentFile=' + str(migration_config / 'migration.env'), args)
+            self.assertNotIn('--property=EnvironmentFile=' + str(config / 'production.env'), args)
+
     def test_command_failure_keeps_details_in_a_private_host_log(self):
         with tempfile.TemporaryDirectory() as directory:
             result = types.SimpleNamespace(returncode=1, stdout='private diagnostic')

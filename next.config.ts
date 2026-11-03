@@ -8,6 +8,7 @@ const withSerwist = withSerwistInit({
 });
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   typescript: {
     // TODO: Remove this after fixing all migration-generated TypeScript errors
     ignoreBuildErrors: true,

@@ -138,20 +138,24 @@ export async function loadMigrations(rootPath) {
     migrations.push({ name: entry.name, checksum: createHash('sha256').update(bytes).digest('hex'), sql: bytes.toString('utf8') });
   }
   if (!lockFound) fail('migration_lock.toml is required');
-  migrations.sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  migrations.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   if (migrations[0]?.name !== BASELINE_NAME || migrations[0].checksum !== BASELINE_CHECKSUM) fail('immutable baseline is missing or changed');
   return migrations;
 }
 
 export function validateHistory(migrations, rows) {
   if (!Array.isArray(rows) || !rows.length || migrations[0]?.name !== BASELINE_NAME || migrations[0].checksum !== BASELINE_CHECKSUM) fail('existing baseline history is required');
-  if (rows.length > migrations.length) fail('history includes removed migrations');
-  // Caller must read in started_at, id order; silently sorting would hide a
-  // reordered history. Rolled-back and unfinished attempts require manual review.
-  rows.forEach((row, i) => {
+  if (rows.some(row => row.finished_at && row.rolled_back_at)) fail('history contains contradictory completion states');
+  // Prisma keeps attempts explicitly resolved as rolled back. They do not count
+  // as applied migrations; unresolved failures still block all automatic work.
+  const applied = rows.filter(row => !row.rolled_back_at);
+  if (applied.length > migrations.length) fail('history includes removed migrations');
+  // Caller reads in started_at,id order; do not sort away a reordered history.
+  applied.forEach((row, i) => {
     if (!row.finished_at || row.rolled_back_at || row.migration_name !== migrations[i]?.name || row.checksum !== migrations[i]?.checksum) fail('history is failed, reordered, removed or edited');
   });
-  const pending = migrations.slice(rows.length);
+  if (!applied.length) fail('existing baseline history is required');
+  const pending = migrations.slice(applied.length);
   pending.forEach(migration => validateMigrationSql(migration.sql));
   return pending;
 }

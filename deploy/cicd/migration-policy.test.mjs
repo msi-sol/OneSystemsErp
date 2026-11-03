@@ -51,6 +51,8 @@ const row = migration => ({ migration_name: migration.name, checksum: migration.
 test('history requires an applied immutable baseline and an exact successful prefix', () => {
   assert.deepEqual(validateHistory([baseline, next], [row(baseline)]), [next]);
   assert.deepEqual(validateHistory([baseline, next], [row(baseline), row(next)]), []);
+  assert.deepEqual(validateHistory([baseline, next], [row(baseline), { ...row(next), finished_at: null, rolled_back_at: new Date() }]), [next]);
+  assert.deepEqual(validateHistory([baseline, next], [row(baseline), { ...row(next), finished_at: null, rolled_back_at: new Date() }, row(next)]), []);
   for (const rows of [[], [row(next)], [{ ...row(baseline), checksum: 'x' }], [{ ...row(baseline), finished_at: null }], [{ ...row(baseline), rolled_back_at: new Date() }], [row(baseline), row(next), row(next)]]) assert.throws(() => validateHistory([baseline, next], rows));
   assert.throws(() => validateHistory([baseline, { ...next, sql: 'ALTER TABLE t DROP `_authoritativeScheduleId`' }], [row(baseline)]));
 });

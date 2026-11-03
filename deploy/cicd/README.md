@@ -1,23 +1,27 @@
 # OneSystemsErp production delivery
 
-A push to `main` or `master` builds a Linux release in GitHub Actions and deploys it to **i-05dbf6853ca3ecb33**, serving **https://erp.mavericksolutionsinc.ph**. Manual runs are also available for those two branches. A stale queued build is skipped. Deployments are serialized and an in-progress deployment is never cancelled by a newer push.
+A production application change on `main` or `master` builds a Linux release in GitHub Actions and deploys it to **i-05dbf6853ca3ecb33**, serving **https://erp.mavericksolutionsinc.ph**. Docs and deployment-configuration-only pushes run lightweight checks without rebuilding or restarting the website; test-only pushes run tests without deploying. Manual workflow runs force a build/deployment. Queued releases are skipped when newer application changes exist. Deployments are serialized and an in-progress deployment is never cancelled by a newer push.
 
 ## What happens
 
-1. Install the committed npm lockfile with Node **22.22.1**, run deployment safety tests, generate the MySQL Prisma client, and build Next.js with webpack/Serwist.
+1. Restore npm and Next.js compiler caches, install the committed lockfile with Node **22.22.1**, run the focused production tests, generate the MySQL Prisma client, and build Next.js with webpack/Serwist.
    Both the Prisma client and CLI include EC2's Debian/OpenSSL 3 engine, and packaging verifies those binaries before upload. Native-binary generator options are excluded from the database compatibility fingerprint because they do not change tables.
-2. Package the built frontend, backend source, required runtime data, and production dependencies. Production `.env` files, uploads, Git metadata, and build caches are excluded.
+2. Package Next standalone output, the bundled backend, required runtime assets and traced dependencies. Full `node_modules` and TypeScript backend source are not copied. Production `.env` files, uploads, Git metadata, build caches and nonproduction native engines are excluded. See [PACKAGING.md](PACKAGING.md).
 3. Obtain short-lived AWS credentials through GitHub OIDC. The trust policy accepts only this repository's immutable identity and `main`/`master` refs.
 4. Upload a checksum-verified release to a private, encrypted S3 bucket and invoke the fixed Systems Manager document on the one production instance. No SSH private key or production database password is stored in GitHub.
 5. The root-owned host installer verifies the target, archive paths, manifest, SHA-256, disk capacity, and Node version. It runs repository code as the dedicated, unprivileged `onesystemserp` account.
-6. A read-only MySQL query and schema comparison must pass. Candidate frontend/backend processes are checked before activating the release. Only the two ERP services are restarted. Failed activation restores and checks the previous release.
+6. If automatic migrations are enabled on the host, validate the restricted migrator account, immutable history, SQL scope, and existing database state; back up the ERP schema before pending migrations and run `prisma migrate deploy`. Read-only application checks and staged frontend/backend health checks must then pass. Only the two ERP services are restarted. Failed activation restores and checks the previous application release.
 7. Check the public HTTPS login page. Retain the current and previous host releases; expire S3 artifacts after 30 days. Before staging another release, older releases may be retired to free disk space; the running release is always preserved as the rollback target.
 
 ## Database changes
 
-**The workflow never migrates, resets, seeds, or provisions a database.** It uses the existing `onesystemserp` schema and records on `constructpro-db`. Other schemas and applications are outside its scope.
+Automatic migrations use the **existing `onesystemserp_migrator` account**, whose only database privileges are on `onesystemserp.*` on `constructpro-db`. The hook never uses the RDS admin account, provisions a database, resets a database, runs development migrations, or seeds records. Other project schemas have no granted write access. Credentials remain on EC2, separate from the web application's account and GitHub.
 
-A schema-changing commit fails the compatibility gate until an operator separately backs up, reviews, applies, and verifies a compatible migration using the existing dedicated migrator account. The initial gate records the exact existing schema comparison, including MySQL generated-column constraints used for scheduling invariants and existing relation differences; it accepts that snapshot only while both the committed schema and database difference remain identical. Review and update `/etc/onesystemserp/schema-compatibility.json` after an intentional migration. Deploy additive database changes before dependent code. Destructive changes also require a compatibility and rollback plan. Never put the RDS admin credentials or migration credentials in GitHub Actions.
+After reviewing the host configuration, an operator enables the hook with `install-auto-migrations.sh`. It verifies a zero-pending run and a private backup before setting `automatic_migrations: true` in `/etc/onesystemserp/deploy.json`. The fixed runner uses a separate non-login OS account, verified TLS, restricted grants, no active roles, and blocked EC2 metadata access. Commit new timestamped directories under `prisma/migrations/`; the deployed `20261103000000_mysql_baseline` is immutable and never replayed. Do not introduce a replacement migration history or commit credentials.
+
+Each run rejects edited/removed/failed migration history, SQL that names other schemas or changes accounts/permissions, and changes to protected scheduling invariants. The exact existing compatibility difference must remain unchanged before and after migrations; it is never automatically accepted again as new drift. A root-owned applied-schema snapshot advances only after successful database verification, allowing a corrective application release after an application rollback.
+
+Private compressed backups are created under `/var/lib/onesystemserp/migrations/backups` before pending SQL. They are not uploaded to GitHub or shared with other apps. Disk-space and backup failures stop before migration. **MySQL DDL is not automatically rolled back:** migration failure can leave partial changes, and reverting application code does not undo SQL. Failed history blocks subsequent automatic attempts until an operator repairs/resolves it. Prefer backward-compatible additive migrations and review destructive changes before merging.
 
 ## Host layout
 
@@ -28,6 +32,9 @@ A schema-changing commit fails the compatibility gate until an operator separate
 | Shared frontend uploads | `/var/lib/onesystemserp/public-uploads` |
 | Shared backend uploads | `/var/lib/onesystemserp/backend-uploads` |
 | Production environment | `/etc/onesystemserp/production.env` (root / ERP group only) |
+| Isolated migrator environment | `/etc/onesystemserp-migrations/migration.env` |
+| Verified database schema snapshot | `/etc/onesystemserp-migrations/applied-schema.prisma` |
+| Private migration backups/results | `/var/lib/onesystemserp/migrations/` |
 | Last successful deployment metadata | `/var/lib/onesystemserp/deployment.json` |
 | Original unit/environment backup | `/var/lib/onesystemserp/backups/<UTC timestamp>` |
 | Original deployment retained for recovery | `/home/ubuntu/onesystemserp` |
@@ -42,10 +49,10 @@ Inside the two ERP services, the selected release is mounted read-only at the or
 
 ## Operations
 
-See the **Production release** workflow under GitHub Actions for build/deployment results. `DEPLOYMENT_SUCCEEDED <commit>` identifies a completed host deployment. A failed build or candidate check leaves the running ERP release unchanged. A schema-check failure does not apply any SQL changes.
+See the **Production release** workflow under GitHub Actions for build/deployment results. `DEPLOYMENT_SUCCEEDED <commit>` identifies a completed host deployment. Preflight/history/scope failures stop before SQL. Migration or post-migration verification failures stop application activation and preserve private diagnostics/recovery backups; SQL already applied is not undone. A failed build or staged application check does not replace the running application release.
 
 For an application regression that passes health checks, revert the offending commit on the production branch and push the revert. It goes through the same build and deployment checks. For urgent host recovery, an administrator can inspect `deployment.json`, switch `current` to its verified previous release, and restart only the two ERP units. The original service definitions and environment are retained in the private backup for recovery from the first transition.
 
 The installer and AWS access policy are **not** automatically updated from repository code during ordinary releases. Changes to these privileged components require separate operator review. Production application code can read its own environment; anyone allowed to push to `main` or `master` must therefore be trusted to deploy production code. Configure repository branch protections according to your team's review policy.
 
-The initial setup used a separate checkout so existing uncommitted work on the original local `main` was preserved. Remote `main` was aligned with the MySQL release already running in production before enabling CI/CD; reconcile existing local work with that remote history before pushing it.
+Production changes were integrated in an isolated checkout. The original local `main` was then fast-forwarded to GitHub `main`; excluded local demo/configuration changes remain in the named backup stash and the private local snapshot.
