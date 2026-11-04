@@ -23,6 +23,10 @@ const LONG_TEXT_COLUMNS: Array<[string, string, 'NULL' | 'NOT NULL']> = [
   ['AiKnowledgeChunk', 'allowedRoles', 'NULL'],
   ['AiKnowledgeChunk', 'vectorEmbedding', 'NOT NULL'],
   ['AiRagEmbedding', 'embeddingVector', 'NOT NULL'],
+  ['SupplierQuotation', 'deliveryPeriod', 'NULL'],
+  ['SupplierQuotation', 'paymentTerms', 'NULL'],
+  ['SupplierQuotation', 'aiRationale', 'NULL'],
+  ['PaymentException', 'unionBankResponseMessage', 'NULL'],
 ];
 
 function fieldLine(model: string, field: string): string {
