@@ -2482,8 +2482,8 @@ model AuditLog {
   moduleName    String
   transactionId String?
   actionType    String
-  oldValue      String?
-  newValue      String?
+  oldValue      String? @db.LongText
+  newValue      String? @db.LongText
   remarks       String? @db.LongText
   ipAddress     String?
   deviceInfo    String?
@@ -2629,7 +2629,7 @@ model NotebookReferenceVersion {
   filePath          String
   extractedText     String? @db.LongText
   aiSummary         String? @db.LongText
-  aiKeywords        String?
+  aiKeywords        String? @db.LongText
   fileHash          String?
   status            String                    @default("ACTIVE")
   indexedStatus     String                    @default("PENDING")
@@ -3933,8 +3933,8 @@ model AiKnowledgeSource {
   mimeType             String?
   uploadedById         String
   visibilityScope      String    @default("GLOBAL") // GLOBAL, PROJECT, ROLE, PRIVATE
-  allowedRoles         String? // JSON string array
-  allowedProjects      String? // JSON string array
+  allowedRoles         String? @db.LongText // JSON string array
+  allowedProjects      String? @db.LongText // JSON string array
   confidentialityLevel String    @default("PUBLIC_INTERNAL") // PUBLIC_INTERNAL, RESTRICTED, CONFIDENTIAL
   status               String    @default("ACTIVE") // ACTIVE, ARCHIVED, DRAFT
   indexedAt            DateTime?
@@ -3949,14 +3949,14 @@ model AiKnowledgeChunk {
   id                   String   @id @default(cuid())
   sourceId             String
   chunkIndex           Int
-  chunkText            String
+  chunkText            String @db.LongText
   chunkSummary         String? @db.LongText
   moduleName           String?
   projectId            String?
-  allowedRoles         String? // Inherited from source
+  allowedRoles         String? @db.LongText // Inherited from source
   visibilityScope      String   @default("GLOBAL")
   confidentialityLevel String   @default("PUBLIC_INTERNAL")
-  vectorEmbedding      String // JSON array of floats for manual cosine similarity
+  vectorEmbedding      String @db.LongText // JSON array of floats for manual cosine similarity
   tokenCount           Int      @default(0)
   createdAt            DateTime @default(now())
 
@@ -4110,7 +4110,7 @@ model AiRagEmbedding {
   sourceRecordId           String?
   sourceTitle              String
   sourceTextChunk          String @db.LongText
-  embeddingVector          String // JSON array of floats representing the embedding
+  embeddingVector          String @db.LongText // JSON array of floats representing the embedding
   metadataJson             String? @db.LongText // JSON
   accessLevel              String   @default("PUBLIC") // PUBLIC, RESTRICTED
   projectId                String?

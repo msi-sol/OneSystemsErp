@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `AuditLog` MODIFY `oldValue` LONGTEXT NULL, MODIFY `newValue` LONGTEXT NULL;
