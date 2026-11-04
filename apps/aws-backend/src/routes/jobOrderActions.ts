@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import * as express from 'express'; // Required for express.json()
 import { PrismaClient } from '@prisma/client';
+import { withJobOrderReadFields } from '../lib/jobOrderWrites';
 const router = Router();
 
 // Middleware to parse JSON body for this router specifically.
@@ -20,7 +21,7 @@ router.post('/getJobOrders', async (req, res) => {
       },
       orderBy: { createdAt: 'desc' }
     });
-    res.json({ success: true, data: jobOrders });
+    res.json({ success: true, data: jobOrders.map(withJobOrderReadFields) });
   } catch (error: any) {
     console.error("Error fetching job orders:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -39,7 +40,7 @@ router.post('/getJobOrderById', async (req, res) => {
         subcontractBillings: true
       }
     });
-    res.json({ success: true, data: jobOrder });
+    res.json({ success: true, data: jobOrder && withJobOrderReadFields(jobOrder) });
   } catch (error: any) {
     console.error("Error fetching job order by ID:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -61,31 +62,6 @@ router.post('/getConsolidatedBoqItemsByProjectId', async (req, res) => {
     res.json({ success: true, items: mapped });
   } catch (error: any) {
     console.error("Error fetching consolidated BOQ items:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-router.post('/createJobOrder', async (req, res) => {
-  try {
-    const data = req.body;
-    const jobOrder = await prisma.jobOrder.create({ data });
-    res.json({ success: true, data: jobOrder });
-  } catch (error: any) {
-    console.error("Error creating job order:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-router.post('/updateJobOrder', async (req, res) => {
-  try {
-    const { id, data } = req.body;
-    const jobOrder = await prisma.jobOrder.update({
-      where: { id },
-      data,
-    });
-    res.json({ success: true, data: jobOrder });
-  } catch (error: any) {
-    console.error("Error updating job order:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

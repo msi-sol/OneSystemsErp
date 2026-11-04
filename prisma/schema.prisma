@@ -1838,6 +1838,7 @@ model JobOrder {
   packageId                  String?
   description                String @db.LongText
   boqReferenceId             String? @db.LongText
+  jobOrderType               JobOrderType?
   location                   String @db.LongText
   contractAmount             Float
   paymentBasis               PaymentTerms
@@ -3412,6 +3413,13 @@ enum MaterialResponsibility {
   COMPANY_SUPPLIED
   CONTRACTOR_SUPPLIED
   MIXED
+}
+
+enum JobOrderType {
+  LABOR_ONLY
+  LABOR_AND_MATERIALS
+  EQUIPMENT_RENTAL
+  RECTIFICATION_WORKS
 }
 
 enum JobOrderStatus {

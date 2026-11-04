@@ -3,17 +3,9 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { requirePermission } from '../lib/permissions';
+import { assertBoqItemsNotInJobOrder, createJobOrderFromRequest, jobOrderErrorStatus, updateJobOrderFromRequest } from '../lib/jobOrderWrites';
 
 const router = Router();
-function parseBoqReferenceIds(value: string | null): string[] {
-  if (!value) return [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (Array.isArray(parsed) && parsed.every((item: unknown) => typeof item === 'string')) return parsed;
-  } catch { /* Older records may contain one plain BOQ ID. */ }
-  return [value];
-}
-
 function getPbacContext(req: any) {
   return {
     userId: req.headers['x-user-session'] as string | undefined,
@@ -30,93 +22,18 @@ router.post('/job-orders', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
     await requirePermission(userId!, 'SUBCONTRACTING', 'canCreate', simulatedRole);
-    const data = req.body;
-
-    if (!data.jobNumber) data.jobNumber = 'JO-' + Date.now();
-    const existing = await prisma.jobOrder.findUnique({ where: { jobNumber: data.jobNumber } });
-    if (existing) throw new Error(`A Job Order with number "${data.jobNumber}" already exists.`);
-    
-    if (data.startDate) data.startDate = new Date(data.startDate);
-    if (data.completionDate) data.completionDate = new Date(data.completionDate);
-    
-    if (data.contractAmount > 250000) {
-      data.isThresholdExceeded = true;
-      data.thresholdWarning = "This Job Order amount exceeds the standard Job Order limit. Consider converting this to a full subcontract.";
-    }
-
-    const boqReferenceIds = data.boqReferenceIds || [];
-    if (!Array.isArray(boqReferenceIds) || !boqReferenceIds.every((id: unknown) => typeof id === 'string')) return res.status(400).json({ success: false, error: 'BOQ references must be a list of IDs.' });
-    if (boqReferenceIds.length > 0) {
-      const pureBoqIds = boqReferenceIds.filter((id: string) => id !== '1_LOT');
-      if (pureBoqIds.length > 0) {
-        const existingSubcontract = await prisma.subcontractorBOQItem.findFirst({
-          where: { awardedBoqItemId: { in: pureBoqIds } }
-        });
-        if (existingSubcontract) throw new Error(`Conflict Error: One or more selected BOQ items are already assigned to an active Subcontract Package.`);
-      }
-    }
-
-    const existingJOs = await prisma.jobOrder.findMany({
-      where: { projectId: data.projectId, subcontractorId: data.subcontractorId }
-    });
-
-    const isDuplicate = existingJOs.some(jo => {
-      const existingIds = parseBoqReferenceIds(jo.boqReferenceId);
-      if (existingIds.length === boqReferenceIds.length && existingIds.length > 0) {
-        const sortedExisting = [...existingIds].sort();
-        const sortedIncoming = [...boqReferenceIds].sort();
-        return sortedExisting.every((val, index) => val === sortedIncoming[index]);
-      }
-      return false;
-    });
-
-    if (isDuplicate) throw new Error("Duplicate Error: A Job Order for this Subcontractor with the exact same BOQ scope already exists.");
-
-    const { durationDays, boqReferenceIds: _, jobOrderType, ...prismaData } = data;
-    prismaData.boqReferenceId = JSON.stringify(boqReferenceIds);
-
-    const result = await prisma.jobOrder.create({ data: prismaData });
+    const result = await createJobOrderFromRequest(req.body);
     res.json({ success: true, data: result });
-  } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
+  } catch (error: any) { res.status(jobOrderErrorStatus(error)).json({ success: false, error: error.message }); }
 });
 
 router.put('/job-orders/:id', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
     await requirePermission(userId!, 'SUBCONTRACTING', 'canEdit', simulatedRole);
-    const { id } = req.params;
-    const data = req.body;
-
-    if (data.startDate) data.startDate = new Date(data.startDate);
-    if (data.completionDate) data.completionDate = new Date(data.completionDate);
-    
-    if (data.contractAmount > 250000) {
-      data.isThresholdExceeded = true;
-      data.thresholdWarning = "This Job Order amount exceeds the standard Job Order limit. Consider converting this to a full subcontract.";
-    } else {
-      data.isThresholdExceeded = false;
-      data.thresholdWarning = null;
-    }
-
-    const existing = await prisma.jobOrder.findUnique({
-      where: { id },
-      include: { subcontractAccomplishments: true, subcontractBillings: true }
-    });
-    
-    if (existing) {
-      const isLocked = existing.subcontractAccomplishments.some((a: any) => a.status === 'APPROVED') || 
-                       existing.subcontractBillings.some((b: any) => b.status === 'APPROVED_FOR_PAYMENT' || b.paymentStatus === 'PAID');
-      if (isLocked) throw new Error("Job Order is locked and cannot be edited because accomplishments or payments have been processed.");
-    }
-
-    const boqReferenceId = data.boqReferenceIds || [];
-    if (!Array.isArray(boqReferenceId) || !boqReferenceId.every((id: unknown) => typeof id === 'string')) return res.status(400).json({ success: false, error: 'BOQ references must be a list of IDs.' });
-    const { durationDays, project, subcontractor, subcontractAccomplishments, subcontractBillings, boqReferenceIds: _, jobOrderType, ...prismaData } = data;
-    prismaData.boqReferenceId = JSON.stringify(boqReferenceId);
-
-    const result = await prisma.jobOrder.update({ where: { id }, data: prismaData });
+    const result = await updateJobOrderFromRequest(req.params.id, req.body);
     res.json({ success: true, data: result });
-  } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
+  } catch (error: any) { res.status(jobOrderErrorStatus(error)).json({ success: false, error: error.message }); }
 });
 
 router.delete('/job-orders/:id', async (req, res) => {
@@ -252,11 +169,7 @@ router.post('/packages/full', async (req, res) => {
     let { packageData, boqItems, powData } = req.body;
 
     if (boqItems && boqItems.length > 0) {
-      const awardedBoqIds = boqItems.map((item: any) => item.id);
-      const conflictingJO = await prisma.jobOrder.findFirst({
-        where: { boqReferenceId: { in: awardedBoqIds } }
-      });
-      if (conflictingJO) throw new Error(`Conflict Error: BOQ item is already assigned to active Job Order (${conflictingJO.jobNumber}).`);
+      await assertBoqItemsNotInJobOrder(packageData.projectId, boqItems.map((item: any) => item.id));
     }
 
     const result = await prisma.$transaction(async (tx) => {
