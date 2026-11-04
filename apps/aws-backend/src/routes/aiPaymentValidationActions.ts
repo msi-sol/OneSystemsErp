@@ -36,7 +36,7 @@ router.post('/validatePaymentBatchWithAI', async (req, res) => {
       accountNumber: batch.paymentMethodType === 'GCASH' ? r.worker.gcashNumber : r.worker.bankAccountNumber,
       verificationStatus: batch.paymentMethodType === 'GCASH' ? r.worker.gcashVerificationStatus : r.worker.bankVerificationStatus,
       profileStatus: r.worker.paymentProfileStatus,
-      status: (r.worker as any).status
+      employmentStatus: r.worker.employmentStatus
     }));
 
     let anomalies: string[] = [];
@@ -45,8 +45,8 @@ router.post('/validatePaymentBatchWithAI', async (req, res) => {
     // Simulated AI Rules Engine
     payload.forEach(row => {
       // 1. Inactive Worker
-      if (row.status !== 'ACTIVE') {
-        anomalies.push(`Worker ${row.workerName} is INACTIVE but included in the batch.`);
+      if (row.employmentStatus !== 'ACTIVE') {
+        anomalies.push(`Worker ${row.workerName} is ${row.employmentStatus} but included in the batch.`);
         riskLevel = 'BLOCKED';
       }
       
