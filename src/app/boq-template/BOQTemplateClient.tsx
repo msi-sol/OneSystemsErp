@@ -1,12 +1,37 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { generateBOQTemplate } from "@/app/actions/boqTemplateService";
 import { uploadAndParseBOQ, checkBoqUploadStatus, approveBOQUpload } from "@/app/actions/boqUploadParser";
+import { validateBOQUploadFile } from "@/lib/boq/upload-input";
 import { Download, Upload, FileSpreadsheet, CheckCircle, AlertTriangle, XCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import styles from "./boqTemplate.module.css";
+
+type BOQUploadError = {
+  row: number | string;
+  field: string;
+  issue: string;
+  suggested: string;
+};
+
+type BOQUploadReport = {
+  fileUrl?: string;
+  fileName: string;
+  validRowsCount: number;
+  errorRowsCount: number;
+  warningRowsCount: number;
+  grandTotal: number;
+  errors: BOQUploadError[];
+};
+
+type BOQUploadResult = {
+  success: true;
+  uploadId: string;
+  status: string;
+  report: BOQUploadReport;
+};
 
 export default function BOQTemplateClient({ projects }: { projects: { id: string, name: string }[] }) {
   const [projectId, setProjectId] = useState<string>("");
@@ -15,7 +40,17 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
   const [isUploading, setIsUploading] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   
-  const [uploadResult, setUploadResult] = useState<any>(null);
+  const [uploadResult, setUploadResult] = useState<BOQUploadResult | null>(null);
+  const mountedRef = useRef(true);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    };
+  }, []);
 
   const handleDownload = async () => {
     setIsDownloading(true);
@@ -40,8 +75,8 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
       link.click();
       document.body.removeChild(link);
       toast.success("Template downloaded successfully");
-    } catch (err: any) {
-      toast.error(err.message || "An error occurred");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setIsDownloading(false);
     }
@@ -51,8 +86,10 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith(".xlsx")) {
-      toast.error("Only .xlsx files are supported");
+    const validationError = validateBOQUploadFile({ name: file.name, size: file.size });
+    if (validationError) {
+      toast.error(validationError);
+      e.target.value = "";
       return;
     }
 
@@ -60,58 +97,80 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
     setUploadResult(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
+      const formData = new FormData();
+      formData.set("projectId", projectId);
+      formData.set("file", file);
+      const res = await uploadAndParseBOQ(formData);
+      if (!mountedRef.current) return;
+
+      if (!res.success || !res.jobId) {
+        toast.error(res.error || "Upload could not be started. Please try again.");
+        setIsUploading(false);
+        e.target.value = "";
+        return;
+      }
+
+      const jobId = res.jobId;
+      const pollStartedAt = Date.now();
+      const poll = async () => {
+        if (!mountedRef.current) return;
+
+        if (Date.now() - pollStartedAt >= 5 * 60 * 1000) {
+          toast.error("BOQ processing is taking longer than expected. Check the upload status or try again later.");
+          setIsUploading(false);
+          e.target.value = "";
+          return;
+        }
+
         try {
-          const base64 = (event.target?.result as string).split(",")[1];
-          const res = await uploadAndParseBOQ(projectId, base64, file.name);
-          
-          if (!res.success) {
-             toast.error(res.error || "Upload failed");
-             setIsUploading(false);
-             e.target.value = "";
-             return;
+          const statusRes = await checkBoqUploadStatus(jobId);
+          if (!mountedRef.current) return;
+
+          if (!statusRes.success) {
+            toast.error(statusRes.error || "Could not check upload status. Please try again.");
+            setIsUploading(false);
+            e.target.value = "";
+            return;
           }
 
-          // Polling logic for background job
-          const jobId = res.jobId;
-          const pollInterval = setInterval(async () => {
-             const statusRes = await checkBoqUploadStatus(jobId);
-             
-             if (statusRes.success && statusRes.status === 'COMPLETED') {
-                clearInterval(pollInterval);
-                const finalResult = statusRes.result;
-                setUploadResult(finalResult);
-                
-                if (finalResult.status === "VALIDATION_FAILED") {
-                  toast.error("Validation failed. Please review the errors.");
-                } else {
-                  toast.success("File uploaded and validated successfully!");
-                }
-                
-                setTimeout(() => {
-                  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-                }, 100);
-                setIsUploading(false);
-                e.target.value = "";
-             } else if (statusRes.success && statusRes.status === 'FAILED') {
-                clearInterval(pollInterval);
-                toast.error(statusRes.error || "Processing failed");
-                setIsUploading(false);
-                e.target.value = "";
-             }
-             // If PENDING or PROCESSING, just continue polling
-          }, 3000); // Check every 3 seconds
+          if (statusRes.status === "COMPLETED") {
+            const finalResult = statusRes.result;
+            if (!finalResult?.success) {
+              toast.error(finalResult?.error || "BOQ processing failed. Please check the file and try again.");
+            } else {
+              setUploadResult(finalResult);
+            }
+            if (finalResult?.status === "VALIDATION_FAILED") {
+              toast.error("Validation failed. Please review the errors.");
+            } else if (finalResult?.success) {
+              toast.success("File uploaded and validated successfully!");
+            }
+            setTimeout(() => {
+              if (mountedRef.current) window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+            }, 100);
+            setIsUploading(false);
+            e.target.value = "";
+            return;
+          }
 
-        } catch (innerErr: any) {
-          toast.error(innerErr.message || "An unexpected error occurred during upload");
+          if (statusRes.status === "FAILED") {
+            toast.error(statusRes.error || "BOQ processing failed. Please check the file and try again.");
+            setIsUploading(false);
+            e.target.value = "";
+            return;
+          }
+
+          pollTimerRef.current = setTimeout(poll, 3000);
+        } catch {
+          if (!mountedRef.current) return;
+          toast.error("Could not check upload status. Please try again.");
           setIsUploading(false);
           e.target.value = "";
         }
       };
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      toast.error(err.message || "An error occurred");
+      pollTimerRef.current = setTimeout(poll, 3000);
+    } catch {
+      toast.error("Upload could not be completed. Please try again.");
       setIsUploading(false);
       e.target.value = "";
     }
@@ -128,8 +187,8 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
       } else {
         toast.error("Failed to approve");
       }
-    } catch (err: any) {
-      toast.error(err.message || "An error occurred");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setIsApproving(false);
     }
@@ -272,7 +331,7 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
                     </tr>
                   </thead>
                   <tbody>
-                    {uploadResult.report.errors.map((err: any, idx: number) => (
+                    {uploadResult.report.errors.map((err, idx) => (
                       <tr key={idx}>
                         <td>{err.row}</td>
                         <td className={styles.highlight}>{err.field}</td>

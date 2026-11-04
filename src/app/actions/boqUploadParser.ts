@@ -1,6 +1,7 @@
 'use server';
 import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
+import { validateBOQUploadFile } from '@/lib/boq/upload-input';
 
 import { cookies } from 'next/headers';
 
@@ -29,16 +30,26 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   return res.json();
 }
 
-export async function uploadAndParseBOQ(projectId: string | null | undefined, fileBufferBase64: string, fileName: string) {
+export async function uploadAndParseBOQ(formData: FormData) {
   try {
+    const file = formData.get('file');
+    const projectId = formData.get('projectId');
+    if (!file || typeof file === 'string') return { success: false, error: 'Please select an .xlsx file to upload.' };
+    if (projectId !== null && typeof projectId !== 'string') return { success: false, error: 'Invalid target project.' };
+    const validationError = validateBOQUploadFile(file);
+    if (validationError) return { success: false, error: validationError };
+
+    // Keep the large file out of React's positional string-argument decoder.
+    // The private backend still receives its existing base64 JSON contract.
+    const fileBufferBase64 = Buffer.from(await file.arrayBuffer()).toString('base64');
     const result = await fetchWithAuth('/api/jobs/boq-upload', {
       method: 'POST',
-      body: JSON.stringify({ projectId, fileBufferBase64, fileName })
+      body: JSON.stringify({ projectId: projectId || null, fileBufferBase64, fileName: file.name })
     });
     return result;
-  } catch (error: any) {
+  } catch (error) {
     console.error("BOQ Upload dispatch error:", error);
-    return { success: false, error: error.message || "Failed to dispatch BOQ upload" };
+    return { success: false, error: 'Unable to start the BOQ upload. Please try again.' };
   }
 }
 
@@ -46,9 +57,9 @@ export async function checkBoqUploadStatus(jobId: string) {
   try {
     const result = await fetchWithAuth(`/api/jobs/${jobId}`);
     return result;
-  } catch (error: any) {
+  } catch (error) {
     console.error("BOQ Job status error:", error);
-    return { success: false, error: error.message };
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to check BOQ upload status.' };
   }
 }
 
@@ -59,7 +70,7 @@ export async function approveBOQUpload(uploadId: string) {
       body: JSON.stringify({ uploadId })
     });
     return result;
-  } catch (error: any) {
-     return { success: false, error: error.message };
+  } catch (error) {
+     return { success: false, error: error instanceof Error ? error.message : 'Unable to approve BOQ upload.' };
   }
 }
