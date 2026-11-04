@@ -23,6 +23,22 @@ Each run rejects edited/removed/failed migration history, SQL that names other s
 
 Private compressed backups are created under `/var/lib/onesystemserp/migrations/backups` before pending SQL. They are not uploaded to GitHub or shared with other apps. Disk-space and backup failures stop before migration. **MySQL DDL is not automatically rolled back:** migration failure can leave partial changes, and reverting application code does not undo SQL. Failed history blocks subsequent automatic attempts until an operator repairs/resolves it. Prefer backward-compatible additive migrations and review destructive changes before merging.
 
+## Master reset backups
+
+The master reset (Settings page, `POST /api/systemResetActions/resetTransactionData` and `scripts/reset-transactions.ts`) dumps the database with `mysqldump` before it deletes anything. If the dump cannot be completed, the reset stops and deletes nothing. **Until `RESET_BACKUP_DIR` is set, every reset is refused.**
+
+To enable it on the host:
+
+```bash
+sudo install -d -m 0700 -o onesystemserp -g onesystemserp /var/lib/onesystemserp/reset-backups
+echo 'RESET_BACKUP_DIR=/var/lib/onesystemserp/reset-backups' | sudo tee -a /etc/onesystemserp/production.env
+sudo systemctl restart onesystemserp.service onesystemserp-backend.service
+```
+
+The dump runs from the application service with the `DATABASE_URL` login, so that login needs `SELECT` on `onesystemserp.*`. It uses `/usr/bin/mysqldump` unless `RESET_BACKUP_MYSQLDUMP` names another path. A dump must finish within 100 seconds, and the disk must have room for twice the database size plus 512 MB.
+
+Each file is a private `pre-reset-<timestamp>.sql.gz` holding every table, including user records and password hashes. Files are not rotated or uploaded, and the reset's audit log entry names the file. Delete them once they are no longer needed. To restore into an empty database, run `gzip -dc <file> | mysql <database>`. The dump does not include uploaded files, and the backend route clears those during a reset.
+
 ## Host layout
 
 | Purpose | Location |

@@ -84,6 +84,13 @@ jobs:
           DATABASE_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
           DIRECT_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
 
+      - name: Test transaction reset backup
+        if: steps.classify.outputs.app_changed == 'true' || steps.classify.outputs.tests_changed == 'true'
+        run: npx jest --config jest.config.js --runInBand tests/unit/reset-backup.test.ts tests/unit/reset-entry-points.test.ts
+        env:
+          DATABASE_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
+          DIRECT_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
+
       - name: Restore Next.js build cache
         if: steps.classify.outputs.app_changed == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0

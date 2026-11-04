@@ -3,7 +3,9 @@ import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
+import path from 'path';
 import { prisma } from '@/lib/prisma';
+import { createResetBackup } from '@/lib/reset-backup';
 
 export async function resetTransactionData(confirmationText: string) {
   try {
@@ -18,6 +20,9 @@ export async function resetTransactionData(confirmationText: string) {
       throw new Error('Unauthorized Action: Only SUPER_ADMIN can perform a master reset.');
     }
     
+    // Back up the database first. A failure here stops the reset.
+    const backupPath = await createResetBackup(prisma);
+
     // ============================================================================
     // PHASE 1: Delete all transactional data in correct FK dependency order
     // Uses a single batch $transaction (array mode) for atomicity.
@@ -253,7 +258,7 @@ export async function resetTransactionData(confirmationText: string) {
         await tx.auditLog.create({
           data: {
             user: { connect: { id: currentUser ? currentUser.id : "system" } },
-            remarks: 'MASTER RESET: All transactional and master data wiped. Only Users, System Roles, Access Matrix, and Knowledge Base preserved.',
+            remarks: 'MASTER RESET: All transactional and master data wiped. Only Users, System Roles, Access Matrix, and Knowledge Base preserved. Backup: ' + path.basename(backupPath),
             moduleName: 'SYSTEM_SETTINGS',
             actionType: 'DELETE'
           }

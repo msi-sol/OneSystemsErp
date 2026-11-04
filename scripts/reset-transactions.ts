@@ -1,29 +1,15 @@
 import { PrismaClient } from '@prisma/client';
-import fs from 'fs';
 import path from 'path';
+import { createResetBackup } from '../src/lib/reset-backup';
 
 const prisma = new PrismaClient();
 
-async function main() {
+export async function main() {
   console.log('Starting Safe Zero Data / Fresh Simulation Reset...');
 
   try {
-    // 1. Create a Backup First
-    const dbPath = path.join(process.cwd(), 'prisma', 'dev.db');
-    const backupDir = path.join(process.cwd(), 'prisma', 'backups');
-    
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-    }
-
-    if (fs.existsSync(dbPath)) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = path.join(backupDir, `dev_backup_${timestamp}.db`);
-      fs.copyFileSync(dbPath, backupPath);
-      console.log(`Database backup created at ${backupPath}`);
-    } else {
-      console.log('No dev.db found. Assuming fresh setup.');
-    }
+    // 1. Back up the database first. A failure here stops the reset.
+    const backupPath = await createResetBackup(prisma);
 
     // 2. Perform the deletions
     console.log('Deleting transaction data in safe dependency order...');
@@ -130,7 +116,7 @@ async function main() {
       // Finally, log this massive reset action into AuditLog
       const systemAdmin = await tx.user.findFirst({ where: { role: 'SUPER_ADMIN' } });
       const auditLogData: any = {
-        remarks: 'ZERO_DATA_RESET: Transactional data has been successfully cleared via CLI script.',
+        remarks: 'ZERO_DATA_RESET: Transactional data has been successfully cleared via CLI script. Backup: ' + path.basename(backupPath),
         moduleName: 'SYSTEM_SETTINGS',
         actionType: 'DELETE',
         ipAddress: 'CLI'
@@ -153,4 +139,4 @@ async function main() {
   }
 }
 
-main();
+if (require.main === module) main();

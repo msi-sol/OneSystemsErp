@@ -4,13 +4,13 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
+import { createResetBackup, ResetBackupError } from '../../../../src/lib/reset-backup';
 
 const router = Router();
 
-// NOTE: In a real AWS environment, process.cwd() for file paths (dbPath, backupDir, uploadsDir)
+// NOTE: In a real AWS environment, process.cwd() for file paths (uploadsDir)
 // would need to be adjusted to point to persistent storage like S3, EFS, or a designated
-// writable directory in a Lambda environment, as local file system might not be persistent
-// or suitable for database files.
+// writable directory in a Lambda environment, as local file system might not be persistent.
 
 router.post('/resetTransactionData', async (req, res) => {
   try {
@@ -25,21 +25,8 @@ router.post('/resetTransactionData', async (req, res) => {
     if (!currentUser || currentUser.role !== 'SUPER_ADMIN') return res.status(403).json({ success: false, error: 'Only SUPER_ADMIN can perform a master reset.' });
     const currentUserId = currentUser.id;
 
-    // 1. Create a Backup First
-    // IMPORTANT: Adjust paths for AWS environment. This assumes local file system.
-    const dbPath = path.join(process.cwd(), 'prisma', 'dev.db');
-    const backupDir = path.join(process.cwd(), 'prisma', 'backups');
-    
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-    }
-
-    if (fs.existsSync(dbPath)) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = path.join(backupDir, `dev_backup_${timestamp}.db`);
-      fs.copyFileSync(dbPath, backupPath);
-      console.log(`Database backup created at ${backupPath}`);
-    }
+    // 1. Back up the database first. A failure here stops the reset.
+    const backupPath = await createResetBackup(prisma);
 
     // ============================================================================
     // STRICTLY PROTECTED TABLES (NEVER deleted by master reset):
@@ -303,7 +290,7 @@ router.post('/resetTransactionData', async (req, res) => {
       await tx.auditLog.create({
         data: {
           user: { connect: { id: currentUserId } },
-          remarks: 'MASTER RESET: All transactional and master data wiped. Only Users, System Roles, Access Matrix, and Knowledge Base preserved.',
+          remarks: 'MASTER RESET: All transactional and master data wiped. Only Users, System Roles, Access Matrix, and Knowledge Base preserved. Backup: ' + path.basename(backupPath),
           moduleName: 'SYSTEM_SETTINGS',
           actionType: 'DELETE'
         }
@@ -336,6 +323,7 @@ router.post('/resetTransactionData', async (req, res) => {
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Failed to reset transaction data:', error);
+    if (error instanceof ResetBackupError) return res.status(503).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: error.message });
   }
 });

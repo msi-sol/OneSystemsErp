@@ -142,7 +142,7 @@ export default function SettingsPage() {
             </div>
 
             <p style={{ color: '#f97316', fontSize: '0.85rem', fontWeight: '600', marginBottom: '1rem', background: 'rgba(249, 115, 22, 0.1)', padding: '0.5rem 0.75rem', borderRadius: '4px', border: '1px solid rgba(249, 115, 22, 0.2)' }}>
-              ⚡ A database backup will be automatically created before the reset.
+              ⚡ A database backup is created before the reset. If the backup fails, nothing is deleted.
             </p>
             
             <button 
