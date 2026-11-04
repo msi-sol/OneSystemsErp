@@ -365,7 +365,7 @@ def deploy(args):
                              '--working-directory=' + str(release), '/usr/bin/node',
                              '/usr/local/lib/onesystemserp/runtime-check.mjs'], timeout=180)
             except DeployError:
-                raise DeployError('Read-only database compatibility check failed. Review the host dbcheck journal; no migration was run.')
+                raise DeployError('Read-only database compatibility check failed. Review the host dbcheck journal and migration result; production was not activated.')
             print('Checking staged frontend and backend', flush=True)
             candidate(release, args.run_id)
             print('Activating ERP release', flush=True)
