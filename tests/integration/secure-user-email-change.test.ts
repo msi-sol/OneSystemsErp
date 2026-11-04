@@ -25,7 +25,6 @@ async function runTests() {
       email: 'test_current@example.com',
       role: 'SUPER_ADMIN',
       status: 'ACTIVE',
-      password: 'test',
       sessionVersion: 1
     }
   });
@@ -35,8 +34,7 @@ async function runTests() {
       name: 'Duplicate',
       email: 'test_duplicate@example.com',
       role: 'USER',
-      status: 'ACTIVE',
-      password: 'test'
+      status: 'ACTIVE'
     }
   });
 
@@ -45,8 +43,7 @@ async function runTests() {
       name: 'Inactive',
       email: 'test_inactive@example.com',
       role: 'SUPER_ADMIN',
-      status: 'INACTIVE',
-      password: 'test'
+      status: 'INACTIVE'
     }
   });
 

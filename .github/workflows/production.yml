@@ -61,6 +61,9 @@ jobs:
       - name: Validate migration isolation policy
         run: node --test deploy/cicd/migration-policy.test.mjs
 
+      - name: Reject literal passwords in tracked code
+        run: node --test deploy/cicd/literal-password-policy.test.mjs
+
       - name: Test app-change classifier
         run: node --test deploy/cicd/classify-changes.test.mjs
 

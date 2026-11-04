@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 async function executeAction(page: any, email: string, password: string, actionName: string, payload: any) {
   // Login via API
@@ -72,7 +73,7 @@ async function run() {
   await executeAction(page, 'director@onesystemserp.com', passwords['director@onesystemserp.com'], 'approveVarianceFinal', { projectId });
 
   // 4. Super Admin: Lock BOQ
-  await executeAction(page, 'j.burns2372@gmail.com', 'Junixsys_001', 'lockBOQ', { projectId });
+  await executeAction(page, 'j.burns2372@gmail.com', process.env.LOCAL_TEST_PASSWORD!, 'lockBOQ', { projectId });
 
   await browser.close();
   console.log('GATE7D_RECONSTRUCTION_WORKFLOW_COMPLETE');

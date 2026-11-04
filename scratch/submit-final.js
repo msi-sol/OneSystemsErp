@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
@@ -30,7 +31,7 @@ const fs = require('fs');
   if (page.url().includes('/login')) {
     console.log("Logging in...");
     await page.fill('input[name="email"]', 'engineer@onesystemserp.com');
-    await page.fill('input[name="password"]', 'Eng$V4R6#SecureGate8D!');
+    await page.fill('input[name="password"]', process.env.LOCAL_TEST_PASSWORD);
     await page.click('button[type="submit"]');
     await page.waitForTimeout(10000); // Give plenty of time for login redirect
   }

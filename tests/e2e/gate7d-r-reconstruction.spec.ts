@@ -1,16 +1,18 @@
 import { test, expect } from '@playwright/test';
+test.skip(!process.env.LOCAL_TEST_PASSWORD, 'Set LOCAL_TEST_PASSWORD to the password of the local test account.');
+test.skip(!process.env.LOCAL_TEST_NEW_PASSWORD, 'Set LOCAL_TEST_NEW_PASSWORD to the password to rotate the local test account to.');
 
 test.describe('Gate 7D-R Reconstruction Workflow', () => {
   const projectId = 'cmrirhhw30000ic0406v47smb';
   const superAdminEmail = 'J.BURNS2372@GMAIL.COM';
-  const superAdminPass = 'Junixsys_001';
+  const superAdminPass = process.env.LOCAL_TEST_PASSWORD!;
 
   // These users should be rotated. To keep the test simple and idempotent,
   // we use their known initial seeded password, but in a real test we could use a rotation API.
   // The instructions require us to rotate them, so we will do that using the reset API.
   const managerEmail = 'manager@onesystemserp.com';
   const directorEmail = 'director@onesystemserp.com';
-  const newPass = 'rotated_pass_001';
+  const newPass = process.env.LOCAL_TEST_NEW_PASSWORD!;
 
   test.describe.configure({ mode: 'serial' });
 

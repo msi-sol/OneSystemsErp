@@ -1,4 +1,5 @@
 const { chromium } = require('playwright');
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 async function testActor(browser, email, currentPassword, newPassword, checks) {
   console.log(`\n--- Testing ${email} ---`);
@@ -77,7 +78,7 @@ async function testActor(browser, email, currentPassword, newPassword, checks) {
   await testActor(
     browser,
     'engineer@onesystemserp.com',
-    'P@ssword12345!',
+    process.env.LOCAL_TEST_PASSWORD,
     'EngineerSecure123!',
     [
       { name: 'Project Access', url: '/projects', expectStatus: [200] },
@@ -89,7 +90,7 @@ async function testActor(browser, email, currentPassword, newPassword, checks) {
   await testActor(
     browser,
     'manager@onesystemserp.com',
-    'P@ssword12345!',
+    process.env.LOCAL_TEST_PASSWORD,
     'ManagerSecure123!',
     [
       { name: 'Project Creation', url: '/projects/new', expectStatus: [200] },
@@ -101,7 +102,7 @@ async function testActor(browser, email, currentPassword, newPassword, checks) {
   await testActor(
     browser,
     'director@onesystemserp.com',
-    'P@ssword12345!',
+    process.env.LOCAL_TEST_PASSWORD,
     'DirectorSecure123!',
     [
       { name: 'BOQ Validation', url: '/director-audit', expectStatus: [200] },

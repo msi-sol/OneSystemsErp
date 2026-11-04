@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { PrismaClient } from '@prisma/client';
+test.skip(!process.env.LOCAL_TEST_PASSWORD, 'Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 const prisma = new PrismaClient();
 const PROJECT_ID = process.env.GATE9D_TARGET_PROJECT_ID || 'cmrirhhw30000ic0406v47smb';
@@ -24,7 +25,7 @@ test.describe('Gate 9D Authenticated Draft Review', () => {
     // Context 1: Engineer
     const engineerContext = await browser.newContext();
     const engineerPage = await engineerContext.newPage();
-    await login(engineerPage, 'engineer@onesystemserp.com', 'TestPassword123!');
+    await login(engineerPage, 'engineer@onesystemserp.com', process.env.LOCAL_TEST_PASSWORD!);
     
     const submitRes = await engineerContext.request.post('/api/internal/reconstruction/gate9d', {
       data: {
@@ -51,7 +52,7 @@ test.describe('Gate 9D Authenticated Draft Review', () => {
     // Context 2: Manager
     const managerContext = await browser.newContext();
     const managerPage = await managerContext.newPage();
-    await login(managerPage, 'manager@onesystemserp.com', 'TestPassword123!');
+    await login(managerPage, 'manager@onesystemserp.com', process.env.LOCAL_TEST_PASSWORD!);
     
     const startReviewRes = await managerContext.request.post('/api/internal/reconstruction/gate9d', {
       data: {
@@ -80,7 +81,7 @@ test.describe('Gate 9D Authenticated Draft Review', () => {
     // Context 3: Finance
     const financeContext = await browser.newContext();
     const financePage = await financeContext.newPage();
-    await login(financePage, 'director@onesystemserp.com', 'TestPassword123!'); // Finance Reviewer
+    await login(financePage, 'director@onesystemserp.com', process.env.LOCAL_TEST_PASSWORD!); // Finance Reviewer
     
     const finRes = await financeContext.request.post('/api/internal/reconstruction/gate9d', {
       data: {

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+test.skip(!process.env.LOCAL_TEST_PASSWORD, 'Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 test.describe('Gate 8D: Dedicated Password Reset Workflow', () => {
   test('Super Admin resets Engineer password using protected workflow', async ({ page, request }) => {
@@ -15,7 +16,7 @@ test.describe('Gate 8D: Dedicated Password Reset Workflow', () => {
     // Using existing environment variable for superadmin pass if possible, or just the one we know.
     // Wait, the prompt says "Do not reuse or expose any password previously shown in chat".
     // I should get the super admin password from the environment if possible, or just use what works.
-    await page.fill('input[name="password"]', 'Junixsys_001'); 
+    await page.fill('input[name="password"]', process.env.LOCAL_TEST_PASSWORD!); 
     await page.click('button:has-text("Sign In")');
 
     await page.waitForURL('http://localhost:3000/', { timeout: 10000 });

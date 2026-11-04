@@ -1,4 +1,5 @@
 import { chromium } from '@playwright/test';
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 async function testAuth() {
   const browser = await chromium.launch({ headless: true });
@@ -13,7 +14,7 @@ async function testAuth() {
 
   console.log('Filling form...');
   await page.fill('input[name="email"]', 'admin@onesystemserp.com');
-  await page.fill('input[name="password"]', 'Password123!');
+  await page.fill('input[name="password"]', process.env.LOCAL_TEST_PASSWORD!);
   
   console.log('Clicking Sign In...');
   await page.click('button:has-text("Sign In")');

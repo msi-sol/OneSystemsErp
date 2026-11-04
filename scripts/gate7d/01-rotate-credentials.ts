@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 const prisma = new PrismaClient();
 
@@ -22,7 +23,7 @@ async function run() {
     form: {
       csrfToken,
       email: 'j.burns2372@gmail.com',
-      password: 'Junixsys_001',
+      password: process.env.LOCAL_TEST_PASSWORD!,
       json: 'true'
     }
   });

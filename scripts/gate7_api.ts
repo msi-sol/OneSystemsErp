@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 const prisma = new PrismaClient();
 
@@ -60,7 +61,7 @@ async function run() {
 
   // Authenticate as Manager
   console.log("Authenticating as manager@onesystemserp.com...");
-  const managerCookie = await getAuthCookie('manager@onesystemserp.com', 'P@ssword12345!');
+  const managerCookie = await getAuthCookie('manager@onesystemserp.com', process.env.LOCAL_TEST_PASSWORD!);
   
   // Call import API
   console.log("Importing Reconstructed Project and BOQ...");
@@ -84,7 +85,7 @@ async function run() {
 
   // Authenticate as Director
   console.log("Authenticating as director@onesystemserp.com...");
-  const directorCookie = await getAuthCookie('director@onesystemserp.com', 'P@ssword12345!');
+  const directorCookie = await getAuthCookie('director@onesystemserp.com', process.env.LOCAL_TEST_PASSWORD!);
 
   // Call lock API
   console.log("Locking BOQ...");

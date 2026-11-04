@@ -4,7 +4,7 @@ async function main() {
   const users = await prisma.user.findMany({ where: { email: 'project_manager@demo.com' } });
   console.log('USERS:', users.length);
   
-  // also check if "admin001" breaks anything?
+  // also check if a shared default password breaks anything?
   
   // Test updating the user explicitly
   if (users.length > 0) {
