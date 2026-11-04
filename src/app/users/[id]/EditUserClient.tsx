@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { updateUser } from '@/app/actions/user';
+import { resetUserPassword, updateUser } from '@/app/actions/user';
 import Link from 'next/link';
 
 interface UserData {
@@ -23,12 +23,15 @@ export default function EditUserClient({ user, roles = [] }: { user: UserData, r
   const [formData, setFormData] = useState({
     name: user.name,
     email: user.email,
-    role: matchedRole,
-    password: ''
+    role: matchedRole
   });
   const [customRole, setCustomRole] = useState(matchedRole === 'OTHER' ? user.role : '');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,6 +59,28 @@ export default function EditUserClient({ user, roles = [] }: { user: UserData, r
       setError(err.message || 'An error occurred while updating the user.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsResetting(true);
+    setResetError(null);
+    setResetDone(false);
+
+    try {
+      const res = await resetUserPassword(user.id, newPassword);
+      if (res && !res.success) {
+        setResetError(res.error || 'Failed to reset password.');
+        return;
+      }
+      setNewPassword('');
+      setResetDone(true);
+      router.refresh();
+    } catch (err: any) {
+      setResetError(err.message || 'An error occurred while resetting the password.');
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -129,17 +154,6 @@ export default function EditUserClient({ user, roles = [] }: { user: UserData, r
               />
             )}
           </div>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ color: 'var(--accent-color)', fontSize: '0.9rem', fontWeight: '500' }}>Override Password (Optional)</label>
-            <input 
-              type="text" 
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder="Leave blank to keep current password"
-              style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--accent-glow)', backgroundColor: 'rgba(0,240,255,0.05)', color: 'var(--text-primary)' }}
-            />
-          </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '15px', marginTop: '20px', borderTop: '1px solid var(--glass-border)', paddingTop: '20px' }}>
@@ -165,6 +179,43 @@ export default function EditUserClient({ user, roles = [] }: { user: UserData, r
             }}
           >
             {isLoading ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+
+      <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '30px', borderTop: '1px solid var(--glass-border)', paddingTop: '20px' }}>
+        {resetError && (
+          <div style={{ padding: '12px', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid #ef4444', borderRadius: '6px' }}>
+            {resetError}
+          </div>
+        )}
+        {resetDone && (
+          <div style={{ padding: '12px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid #10b981', borderRadius: '6px' }}>
+            Password reset. Give the temporary password to the user directly. They must change it at their next sign-in.
+          </div>
+        )}
+        <label htmlFor="newPassword" style={{ color: 'var(--accent-color)', fontSize: '0.9rem', fontWeight: '500' }}>Reset Password</label>
+        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+          Sets a temporary password of at least 12 characters. All of this user&apos;s sessions end, and they must choose a new password at their next sign-in.
+        </p>
+        <div style={{ display: 'flex', gap: '15px' }}>
+          <input
+            id="newPassword"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            required
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            placeholder="Temporary password"
+            style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid var(--accent-glow)', backgroundColor: 'rgba(0,240,255,0.05)', color: 'var(--text-primary)' }}
+          />
+          <button
+            type="submit"
+            disabled={isResetting}
+            style={{ padding: '10px 25px', borderRadius: '6px', backgroundColor: 'transparent', color: 'var(--accent-color)', border: '1px solid var(--accent-color)', fontWeight: 'bold', cursor: isResetting ? 'not-allowed' : 'pointer', opacity: isResetting ? 0.7 : 1 }}
+          >
+            {isResetting ? 'Resetting...' : 'Reset Password'}
           </button>
         </div>
       </form>

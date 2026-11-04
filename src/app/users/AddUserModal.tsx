@@ -11,6 +11,7 @@ export default function AddUserModal({ onClose, roles = [] }: { onClose: () => v
   const [role, setRole] = useState('PROJECT_ENGINEER');
   const [customRole, setCustomRole] = useState('');
   const [error, setError] = useState('');
+  const [temporaryPassword, setTemporaryPassword] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,7 +29,7 @@ export default function AddUserModal({ onClose, roles = [] }: { onClose: () => v
           setError(res.error || 'Failed to create user.');
           return;
         }
-        onClose();
+        setTemporaryPassword(res.temporaryPassword || '');
       } catch (err: any) {
         setError(err.message || 'An error occurred.');
       }
@@ -45,6 +46,20 @@ export default function AddUserModal({ onClose, roles = [] }: { onClose: () => v
         backgroundColor: 'var(--bg-secondary)', padding: '30px', borderRadius: '16px',
         border: '1px solid var(--glass-border)', width: '100%', maxWidth: '400px'
       }}>
+        {temporaryPassword ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <h2 style={{ margin: 0, color: 'var(--text-primary)' }}>User Created</h2>
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              Give this temporary password to {email} directly. It is shown only once, and they must change it at first sign-in.
+            </p>
+            <code style={{ padding: '12px', borderRadius: '8px', border: '1px solid var(--accent-glow)', backgroundColor: 'var(--bg-dark)', color: 'var(--text-primary)', wordBreak: 'break-all', userSelect: 'all' }}>
+              {temporaryPassword}
+            </code>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={onClose} className={styles.primaryButton}>Done</button>
+            </div>
+          </div>
+        ) : (<>
         <h2 style={{ margin: '0 0 20px 0', color: 'var(--text-primary)' }}>Add New User</h2>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           <div>
@@ -97,6 +112,7 @@ export default function AddUserModal({ onClose, roles = [] }: { onClose: () => v
             </button>
           </div>
         </form>
+        </>)}
       </div>
     </div>
   );

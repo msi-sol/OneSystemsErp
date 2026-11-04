@@ -2,6 +2,12 @@ import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import type { AuthenticatedRequest } from '../middleware/auth';
+import {
+  createUserWithTemporaryPassword,
+  resetPasswordForUser,
+  validateNewPassword,
+} from '../../../../src/lib/user-credentials';
 const router = Router();
 
 // Internal helper to avoid code duplication and internal HTTP calls
@@ -163,8 +169,9 @@ router.post('/createUser', async (req, res) => {
       return res.status(400).json({ success: false, error: 'All fields are required.' });
     }
 
+    const email = data.email.trim();
     const existingUser = await prisma.user.findUnique({
-      where: { email: data.email }
+      where: { email }
     });
 
     if (existingUser) {
@@ -176,18 +183,20 @@ router.post('/createUser', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to resolve system role.' });
     }
 
-    await prisma.user.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        role: finalRole.name!,
-        password: 'admin001',
-      }
-    });
+    const actor = (req as AuthenticatedRequest).user; // Middleware restricts this router to SUPER_ADMIN
+    const temporaryPassword = await prisma.$transaction((tx) => createUserWithTemporaryPassword(
+      tx,
+      { id: actor.id, role: actor.role },
+      { name: data.name, email, role: finalRole.name! },
+    ));
 
-    res.json({ success: true });
+    res.json({ success: true, temporaryPassword });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message || 'An unexpected database error occurred.' });
+    // Prisma messages can echo the attempted values, which here include the password hash.
+    if (err?.code === 'P2002') {
+      return res.status(409).json({ success: false, error: 'A user with this email already exists.' });
+    }
+    res.status(500).json({ success: false, error: 'An unexpected database error occurred.' });
   }
 });
 
@@ -196,6 +205,10 @@ router.post('/updateUser', async (req, res) => {
     const { id, data } = req.body;
     if (!id || !data || !data.name || !data.email || !data.role) {
       return res.status(400).json({ success: false, error: 'User ID, Name, Email, and Role are required.' });
+    }
+
+    if (data.password) {
+      return res.status(400).json({ success: false, error: 'Use resetUserPassword to change a password.' });
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -217,10 +230,6 @@ router.post('/updateUser', async (req, res) => {
       role: finalRole.name!,
     };
 
-    if (data.password && data.password.trim() !== '') {
-      updateData.password = data.password;
-    }
-
     await prisma.user.update({
       where: { id },
       data: updateData
@@ -229,6 +238,37 @@ router.post('/updateUser', async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'An unexpected database error occurred.' });
+  }
+});
+
+router.post('/resetUserPassword', async (req, res) => {
+  try {
+    const { targetUserId, newPasswordRaw } = req.body;
+    if (!targetUserId || !newPasswordRaw) {
+      return res.status(400).json({ success: false, error: 'Target user ID and new password are required.' });
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!targetUser) {
+      return res.status(404).json({ success: false, error: 'Target user not found.' });
+    }
+
+    const policyResult = validateNewPassword(newPasswordRaw, targetUser.email || '');
+    if (!policyResult.valid) {
+      return res.status(400).json({ success: false, error: policyResult.error });
+    }
+
+    const actor = (req as AuthenticatedRequest).user; // Middleware restricts this router to SUPER_ADMIN
+    await prisma.$transaction((tx) => resetPasswordForUser(
+      tx,
+      { id: actor.id, role: actor.role },
+      { id: targetUser.id, email: targetUser.email },
+      newPasswordRaw,
+    ));
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'An error occurred during password reset.' });
   }
 });
 

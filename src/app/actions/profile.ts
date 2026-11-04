@@ -44,16 +44,10 @@ export async function updateProfile(formData: FormData) {
   // Extract formData into a plain object to send as JSON
   const name = formData.get('name') as string;
   const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
-  const confirmPassword = formData.get('confirmPassword') as string;
 
   // Client-side validation for immediate feedback
   if (!name || !email) {
     return { success: false, error: 'Name and email are required.' };
-  }
-
-  if (password && password !== confirmPassword) {
-    return { success: false, error: 'Passwords do not match.' };
   }
 
   try {
@@ -61,8 +55,6 @@ export async function updateProfile(formData: FormData) {
       userId, // Pass userId to the backend
       name,
       email,
-      password,
-      confirmPassword,
     };
 
     const result = await fetchWithAuth('/api/profile/updateProfile', {
