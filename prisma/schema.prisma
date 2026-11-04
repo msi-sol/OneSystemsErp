@@ -2177,7 +2177,7 @@ model PaymentException {
   recipientBankName         String?
   transferRail              String?
   unionBankResponseCode     String?
-  unionBankResponseMessage  String?
+  unionBankResponseMessage  String? @db.LongText
   worker                    Worker    @relation(fields: [workerId], references: [id], onDelete: Cascade)
 }
 
@@ -2825,10 +2825,10 @@ model SupplierQuotation {
   status         String          @default("RECEIVED")
   totalAmount    Float           @default(0)
   isRecommended  Boolean         @default(false)
-  deliveryPeriod String?
-  paymentTerms   String?
+  deliveryPeriod String? @db.LongText
+  paymentTerms   String? @db.LongText
   aiRank         Int?
-  aiRationale    String?
+  aiRationale    String? @db.LongText
   canvassFormId  String
   supplierId     String
   createdAt      DateTime        @default(now())
