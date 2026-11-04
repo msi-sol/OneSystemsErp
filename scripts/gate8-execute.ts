@@ -11,7 +11,7 @@ const ARTIFACT_DIR = path.resolve('artifacts/scheduling');
 const DOC_DIR = path.resolve('docs/scheduling');
 const pgDumpPath = '"C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe"';
 const pgRestorePath = '"C:\\Program Files\\PostgreSQL\\18\\bin\\pg_restore.exe"';
-const DIRECT_URL = "postgresql://neondb_owner:npg_brmzcXfH81MG@ep-rapid-base-apec3cyh.c-7.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+const DIRECT_URL = process.env.DIRECT_URL || (() => { throw new Error('DIRECT_URL is not set'); })();
 
 const PROJECT_ID = 'cmrlx3xcg00swvceoxntp02vz';
 const BOQ_VERSION_ID = 'cmrlx3yh500t1vceomq83o215';
