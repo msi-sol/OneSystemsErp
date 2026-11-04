@@ -313,14 +313,14 @@ describe('backend routes', () => {
   test('updateProfile refuses a password and leaves the account unchanged', async () => {
     const password = randomPassword();
     const response = await post('/api/profile/updateProfile', {
-      userId: 'user-1', name: 'Name', email: 'user@example.com', password, confirmPassword: password,
+      name: 'Name', email: 'user@example.com', password, confirmPassword: password,
     });
     expect(response.status).toBe(400);
     expect(mockDb.user.update).not.toHaveBeenCalled();
   });
 
   test('updateProfile without a password changes only name and email', async () => {
-    const response = await post('/api/profile/updateProfile', { userId: 'user-1', name: 'Name', email: 'user@example.com' });
+    const response = await post('/api/profile/updateProfile', { name: 'Name', email: 'user@example.com' });
     expect(response.status).toBe(200);
     expect(mockDb.user.update.mock.calls[0][0].data).toEqual({ name: 'Name', email: 'user@example.com' });
   });

@@ -58,6 +58,9 @@ async function _internalCreateSystemRole(roleName: string) {
 
 export async function getSystemRoles() {
   try {
+    // Server actions are reachable without the page, and this one writes to Role.
+    if (!(await _requireUserAdmin())) return [];
+
     const roles = await prisma.systemRole.findMany({
       orderBy: { name: 'asc' }
     });
@@ -92,7 +95,16 @@ export async function getSystemRoles() {
 
 export async function deleteSystemRole(roleName: string) {
   try {
+    const actor = await _requireUserAdmin();
+    if (!actor) {
+      return { success: false, error: 'Unauthorized: You do not have permission to manage roles.' };
+    }
+
     if (!roleName) return { success: false, error: 'roleName is required.' };
+
+    if (!canManageAccountRole(actor.role, roleName)) {
+      return { success: false, error: 'Unauthorized: Only a Super Admin can change administrator roles.' };
+    }
 
     await prisma.systemRole.delete({
       where: { name: roleName }
@@ -119,10 +131,19 @@ export async function deleteSystemRole(roleName: string) {
 
 export async function updateSystemRole(oldName: string, newName: string) {
   try {
+    const actor = await _requireUserAdmin();
+    if (!actor) {
+      return { success: false, error: 'Unauthorized: You do not have permission to manage roles.' };
+    }
+
     if (!oldName || !newName) return { success: false, error: 'oldName and newName are required.' };
 
     const normalizedNew = newName.toUpperCase().trim();
     if (!normalizedNew) return { success: false, error: "Role name cannot be empty" };
+
+    if (!canManageAccountRole(actor.role, oldName) || !canManageAccountRole(actor.role, normalizedNew)) {
+      return { success: false, error: 'Unauthorized: Only a Super Admin can change administrator roles.' };
+    }
 
     const existing = await prisma.systemRole.findUnique({
       where: { name: normalizedNew }
@@ -158,7 +179,16 @@ export async function updateSystemRole(oldName: string, newName: string) {
 
 export async function createSystemRole(roleName: string) {
   try {
+    const actor = await _requireUserAdmin();
+    if (!actor) {
+      return { success: false, error: 'Unauthorized: You do not have permission to manage roles.' };
+    }
+
     if (!roleName) return { success: false, error: 'roleName is required.' };
+
+    if (!canManageAccountRole(actor.role, roleName)) {
+      return { success: false, error: 'Unauthorized: Only a Super Admin can create administrator roles.' };
+    }
 
     const result = await _internalCreateSystemRole(roleName);
     revalidatePath('/users');
@@ -264,8 +294,22 @@ export async function updateUser(id: string, data: { name: string, email: string
 
 export async function deleteUser(id: string) {
   try {
+    const actor = await _requireUserAdmin();
+    if (!actor) {
+      return { success: false, error: 'Unauthorized: You do not have permission to delete users.' };
+    }
+
     if (!id) return { success: false, error: 'User ID is required' };
-    
+
+    const targetUser = await prisma.user.findUnique({ where: { id }, select: { role: true } });
+    if (!targetUser) {
+      return { success: false, error: 'Target user not found.' };
+    }
+
+    if (!canManageAccountRole(actor.role, targetUser.role)) {
+      return { success: false, error: 'Unauthorized: Only a Super Admin can delete administrator accounts.' };
+    }
+
     await prisma.user.delete({
       where: { id }
     });

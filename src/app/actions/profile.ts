@@ -52,7 +52,6 @@ export async function updateProfile(formData: FormData) {
 
   try {
     const body = {
-      userId, // Pass userId to the backend
       name,
       email,
     };

@@ -22,7 +22,7 @@ function requiresSuperAdmin(path: string, method: string) {
   if (/^\/api\/(systemresetactions|simulationclearactions|migration)(\/|$)/.test(normalized)) return true;
   // This endpoint returns complete user records, including password fields.
   if (/^\/api\/user-roles(\/|$)/.test(normalized)) return true;
-  if (/^\/api\/user(\/|$)/.test(normalized)) return normalized !== '/api/user/getsystemroles';
+  if (/^\/api\/user(\/|$)/.test(normalized)) return true;
   return /^\/api\/permissions(\/|$)/.test(normalized) && !['GET', 'HEAD', 'OPTIONS'].includes(method);
 }
 

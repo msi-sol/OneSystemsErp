@@ -293,7 +293,6 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>System Users</h3>
             <p className={styles.statValue}>{stats.totalUsers ?? 0}</p>
-            <Link href="/users" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>User Directory ➔</Link>
           </div>
         </div>
       )}

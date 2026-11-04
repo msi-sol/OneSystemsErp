@@ -6,6 +6,7 @@ import OfflineSyncProvider from "@/components/layout/OfflineSyncProvider";
 import DatePickerEnforcer from "@/components/layout/DatePickerEnforcer";
 import { cookies } from 'next/headers';
 import { getUserPermissions } from '@/lib/permissions';
+import { canAdministerUsers } from '@/lib/user-credentials';
 import MainContentWrapper from '@/components/layout/MainContentWrapper';
 import Topbar from '@/components/layout/Topbar';
 import { Toaster } from 'sonner';
@@ -68,6 +69,11 @@ export default async function RootLayout({
   } else {
     // Failsafe empty permissions
     permissions = {};
+  }
+
+  // The Users pages go by the signed-in role, so a module grant alone must not show their link.
+  if (!__session || !canAdministerUsers(__session.role)) {
+    permissions = { ...permissions, SYSTEM_ROLES: { ...permissions.SYSTEM_ROLES, canView: false } };
   }
 
   return (

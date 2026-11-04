@@ -7,10 +7,13 @@ import AddUserButton from './AddUserButton';
 import ManageRolesButton from './ManageRolesButton';
 import DeleteUserButton from './DeleteUserButton';
 import { getSystemRoles } from '@/app/actions/user';
+import { requireUserAdminPage } from './require-user-admin-page';
 
 export const dynamic = 'force-dynamic';
 
 export default async function UsersPage() {
+  await requireUserAdminPage();
+
   const users = await prisma.user.findMany({
     orderBy: { createdAt: 'desc' },
   });

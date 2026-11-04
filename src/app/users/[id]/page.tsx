@@ -4,10 +4,13 @@ import { getSystemRoles } from '@/app/actions/user';
 import EditUserClient from './EditUserClient';
 import UserTabs from './UserTabs';
 import ProjectAccessClient from './ProjectAccessClient';
+import { requireUserAdminPage } from '../require-user-admin-page';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EditUserPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireUserAdminPage();
+
   // Await params to avoid Next.js 15 sync access warnings
   const { id } = await params;
 

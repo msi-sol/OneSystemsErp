@@ -2,11 +2,14 @@ import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import type { AuthenticatedRequest } from '../middleware/auth';
 const router = Router();
 
-router.post('/updateProfile', async (req: Request, res: Response) => {
+router.post('/updateProfile', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { userId, name, email, password } = req.body;
+    // A profile can only ever be the signed-in user's own.
+    const userId = req.user?.id;
+    const { name, email, password } = req.body;
 
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized. User ID is missing.' });
