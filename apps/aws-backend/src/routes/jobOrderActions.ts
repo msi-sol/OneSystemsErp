@@ -66,35 +66,4 @@ router.post('/getConsolidatedBoqItemsByProjectId', async (req, res) => {
   }
 });
 
-router.post('/deleteJobOrder', async (req, res) => {
-  try {
-    const { id } = req.body;
-    await prisma.jobOrder.delete({
-      where: { id },
-    });
-    res.json({ success: true });
-  } catch (error: any) {
-    console.error("Error deleting job order:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-router.post('/updateJobOrderStatus', async (req, res) => {
-  try {
-    const { id, newStatus } = req.body;
-    const jobOrder = await prisma.jobOrder.update({
-      where: { id },
-      data: { status: newStatus },
-    });
-    res.json({ success: true, data: jobOrder });
-  } catch (error: any) {
-    console.error("Error updating job order status:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-router.post('/unlockJobOrder', (_req, res) => {
-  return res.status(409).json({ success: false, error: 'WORKFLOW_UNAVAILABLE: This legacy job-order unlock action has no supported lock field. Use the authorized job-order workflow instead. No changes were saved.' });
-});
-
 export default router;

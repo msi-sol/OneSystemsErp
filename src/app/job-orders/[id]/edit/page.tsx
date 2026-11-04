@@ -51,8 +51,17 @@ export default async function EditJobOrderPage({ params }: { params: Promise<{ i
             This Job Order can no longer be edited because progress accomplishments or payment billings have already been processed against it.
           </p>
         </div>
+      ) : initialData.status === 'APPROVED' || initialData.status === 'ISSUED' ? (
+        <div style={{ padding: '24px', backgroundColor: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '8px', color: '#92400e', marginBottom: '20px' }}>
+          <h3 style={{ margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🔒</span> Job Order Locked
+          </h3>
+          <p style={{ margin: 0 }}>
+            This Job Order is approved. Unlock it from the Job Order page before editing.
+          </p>
+        </div>
       ) : (
-        <JobOrderFormClient 
+        <JobOrderFormClient
           projects={projects} 
           subcontractors={subcontractors} 
           initialData={initialData} 

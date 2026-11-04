@@ -2,6 +2,8 @@
 import React from 'react';
 import { getJobOrderById } from '@/app/actions/jobOrderActions';
 import { prisma } from '@/lib/prisma';
+import { verifySession } from '@/lib/dal/auth';
+import { hasPermission } from '@/lib/permissions';
 import Link from 'next/link';
 import JobOrderWorkflowControls from './JobOrderWorkflowControls';
 
@@ -22,6 +24,8 @@ export default async function ViewJobOrderPage({ params }: { params: Promise<{ i
   }
 
   const jo = joRes.data;
+  const session = await verifySession();
+  const canUnlock = session?.id ? await hasPermission(session.id, 'SUBCONTRACTING', 'canUnlockWithAuthorization') : false;
 
   // Fetch actual BOQ item details for the IDs
   let boqItems: any[] = [];
@@ -68,8 +72,8 @@ export default async function ViewJobOrderPage({ params }: { params: Promise<{ i
       <JobOrderWorkflowControls 
         jobOrderId={jo.id} 
         currentStatus={jo.status} 
-        isLocked={jo.status === 'APPROVED'} 
-        canUnlock={true} // Hardcoded for simulation per user request 
+        isLocked={jo.status === 'APPROVED' || jo.status === 'ISSUED'} 
+        canUnlock={canUnlock} 
       />
 
       <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>

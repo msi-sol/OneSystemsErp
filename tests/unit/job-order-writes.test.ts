@@ -15,7 +15,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Prisma } from '@prisma/client';
 import { backendFetch } from '@/lib/backend-fetch';
-import { createJobOrder, updateJobOrder } from '@/app/actions/jobOrderActions';
+import { createJobOrder, deleteJobOrder, unlockJobOrder, updateJobOrder, updateJobOrderStatus } from '@/app/actions/jobOrderActions';
 import subcontracting from '../../apps/aws-backend/src/routes/subcontracting';
 import jobOrderActions from '../../apps/aws-backend/src/routes/jobOrderActions';
 import { requirePermission } from '../../apps/aws-backend/src/lib/permissions';
@@ -24,6 +24,7 @@ import { parseBoqReferenceIds } from '../../apps/aws-backend/src/lib/jobOrderWri
 
 const db = prisma as any;
 const jobOrderColumns = new Set(Prisma.dmmf.datamodel.models.find((model) => model.name === 'JobOrder')!.fields.filter((field) => field.kind !== 'object').map((field) => field.name));
+const rolePermissionColumns = new Set(Prisma.dmmf.datamodel.models.find((model) => model.name === 'RolePermission')!.fields.map((field) => field.name));
 
 // What JobOrderFormClient posts, plus the fields requireAuth adds to every body.
 const formPayload = {
@@ -244,10 +245,55 @@ describe('job order reads', () => {
 });
 
 describe('write route ownership', () => {
-  test.each(['createJobOrder', 'updateJobOrder'])('the unguarded /%s route is gone', async (name) => {
+  test.each(['createJobOrder', 'updateJobOrder', 'updateJobOrderStatus', 'deleteJobOrder', 'unlockJobOrder'])('the unguarded /%s route is gone', async (name) => {
     expect((await send('POST', `/api/jobOrderActions/${name}`, { id: 'jo-1', data: {} })).status).toBe(404);
     expect(db.jobOrder.create).not.toHaveBeenCalled();
     expect(db.jobOrder.update).not.toHaveBeenCalled();
+  });
+
+  test('the workflow actions call the permission-checked routes', async () => {
+    (backendFetch as jest.Mock).mockImplementation(async () => new Response(JSON.stringify({ success: true })));
+    await updateJobOrderStatus('jo/1', 'FOR_REVIEW');
+    expect(backendFetch).toHaveBeenLastCalledWith('/api/subcontracting/job-orders/jo%2F1/status', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ newStatus: 'FOR_REVIEW' }) }));
+    await unlockJobOrder('jo-1');
+    expect(backendFetch).toHaveBeenLastCalledWith('/api/subcontracting/job-orders/jo-1/unlock', expect.objectContaining({ method: 'PUT' }));
+    await deleteJobOrder('jo-1');
+    expect(backendFetch).toHaveBeenLastCalledWith('/api/subcontracting/job-orders/jo-1', expect.objectContaining({ method: 'DELETE' }));
+  });
+
+  test.each([
+    ['DRAFT', 'canReturnForCorrection'],
+    ['FOR_REVIEW', 'canSubmit'],
+    ['FOR_FINANCIAL_REVIEW', 'canReview'],
+    ['FOR_TECHNICAL_REVIEW', 'canReview'],
+    ['APPROVED', 'canApprove'],
+    ['ISSUED', 'canApprove'],
+    ['CANCELLED', 'canCancel'],
+  ])('moving to %s needs %s, which the role matrix can grant', async (status, action) => {
+    expect(rolePermissionColumns.has(action)).toBe(true);
+    (requirePermission as jest.Mock).mockRejectedValue(new Error('Unauthorized Action'));
+    const res = await send('PUT', '/api/subcontracting/job-orders/jo-1/status', { newStatus: status });
+    expect(res.status).toBe(403);
+    expect(requirePermission).toHaveBeenCalledWith('user-1', 'SUBCONTRACTING', action, undefined);
+  });
+
+  test.each([
+    ['PUT', '/api/subcontracting/job-orders/jo-1', 'canEditDraft'],
+    ['DELETE', '/api/subcontracting/job-orders/jo-1', 'canDeleteDraft'],
+    ['PUT', '/api/subcontracting/job-orders/jo-1/unlock', 'canUnlockWithAuthorization'],
+  ])('%s %s needs %s, which the role matrix can grant', async (method, path, action) => {
+    expect(rolePermissionColumns.has(action)).toBe(true);
+    (requirePermission as jest.Mock).mockRejectedValue(new Error('Unauthorized Action'));
+    expect((await send(method, path, {})).status).toBe(403);
+    expect(requirePermission).toHaveBeenCalledWith('user-1', 'SUBCONTRACTING', action, undefined);
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  test.each(['BOGUS', 'approved', '', 'constructor', null, 7, undefined])('rejects the status value %p before checking anything else', async (newStatus) => {
+    const res = await send('PUT', '/api/subcontracting/job-orders/jo-1/status', { newStatus });
+    expect(res.status).toBe(400);
+    expect(requirePermission).not.toHaveBeenCalled();
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   test('the form actions post to the permission-checked route', async () => {

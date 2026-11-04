@@ -6,7 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 
 const API_ROUTE_PREFIX = '/api/jobOrderActions'; // New common prefix for all actions
-const JOB_ORDER_WRITE_ROUTE = '/api/subcontracting/job-orders'; // Owns create and edit: permissions, locks and BOQ conflict rules
+const JOB_ORDER_WRITE_ROUTE = '/api/subcontracting/job-orders'; // Owns every job order write: permissions, locks and BOQ conflict rules
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies(); // `cookies()` is not awaitable
@@ -113,9 +113,8 @@ export async function updateJobOrder(id: string, data: any) {
 
 export async function deleteJobOrder(id: string) {
   try {
-    const result = await fetchWithAuth(`${API_ROUTE_PREFIX}/deleteJobOrder`, {
-      method: 'POST',
-      body: JSON.stringify({ id }) // Pass id in the body for the RPC call
+    const result = await fetchWithAuth(`${JOB_ORDER_WRITE_ROUTE}/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
     });
     
     revalidatePath('/job-orders/dashboard');
@@ -128,9 +127,9 @@ export async function deleteJobOrder(id: string) {
 
 export async function updateJobOrderStatus(id: string, newStatus: any) {
   try {
-    const result = await fetchWithAuth(`${API_ROUTE_PREFIX}/updateJobOrderStatus`, {
-      method: 'POST',
-      body: JSON.stringify({ id, newStatus }) // Pass both id and newStatus in the body
+    const result = await fetchWithAuth(`${JOB_ORDER_WRITE_ROUTE}/${encodeURIComponent(id)}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ newStatus })
     });
     
     revalidatePath(`/job-orders/${id}`);
@@ -143,9 +142,8 @@ export async function updateJobOrderStatus(id: string, newStatus: any) {
 
 export async function unlockJobOrder(id: string) {
   try {
-    const result = await fetchWithAuth(`${API_ROUTE_PREFIX}/unlockJobOrder`, {
-      method: 'POST',
-      body: JSON.stringify({ id }) // Pass id in the body for the RPC call
+    const result = await fetchWithAuth(`${JOB_ORDER_WRITE_ROUTE}/${encodeURIComponent(id)}/unlock`, {
+      method: 'PUT'
     });
     
     revalidatePath(`/job-orders/${id}`);

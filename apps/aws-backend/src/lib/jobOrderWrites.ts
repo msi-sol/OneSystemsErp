@@ -1,4 +1,4 @@
-import { JobOrderType, MaterialResponsibility, PaymentTerms, Prisma } from '@prisma/client';
+import { JobOrderStatus, JobOrderType, MaterialResponsibility, PaymentTerms, Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 
 export const JOB_ORDER_THRESHOLD = 250000;
@@ -18,6 +18,24 @@ const ENUM_FIELDS: Array<{ field: 'paymentBasis' | 'materialResponsibility' | 'j
   { field: 'materialResponsibility', values: MaterialResponsibility, required: true },
   { field: 'jobOrderType', values: JobOrderType, required: false },
 ];
+
+// The actions the role matrix can grant. RolePermission has no canEdit or canDelete
+// column, so checks on those pass for system administrators only.
+export const JOB_ORDER_EDIT_ACTION = 'canEditDraft';
+export const JOB_ORDER_DELETE_ACTION = 'canDeleteDraft';
+export const JOB_ORDER_UNLOCK_ACTION = 'canUnlockWithAuthorization';
+const STATUS_ACTIONS: Record<JobOrderStatus, string> = {
+  DRAFT: 'canReturnForCorrection',
+  FOR_REVIEW: 'canSubmit',
+  FOR_FINANCIAL_REVIEW: 'canReview',
+  FOR_TECHNICAL_REVIEW: 'canReview',
+  APPROVED: 'canApprove',
+  ISSUED: 'canApprove',
+  CANCELLED: 'canCancel',
+};
+
+// Job orders in these statuses hold commitments and can only be changed by unlocking.
+const LOCKED_STATUSES = new Set<JobOrderStatus>(['APPROVED', 'ISSUED']);
 
 type JobOrderBody = Record<string, unknown>;
 
@@ -136,6 +154,13 @@ async function assertNotDuplicateScope(projectId: string, subcontractorId: strin
   if (isDuplicate) throw new JobOrderRequestError('Duplicate Error: A Job Order for this Subcontractor with the exact same BOQ scope already exists.', 409);
 }
 
+const PROCESSED_WORK = { subcontractAccomplishments: true, subcontractBillings: { include: { payments: true } } } as const;
+
+function hasProcessedWork(jobOrder: Prisma.JobOrderGetPayload<{ include: typeof PROCESSED_WORK }>) {
+  return jobOrder.subcontractAccomplishments.some((a) => a.status === 'APPROVED') ||
+    jobOrder.subcontractBillings.some((b) => b.status === 'APPROVED_FOR_PAYMENT' || b.status === 'PAID' || b.paymentStatus === 'PAID' || b.payments.length > 0);
+}
+
 export async function createJobOrderFromRequest(body: JobOrderBody) {
   const data = readJobOrderFields(body);
   const references = readBoqReferences(body) ?? [];
@@ -167,15 +192,11 @@ export async function updateJobOrderFromRequest(id: string, body: JobOrderBody) 
   const newProjectId = body.projectId;
   if (newProjectId !== undefined && (typeof newProjectId !== 'string' || !newProjectId)) throw new JobOrderRequestError('projectId must be an ID.', 400);
 
-  const existing = await prisma.jobOrder.findUnique({
-    where: { id },
-    include: { subcontractAccomplishments: true, subcontractBillings: true },
-  });
+  const existing = await prisma.jobOrder.findUnique({ where: { id }, include: PROCESSED_WORK });
   if (!existing) throw new JobOrderRequestError('Job Order not found.', 404);
 
-  const isLocked = existing.subcontractAccomplishments.some((a) => a.status === 'APPROVED') ||
-    existing.subcontractBillings.some((b) => b.status === 'APPROVED_FOR_PAYMENT' || b.paymentStatus === 'PAID');
-  if (isLocked) throw new JobOrderRequestError('Job Order is locked and cannot be edited because accomplishments or payments have been processed.', 409);
+  if (hasProcessedWork(existing)) throw new JobOrderRequestError('Job Order is locked and cannot be edited because accomplishments or payments have been processed.', 409);
+  if (LOCKED_STATUSES.has(existing.status)) throw new JobOrderRequestError('Job Order is approved and locked. Unlock it before editing.', 409);
 
   const projectId = newProjectId ?? existing.projectId;
   const subcontractorId = data.subcontractorId === undefined ? existing.subcontractorId : data.subcontractorId as string | null;
@@ -198,6 +219,109 @@ export async function updateJobOrderFromRequest(id: string, body: JobOrderBody) 
     } as Prisma.JobOrderUncheckedUpdateInput,
   });
   return withJobOrderReadFields(updated);
+}
+
+export function jobOrderStatusAction(newStatus: unknown): { status: JobOrderStatus; action: string } {
+  if (typeof newStatus !== 'string' || !Object.hasOwn(STATUS_ACTIONS, newStatus)) throw new JobOrderRequestError('newStatus is not a valid Job Order status.', 400);
+  return { status: newStatus as JobOrderStatus, action: STATUS_ACTIONS[newStatus as JobOrderStatus] };
+}
+
+// Moves only from the status that was read, so two approvals at once commit once.
+async function moveJobOrderStatus(tx: Prisma.TransactionClient, id: string, from: JobOrderStatus, to: JobOrderStatus) {
+  const { count } = await tx.jobOrder.updateMany({ where: { id, status: from }, data: { status: to } });
+  if (count === 0) throw new JobOrderRequestError('Job Order status changed while saving. Reload and try again.', 409);
+}
+
+// Splits the amount by master BOQ value, as the form does, because per-item costs
+// are not stored. Work with no BOQ items stays a project-level commitment.
+async function commitmentShares(tx: Prisma.TransactionClient, jobOrder: { projectId: string; boqReferenceId: string | null; consolidatedBoqItemId: string | null; contractAmount: number }) {
+  const references = boqItemIds(parseBoqReferenceIds(jobOrder.boqReferenceId));
+  const ids = references.length > 0 || !jobOrder.consolidatedBoqItemId ? references : [jobOrder.consolidatedBoqItemId];
+  const items = await tx.consolidatedBOQItem.findMany({
+    where: { id: { in: ids }, projectId: jobOrder.projectId },
+    select: { id: true, quantity: true, unitCost: true },
+  });
+  if (items.length === 0) return [{ consolidatedBoqItemId: null, amount: jobOrder.contractAmount }];
+
+  const masterCost = (item: (typeof items)[number]) => (item.quantity || 0) * (item.unitCost || 0);
+  const totalMaster = items.reduce((sum, item) => sum + masterCost(item), 0);
+  const roundedTotal = Math.round(jobOrder.contractAmount * 100);
+  let allocated = 0;
+  return items.map((item, index) => {
+    const share = totalMaster > 0 ? masterCost(item) / totalMaster : 1 / items.length;
+    // Working in centavos lets the last item take the rounding remainder.
+    const cents = index === items.length - 1 ? roundedTotal - allocated : Math.round(roundedTotal * share);
+    allocated += cents;
+    return { consolidatedBoqItemId: item.id, amount: cents / 100 };
+  });
+}
+
+async function recordCommitments(tx: Prisma.TransactionClient, jobOrder: Parameters<typeof commitmentShares>[1] & { id: string; subcontractor: { name: string } | null }) {
+  for (const { consolidatedBoqItemId, amount } of await commitmentShares(tx, jobOrder)) {
+    await tx.commitmentLedger.create({
+      data: {
+        projectId: jobOrder.projectId,
+        jobOrderId: jobOrder.id,
+        consolidatedBoqItemId,
+        commitmentType: 'SUBCONTRACT',
+        subcontractorName: jobOrder.subcontractor?.name || '',
+        approvedAmount: amount,
+        remainingCommitment: amount,
+        status: 'ACTIVE',
+      },
+    });
+    if (consolidatedBoqItemId) {
+      await tx.consolidatedBOQItem.update({ where: { id: consolidatedBoqItemId }, data: { committedCost: { increment: amount } } });
+    }
+  }
+}
+
+async function releaseCommitments(tx: Prisma.TransactionClient, jobOrderId: string) {
+  const active = await tx.commitmentLedger.findMany({ where: { jobOrderId, status: 'ACTIVE' } });
+  for (const { id, consolidatedBoqItemId, approvedAmount } of active) {
+    await tx.commitmentLedger.update({ where: { id }, data: { status: 'RELEASED', remainingCommitment: 0 } });
+    if (consolidatedBoqItemId) {
+      await tx.consolidatedBOQItem.update({ where: { id: consolidatedBoqItemId }, data: { committedCost: { decrement: approvedAmount } } });
+    }
+  }
+}
+
+export async function changeJobOrderStatus(id: string, status: JobOrderStatus) {
+  const updated = await prisma.$transaction(async (tx) => {
+    const jobOrder = await tx.jobOrder.findUnique({ where: { id }, include: { subcontractor: true } });
+    if (!jobOrder) throw new JobOrderRequestError('Job Order not found.', 404);
+    if (jobOrder.status === 'CANCELLED') throw new JobOrderRequestError('A cancelled Job Order cannot change status.', 409);
+    if (status === 'ISSUED' && jobOrder.status !== 'APPROVED') throw new JobOrderRequestError('Only an approved Job Order can be issued.', 409);
+    if (status !== 'ISSUED' && LOCKED_STATUSES.has(jobOrder.status)) throw new JobOrderRequestError('Job Order is approved and locked. Unlock it before changing its status.', 409);
+
+    await moveJobOrderStatus(tx, id, jobOrder.status, status);
+    if (status === 'APPROVED') await recordCommitments(tx, jobOrder);
+    return tx.jobOrder.findUniqueOrThrow({ where: { id } });
+  });
+  return withJobOrderReadFields(updated);
+}
+
+export async function unlockJobOrderFromRequest(id: string) {
+  const updated = await prisma.$transaction(async (tx) => {
+    const jobOrder = await tx.jobOrder.findUnique({ where: { id }, include: PROCESSED_WORK });
+    if (!jobOrder) throw new JobOrderRequestError('Job Order not found.', 404);
+    if (!LOCKED_STATUSES.has(jobOrder.status)) throw new JobOrderRequestError('Only an approved Job Order can be unlocked.', 409);
+    if (hasProcessedWork(jobOrder)) throw new JobOrderRequestError('Job Order cannot be unlocked because accomplishments or payments have been processed.', 409);
+
+    await moveJobOrderStatus(tx, id, jobOrder.status, 'FOR_FINANCIAL_REVIEW');
+    await releaseCommitments(tx, id);
+    return tx.jobOrder.findUniqueOrThrow({ where: { id } });
+  });
+  return withJobOrderReadFields(updated);
+}
+
+export async function deleteJobOrderFromRequest(id: string) {
+  const jobOrder = await prisma.jobOrder.findUnique({ where: { id }, include: PROCESSED_WORK });
+  if (!jobOrder) throw new JobOrderRequestError('Job Order not found.', 404);
+  // Deleting cascades to accomplishments, billings and payment records.
+  if (hasProcessedWork(jobOrder)) throw new JobOrderRequestError('Job Order cannot be deleted because accomplishments or payments have been processed.', 409);
+  if (LOCKED_STATUSES.has(jobOrder.status)) throw new JobOrderRequestError('Job Order is approved and locked. Unlock it before deleting.', 409);
+  await prisma.jobOrder.delete({ where: { id } });
 }
 
 export function jobOrderErrorStatus(error: unknown): number {

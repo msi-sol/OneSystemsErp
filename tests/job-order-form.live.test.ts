@@ -25,7 +25,7 @@ import express from 'express';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { createJobOrder, getJobOrderById, updateJobOrder } from '@/app/actions/jobOrderActions';
+import { createJobOrder, deleteJobOrder, getJobOrderById, unlockJobOrder, updateJobOrder, updateJobOrderStatus } from '@/app/actions/jobOrderActions';
 import { createFullSubcontractPackage } from '@/app/actions/subcontractingActions';
 import subcontracting from '../apps/aws-backend/src/routes/subcontracting';
 import jobOrderActions from '../apps/aws-backend/src/routes/jobOrderActions';
@@ -189,6 +189,255 @@ describeLive('job order form against a real database', () => {
     } finally {
       mockActor = { userId: admin.id, sessionVersion: admin.sessionVersion };
     }
+  });
+
+  describe('workflow status, unlock and delete', () => {
+    const newJobOrder = async (overrides: Record<string, unknown> = {}) => {
+      const res = await createJobOrder(form({ subcontractorId: await freshSubcontractor(), ...overrides }));
+      expect(res.error).toBeUndefined();
+      return res.data;
+    };
+    const statusOf = async (id: string) => (await db.jobOrder.findUniqueOrThrow({ where: { id } })).status;
+    const ledgerFor = (jobOrderId: string) => db.commitmentLedger.findMany({ where: { jobOrderId }, orderBy: { approvedAmount: 'asc' } });
+    const committedCost = async (id: string) => (await db.consolidatedBOQItem.findUniqueOrThrow({ where: { id } })).committedCost;
+
+    // A real matrix role, so the checks prove the actions roles can actually be granted.
+    async function asRoleWith(grants: Record<string, boolean>, run: () => Promise<void>) {
+      const code = `JO_ROLE_${++seq}`;
+      const role = await seed('Role', { roleCode: code, roleName: code, isActive: true });
+      const permissionModule = await seed('Module', { moduleName: `SUBCONTRACTING_${seq}` });
+      await seed('RolePermission', { roleId: role.id, moduleId: permissionModule.id, moduleName: 'SUBCONTRACTING', ...grants });
+      const user = await seed('User', { role: code, status: 'ACTIVE', mustChangePassword: false, email: `jo-role-${++seq}@example.test` });
+      mockActor = { userId: user.id, sessionVersion: user.sessionVersion };
+      try {
+        await run();
+      } finally {
+        mockActor = { userId: admin.id, sessionVersion: admin.sessionVersion };
+      }
+    }
+
+    test('walks every workflow button from draft to approved', async () => {
+      const jo = await newJobOrder();
+      for (const step of ['FOR_REVIEW', 'FOR_FINANCIAL_REVIEW', 'APPROVED']) {
+        const res = await updateJobOrderStatus(jo.id, step);
+        expect(res.error).toBeUndefined();
+        expect(res.data.status).toBe(step);
+        expect(await statusOf(jo.id)).toBe(step);
+      }
+    });
+
+    test.each(['BOGUS', 'approved', '', 'constructor', null, 7])('rejects the status value %p', async (value) => {
+      const jo = await newJobOrder();
+      const res = await updateJobOrderStatus(jo.id, value);
+      expect(res).toEqual({ success: false, error: expect.stringContaining('not a valid') });
+      expect(await statusOf(jo.id)).toBe('DRAFT');
+    });
+
+    test('the old unguarded routes are gone', async () => {
+      const jo = await newJobOrder();
+      for (const path of ['updateJobOrderStatus', 'deleteJobOrder', 'unlockJobOrder']) {
+        const res = await fetch(`${process.env.BACKEND_INTERNAL_URL}/api/jobOrderActions/${path}`, { method: 'POST' });
+        expect([401, 404]).toContain(res.status);
+      }
+      expect(await statusOf(jo.id)).toBe('DRAFT');
+    });
+
+    test('each step needs its own right, and a role can hold exactly that right', async () => {
+      const jo = await newJobOrder();
+      await asRoleWith({ canSubmit: true }, async () => {
+        expect((await updateJobOrderStatus(jo.id, 'APPROVED')).error).toContain('Unauthorized');
+        expect((await updateJobOrderStatus(jo.id, 'FOR_FINANCIAL_REVIEW')).error).toContain('Unauthorized');
+        expect((await updateJobOrderStatus(jo.id, 'FOR_REVIEW')).error).toBeUndefined();
+      });
+      await asRoleWith({ canReview: true }, async () => {
+        expect((await updateJobOrderStatus(jo.id, 'FOR_FINANCIAL_REVIEW')).error).toBeUndefined();
+      });
+      await asRoleWith({ canApprove: true }, async () => {
+        expect((await deleteJobOrder(jo.id)).error).toContain('Unauthorized');
+        expect((await updateJobOrderStatus(jo.id, 'APPROVED')).error).toBeUndefined();
+        expect((await unlockJobOrder(jo.id)).error).toContain('Unauthorized');
+      });
+      await asRoleWith({ canUnlockWithAuthorization: true }, async () => {
+        expect((await unlockJobOrder(jo.id)).error).toBeUndefined();
+      });
+      await asRoleWith({ canEditDraft: true }, async () => {
+        expect((await updateJobOrder(jo.id, { location: 'Roof Deck' })).error).toBeUndefined();
+      });
+      await asRoleWith({ canDeleteDraft: true }, async () => {
+        expect((await deleteJobOrder(jo.id)).error).toBeUndefined();
+      });
+      expect(await db.jobOrder.findUnique({ where: { id: jo.id } })).toBeNull();
+    });
+
+    test('a user with no subcontracting rights cannot move, unlock or delete', async () => {
+      const jo = await newJobOrder();
+      await asRoleWith({ canView: true }, async () => {
+        for (const res of [await updateJobOrderStatus(jo.id, 'FOR_REVIEW'), await unlockJobOrder(jo.id), await deleteJobOrder(jo.id)]) {
+          expect(res).toEqual({ success: false, error: expect.stringContaining('Unauthorized') });
+        }
+      });
+      expect(await statusOf(jo.id)).toBe('DRAFT');
+    });
+
+    test('approval splits the contract amount across BOQ items by master value', async () => {
+      const small = await seed('ConsolidatedBOQItem', { projectId: project.id, itemCode: 'C200', quantity: 1, unitCost: 1000, totalCost: 1000 });
+      const large = await seed('ConsolidatedBOQItem', { projectId: project.id, itemCode: 'C201', quantity: 2, unitCost: 1000, totalCost: 2000 });
+      const jo = await newJobOrder({ boqReferenceIds: ['1_LOT', small.id, large.id], contractAmount: 1000 });
+
+      expect((await updateJobOrderStatus(jo.id, 'APPROVED')).error).toBeUndefined();
+      const rows = await ledgerFor(jo.id);
+      expect(rows.map((row: any) => [row.consolidatedBoqItemId, row.approvedAmount, row.remainingCommitment, row.status])).toEqual([
+        [small.id, 333.33, 333.33, 'ACTIVE'],
+        [large.id, 666.67, 666.67, 'ACTIVE'],
+      ]);
+      expect(rows[0].commitmentType).toBe('SUBCONTRACT');
+      expect(await committedCost(small.id)).toBeCloseTo(333.33);
+      expect(await committedCost(large.id)).toBeCloseTo(666.67);
+    });
+
+    test('a job order with no BOQ items commits at project level', async () => {
+      const jo = await newJobOrder({ boqReferenceIds: ['1_LOT'], contractAmount: 5000 });
+      expect((await updateJobOrderStatus(jo.id, 'APPROVED')).error).toBeUndefined();
+      expect((await ledgerFor(jo.id)).map((row: any) => [row.consolidatedBoqItemId, row.approvedAmount])).toEqual([[null, 5000]]);
+    });
+
+    test('an older job order with only the single BOQ field commits against that item', async () => {
+      const item = await consolidatedItem('C208');
+      const jo = await newJobOrder({ boqReferenceIds: [], consolidatedBoqItemId: item.id, contractAmount: 2500 });
+      expect((await updateJobOrderStatus(jo.id, 'APPROVED')).error).toBeUndefined();
+      expect(await committedCost(item.id)).toBe(2500);
+    });
+
+    test('an approved job order is locked until unlocked', async () => {
+      const jo = await newJobOrder();
+      await updateJobOrderStatus(jo.id, 'APPROVED');
+
+      expect((await updateJobOrder(jo.id, { contractAmount: 1 })).error).toContain('Unlock');
+      expect((await deleteJobOrder(jo.id)).error).toContain('Unlock');
+      expect((await updateJobOrderStatus(jo.id, 'DRAFT')).error).toContain('Unlock');
+      expect((await updateJobOrderStatus(jo.id, 'APPROVED')).error).toContain('Unlock');
+      expect(await statusOf(jo.id)).toBe('APPROVED');
+      expect((await db.jobOrder.findUniqueOrThrow({ where: { id: jo.id } })).contractAmount).toBe(15000);
+    });
+
+    test('unlock releases commitments, so approving again does not double count', async () => {
+      const item = await consolidatedItem('C202');
+      const jo = await newJobOrder({ boqReferenceIds: [item.id], contractAmount: 4000 });
+
+      await updateJobOrderStatus(jo.id, 'APPROVED');
+      expect(await committedCost(item.id)).toBe(4000);
+
+      const unlocked = await unlockJobOrder(jo.id);
+      expect(unlocked.error).toBeUndefined();
+      expect(unlocked.data.status).toBe('FOR_FINANCIAL_REVIEW');
+      expect(await committedCost(item.id)).toBe(0);
+      expect((await ledgerFor(jo.id)).map((row: any) => [row.status, row.remainingCommitment])).toEqual([['RELEASED', 0]]);
+
+      expect((await updateJobOrder(jo.id, { contractAmount: 6000 })).error).toBeUndefined();
+      await updateJobOrderStatus(jo.id, 'APPROVED');
+      expect(await committedCost(item.id)).toBe(6000);
+      const active = await db.commitmentLedger.findMany({ where: { jobOrderId: jo.id, status: 'ACTIVE' } });
+      expect(active.map((row: any) => row.approvedAmount)).toEqual([6000]);
+    });
+
+    test('two approvals at once commit only once', async () => {
+      const item = await consolidatedItem('C203');
+      const jo = await newJobOrder({ boqReferenceIds: [item.id], contractAmount: 4000 });
+      const results = await Promise.all([updateJobOrderStatus(jo.id, 'APPROVED'), updateJobOrderStatus(jo.id, 'APPROVED')]);
+      expect(results.filter((res) => res.success)).toHaveLength(1);
+      expect(await committedCost(item.id)).toBe(4000);
+      expect(await ledgerFor(jo.id)).toHaveLength(1);
+    });
+
+    test('a failed commitment leaves the job order unapproved', async () => {
+      const item = await consolidatedItem('C204');
+      const name = `BLOCKED-${++seq}`;
+      const blocked = await seed('Subcontractor', { name });
+      const jo = await newJobOrder({ boqReferenceIds: [item.id], subcontractorId: blocked.id });
+      await db.$executeRawUnsafe(`ALTER TABLE CommitmentLedger ADD CONSTRAINT block_ledger CHECK (subcontractorName <> '${name}')`);
+      try {
+        expect((await updateJobOrderStatus(jo.id, 'APPROVED')).success).toBe(false);
+      } finally {
+        await db.$executeRawUnsafe('ALTER TABLE CommitmentLedger DROP CHECK block_ledger');
+      }
+      expect(await statusOf(jo.id)).toBe('DRAFT');
+      expect(await committedCost(item.id)).toBe(0);
+    });
+
+    test('unlock refuses a job order that is not approved', async () => {
+      const jo = await newJobOrder();
+      expect((await unlockJobOrder(jo.id)).error).toContain('Only an approved');
+      expect(await statusOf(jo.id)).toBe('DRAFT');
+    });
+
+    test('a cancelled job order stays cancelled and only an approved one can be issued', async () => {
+      const jo = await newJobOrder();
+      expect((await updateJobOrderStatus(jo.id, 'ISSUED')).error).toContain('Only an approved');
+      expect((await updateJobOrderStatus(jo.id, 'CANCELLED')).error).toBeUndefined();
+      expect((await updateJobOrderStatus(jo.id, 'APPROVED')).error).toContain('cancelled');
+    });
+
+    test('issuing keeps the commitment and the lock', async () => {
+      const item = await consolidatedItem('C205');
+      const jo = await newJobOrder({ boqReferenceIds: [item.id], contractAmount: 4000 });
+      await updateJobOrderStatus(jo.id, 'APPROVED');
+      expect((await updateJobOrderStatus(jo.id, 'ISSUED')).error).toBeUndefined();
+      expect(await committedCost(item.id)).toBe(4000);
+      expect((await updateJobOrder(jo.id, { location: 'Roof Deck' })).error).toContain('Unlock');
+    });
+
+    describe('with processed work', () => {
+      const billing = (jobOrderId: string, data: Record<string, unknown>) => seed('SubcontractBilling', { jobOrderId, projectId: project.id, subcontractorId: subcontractor.id, ...data });
+
+      test.each<[string, (id: string) => Promise<any>]>([
+        ['an approved accomplishment', (id) => seed('SubcontractAccomplishment', { jobOrderId: id, status: 'APPROVED' })],
+        ['a billing approved for payment', (id) => billing(id, { status: 'APPROVED_FOR_PAYMENT' })],
+        ['a paid billing', (id) => billing(id, { status: 'PAID' })],
+        ['a billing marked paid', (id) => billing(id, { paymentStatus: 'PAID' })],
+        ['a recorded payment', async (id) => seed('PaymentRecord', { billingId: (await billing(id, {})).id })],
+      ])('refuses to delete a job order with %s', async (_label, addWork) => {
+        const jo = await newJobOrder();
+        await addWork(jo.id);
+        expect(await deleteJobOrder(jo.id)).toEqual({ success: false, error: expect.stringContaining('cannot be deleted') });
+        expect(await statusOf(jo.id)).toBe('DRAFT');
+      });
+
+      test('deletes a job order whose work is still unapproved', async () => {
+        const jo = await newJobOrder();
+        await seed('SubcontractAccomplishment', { jobOrderId: jo.id, status: 'DRAFT' });
+        expect((await deleteJobOrder(jo.id)).error).toBeUndefined();
+        expect(await db.jobOrder.findUnique({ where: { id: jo.id } })).toBeNull();
+      });
+
+      test('refuses to unlock once accomplishments are approved, keeping the commitment', async () => {
+        const item = await consolidatedItem('C206');
+        const jo = await newJobOrder({ boqReferenceIds: [item.id], contractAmount: 4000 });
+        await updateJobOrderStatus(jo.id, 'APPROVED');
+        await seed('SubcontractAccomplishment', { jobOrderId: jo.id, status: 'APPROVED' });
+
+        expect((await unlockJobOrder(jo.id)).error).toContain('cannot be unlocked');
+        expect(await statusOf(jo.id)).toBe('APPROVED');
+        expect(await committedCost(item.id)).toBe(4000);
+      });
+    });
+
+    test('deleting after unlock keeps the released ledger rows for the record', async () => {
+      const item = await consolidatedItem('C207');
+      const jo = await newJobOrder({ boqReferenceIds: [item.id], contractAmount: 4000 });
+      await updateJobOrderStatus(jo.id, 'APPROVED');
+      const [row] = await ledgerFor(jo.id);
+      await unlockJobOrder(jo.id);
+
+      expect((await deleteJobOrder(jo.id)).error).toBeUndefined();
+      expect(await db.commitmentLedger.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ jobOrderId: null, status: 'RELEASED' });
+      expect(await committedCost(item.id)).toBe(0);
+    });
+
+    test('deleting a missing job order reports not found', async () => {
+      expect(await deleteJobOrder('no-such-job-order')).toEqual({ success: false, error: expect.stringContaining('not found') });
+      expect(await updateJobOrderStatus('no-such-job-order', 'FOR_REVIEW')).toEqual({ success: false, error: expect.stringContaining('not found') });
+      expect(await unlockJobOrder('no-such-job-order')).toEqual({ success: false, error: expect.stringContaining('not found') });
+    });
   });
 
   describe('BOQ conflicts between job orders and subcontract packages', () => {

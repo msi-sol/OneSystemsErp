@@ -1864,6 +1864,7 @@ model JobOrder {
   consolidatedBoqItem        ConsolidatedBOQItem?        @relation("ConsolidatedJobOrders", fields: [consolidatedBoqItemId], references: [id], onDelete: Cascade)
   subcontractAccomplishments SubcontractAccomplishment[]
   subcontractBillings        SubcontractBilling[]
+  commitmentLedgers          CommitmentLedger[]
 }
 
 model SubcontractAccomplishment {
@@ -3547,10 +3548,14 @@ model CommitmentLedger {
 
   consolidatedBoqItemId String?
   awardedBoqItemId      String?
+  jobOrderId            String?
 
   project             Project              @relation("ProjectCommitmentLedgers", fields: [projectId], references: [id], onDelete: Cascade)
   consolidatedBoqItem ConsolidatedBOQItem? @relation("ConsolidatedCommitmentLedgers", fields: [consolidatedBoqItemId], references: [id], onDelete: Cascade)
   awardedBoqItem      AwardedBOQItem?      @relation("AwardedCommitmentLedgers", fields: [awardedBoqItemId], references: [id], onDelete: Cascade)
+  jobOrder            JobOrder?            @relation(fields: [jobOrderId], references: [id], onDelete: SetNull)
+
+  @@index([jobOrderId])
 }
 
 model SubcontractorVariationOrder {

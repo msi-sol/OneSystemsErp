@@ -38,6 +38,7 @@ export default function JobOrderWorkflowControls({ jobOrderId, currentStatus, is
     const res = await unlockJobOrder(jobOrderId);
     if (res.success) {
       setLocked(false);
+      setStatus(res.data.status);
     } else {
       setError(res.error || 'Failed to unlock Job Order');
     }

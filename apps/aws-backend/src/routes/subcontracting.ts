@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { requirePermission } from '../lib/permissions';
-import { assertBoqItemsNotInJobOrder, createJobOrderFromRequest, jobOrderErrorStatus, updateJobOrderFromRequest } from '../lib/jobOrderWrites';
+import { assertBoqItemsNotInJobOrder, changeJobOrderStatus, createJobOrderFromRequest, deleteJobOrderFromRequest, JOB_ORDER_DELETE_ACTION, JOB_ORDER_EDIT_ACTION, JOB_ORDER_UNLOCK_ACTION, jobOrderErrorStatus, jobOrderStatusAction, unlockJobOrderFromRequest, updateJobOrderFromRequest } from '../lib/jobOrderWrites';
 
 const router = Router();
 function getPbacContext(req: any) {
@@ -30,7 +30,7 @@ router.post('/job-orders', async (req, res) => {
 router.put('/job-orders/:id', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'SUBCONTRACTING', 'canEdit', simulatedRole);
+    await requirePermission(userId!, 'SUBCONTRACTING', JOB_ORDER_EDIT_ACTION, simulatedRole);
     const result = await updateJobOrderFromRequest(req.params.id, req.body);
     res.json({ success: true, data: result });
   } catch (error: any) { res.status(jobOrderErrorStatus(error)).json({ success: false, error: error.message }); }
@@ -39,54 +39,29 @@ router.put('/job-orders/:id', async (req, res) => {
 router.delete('/job-orders/:id', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'SUBCONTRACTING', 'canDelete', simulatedRole);
-    await prisma.jobOrder.delete({ where: { id: req.params.id } });
+    await requirePermission(userId!, 'SUBCONTRACTING', JOB_ORDER_DELETE_ACTION, simulatedRole);
+    await deleteJobOrderFromRequest(req.params.id);
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
+  } catch (error: any) { res.status(jobOrderErrorStatus(error)).json({ success: false, error: error.message }); }
 });
 
 router.put('/job-orders/:id/status', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'SUBCONTRACTING', 'canEdit', simulatedRole);
-    const { id } = req.params;
-    const { newStatus } = req.body;
-
-    const jo = await prisma.jobOrder.findUnique({ where: { id }, include: { project: true, subcontractor: true } });
-    if (!jo) throw new Error("Job order not found");
-
-    const result = await prisma.jobOrder.update({ where: { id }, data: { status: newStatus } });
-
-    const isApproved = newStatus === 'APPROVED';
-    if (isApproved && jo.status !== 'APPROVED' && jo.consolidatedBoqItemId) {
-      await prisma.commitmentLedger.create({
-        data: {
-          projectId: jo.projectId,
-          consolidatedBoqItemId: jo.consolidatedBoqItemId,
-          commitmentType: 'SUBCONTRACT',
-          subcontractorName: jo.subcontractor?.name || '',
-          approvedAmount: jo.contractAmount,
-          remainingCommitment: jo.contractAmount,
-          status: 'ACTIVE'
-        }
-      });
-      await prisma.consolidatedBOQItem.update({
-        where: { id: jo.consolidatedBoqItemId },
-        data: { committedCost: { increment: jo.contractAmount } }
-      });
-    }
-
+    const { status, action } = jobOrderStatusAction(req.body?.newStatus);
+    await requirePermission(userId!, 'SUBCONTRACTING', action, simulatedRole);
+    const result = await changeJobOrderStatus(req.params.id, status);
     res.json({ success: true, data: result });
-  } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
+  } catch (error: any) { res.status(jobOrderErrorStatus(error)).json({ success: false, error: error.message }); }
 });
 
 router.put('/job-orders/:id/unlock', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'SUBCONTRACTING', 'canEdit', simulatedRole);
-    const result = await prisma.jobOrder.update({ where: { id: req.params.id }, data: { status: 'FOR_FINANCIAL_REVIEW' } });
+    await requirePermission(userId!, 'SUBCONTRACTING', JOB_ORDER_UNLOCK_ACTION, simulatedRole);
+    const result = await unlockJobOrderFromRequest(req.params.id);
     res.json({ success: true, data: result });
-  } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
+  } catch (error: any) { res.status(jobOrderErrorStatus(error)).json({ success: false, error: error.message }); }
 });
 
 // ---------------------------------------------------------
