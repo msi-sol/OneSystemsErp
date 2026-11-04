@@ -1,14 +1,10 @@
 // @ts-nocheck
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createJobOrder, updateJobOrder, getConsolidatedBoqItemsByProjectId } from '@/app/actions/jobOrderActions';
 import { useRouter } from 'next/navigation';
-
-interface SelectedBoqItem {
-  id: string;
-  joCost: number; // user-entered JO cost for this item (used in individual mode)
-}
+import { allocateContractAmount, buildEditFormState, LUMP_SUM_REFERENCE, selectedItemsFromReferences, SelectedBoqItem } from './jobOrderFormState';
 
 export default function JobOrderFormClient({ projects, subcontractors, initialData }: { projects: any[], subcontractors: any[], initialData?: any }) {
   const router = useRouter();
@@ -41,8 +37,9 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
       }
 
       return {
-        ...defaultFormState,
-        ...initialData,
+        ...buildEditFormState(initialData, defaultFormState),
+        // Older records have no type; do not invent one for them.
+        jobOrderType: initialData.jobOrderType || '',
         boqReferenceIds: initialData.boqReferenceIds || [],
         startDate: start && !isNaN(start.getTime()) ? start.toISOString().split('T')[0] : '',
         completionDate: end && !isNaN(end.getTime()) ? end.toISOString().split('T')[0] : '',
@@ -55,10 +52,13 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
   const [isBoqModalOpen, setIsBoqModalOpen] = useState(false);
   const [isOneLot, setIsOneLot] = useState(() => {
     // If editing and '1_LOT' was in the refs, start in lump sum mode
-    return initialData?.boqReferenceIds?.includes('1_LOT') || false;
+    return initialData?.boqReferenceIds?.includes(LUMP_SUM_REFERENCE) || false;
   });
   const [lumpSumValue, setLumpSumValue] = useState(initialData?.contractAmount || 0);
-  const [selectedBoqItems, setSelectedBoqItems] = useState<SelectedBoqItem[]>([]);
+  const [selectedBoqItems, setSelectedBoqItems] = useState<SelectedBoqItem[]>(() => selectedItemsFromReferences(initialData?.boqReferenceIds));
+  // The saved contract amount stands until the user changes the selection or a cost.
+  const boqCostsEdited = useRef(false);
+  const needsCostAllocation = useRef(Boolean(initialData?.id));
 
   // Auto-generate job number on mount if creating
   useEffect(() => {
@@ -117,11 +117,18 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
   useEffect(() => {
     if (isOneLot) {
       setFormData(prev => ({ ...prev, contractAmount: lumpSumValue }));
-    } else if (selectedBoqItems.length > 0) {
+    } else if (selectedBoqItems.length > 0 && boqCostsEdited.current) {
       const total = selectedBoqItems.reduce((sum, item) => sum + (item.joCost || 0), 0);
       setFormData(prev => ({ ...prev, contractAmount: total }));
     }
   }, [selectedBoqItems, isOneLot, lumpSumValue]);
+
+  // Rebuild per-item costs for the saved selection once master BOQ values are known
+  useEffect(() => {
+    if (!needsCostAllocation.current || boqItems.length === 0) return;
+    needsCostAllocation.current = false;
+    if (!isOneLot) setSelectedBoqItems(prev => allocateContractAmount(prev, boqItems, initialData?.contractAmount || 0));
+  }, [boqItems, isOneLot, initialData]);
 
   // Auto-deduplicate selected items in case of hot-reload or fast clicking
   useEffect(() => {
@@ -140,7 +147,7 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
   useEffect(() => {
     const ids = selectedBoqItems.map(s => s.id);
     if (isOneLot) {
-      setFormData(prev => ({ ...prev, boqReferenceIds: ['1_LOT', ...Array.from(new Set(ids))] }));
+      setFormData(prev => ({ ...prev, boqReferenceIds: [LUMP_SUM_REFERENCE, ...Array.from(new Set(ids))] }));
     } else if (ids.length > 0) {
       setFormData(prev => ({ ...prev, boqReferenceIds: Array.from(new Set(ids)) }));
     } else {
@@ -150,6 +157,11 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
+    if (name === 'projectId') {
+      // BOQ items belong to one project, so a saved selection cannot carry over.
+      needsCostAllocation.current = false;
+      setSelectedBoqItems([]);
+    }
     setFormData(prev => ({
       ...prev,
       [name]: name === 'contractAmount' ? parseFloat(value) || 0 : value
@@ -157,6 +169,7 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
   };
 
   const handleToggleBoqItem = (itemId: string, checked: boolean) => {
+    boqCostsEdited.current = true;
     if (checked) {
       const masterItem = boqItems.find(b => b.id === itemId);
       const masterCost = masterItem ? (parseFloat(masterItem.quantity) || 0) * (parseFloat(masterItem.combinedUnitCost) || 0) : 0;
@@ -172,6 +185,7 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
   };
 
   const handleJoCostChange = (itemId: string, value: number) => {
+    boqCostsEdited.current = true;
     setSelectedBoqItems(prev => prev.map(s => s.id === itemId ? { ...s, joCost: value } : s));
   };
 
@@ -312,6 +326,7 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <label style={{ fontWeight: '500' }}>Job Order Type</label>
           <select name="jobOrderType" value={formData.jobOrderType} onChange={handleChange} style={{ padding: '10px', borderRadius: '4px', border: '1px solid #d1d5db', backgroundColor: '#f9fafb' }}>
+            {initialData && !initialData.jobOrderType && <option value="">Not specified</option>}
             <option value="LABOR_ONLY">Labor Only</option>
             <option value="LABOR_AND_MATERIALS">Labor &amp; Materials</option>
             <option value="EQUIPMENT_RENTAL">Equipment Rental</option>
@@ -368,6 +383,7 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
                 onChange={(e) => {
                   setIsOneLot(e.target.checked);
                   if (!e.target.checked) {
+                    boqCostsEdited.current = true;
                     // Switching back to individual mode: reset joCosts to master costs
                     setSelectedBoqItems(prev => prev.map(s => {
                       const masterItem = boqItems.find(b => b.id === s.id);

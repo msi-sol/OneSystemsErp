@@ -23,6 +23,19 @@ const LONG_TEXT_COLUMNS: Array<[string, string, 'NULL' | 'NOT NULL']> = [
   ['AiKnowledgeChunk', 'allowedRoles', 'NULL'],
   ['AiKnowledgeChunk', 'vectorEmbedding', 'NOT NULL'],
   ['AiRagEmbedding', 'embeddingVector', 'NOT NULL'],
+  ['UploadedWorkbookFile', 'storagePath', 'NOT NULL'],
+  ['UploadedWorkbookFile', 'preservedOriginalUrl', 'NULL'],
+  ['JobOrder', 'boqReferenceId', 'NULL'],
+  ['PaymentBatch', 'aiAuditNotes', 'NULL'],
+  ['PettyCashReplenishment', 'reviewerRemarks', 'NULL'],
+  ['ScheduleActivity', 'aiRationale', 'NULL'],
+  ['ScheduleDelayRecord', 'cause', 'NOT NULL'],
+  ['AiAccessAuditLog', 'question', 'NOT NULL'],
+  ['AIVariationOrderValidation', 'missingRequirements', 'NULL'],
+  ['AITransactionValidation', 'aiRecommendation', 'NULL'],
+  ['AiKnowledgeMap', 'businessMeaning', 'NULL'],
+  ['AiKnowledgeMap', 'sampleQuestions', 'NULL'],
+  ['AiRagKeywordRegistry', 'businessMeaning', 'NULL'],
 ];
 
 function fieldLine(model: string, field: string): string {
@@ -49,5 +62,18 @@ describe('MySQL long text columns', () => {
   it('leaves audit tables whose value columns have no long writers unchanged', () => {
     expect(fieldLine('PayrollAuditLog', 'newValue')).not.toContain('@db.LongText');
     expect(fieldLine('KnowledgeAuditTrail', 'newValue')).not.toContain('@db.LongText');
+  });
+
+  // Recorded scanner output peaks at 70 characters, and the unique key on
+  // normalizedKeyword + keywordType stops the registry merge paths from running.
+  it.each([
+    ['AiKnowledgeMap', 'generatedAliases'],
+    ['AiKnowledgeMap', 'generatedSynonyms'],
+    ['AiKnowledgeMap', 'abbreviations'],
+    ['AiRagKeywordRegistry', 'aliases'],
+    ['AiRagKeywordRegistry', 'synonyms'],
+    ['AiRagKeywordRegistry', 'abbreviations'],
+  ])('leaves %s.%s unchanged without overflow evidence', (model, field) => {
+    expect(fieldLine(model, field)).not.toContain('@db.LongText');
   });
 });

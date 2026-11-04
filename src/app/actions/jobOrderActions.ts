@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 
 const API_ROUTE_PREFIX = '/api/jobOrderActions'; // New common prefix for all actions
+const JOB_ORDER_WRITE_ROUTE = '/api/subcontracting/job-orders'; // Owns create and edit: permissions, locks and BOQ conflict rules
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies(); // `cookies()` is not awaitable
@@ -27,7 +28,9 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    let backendMessage: unknown;
+    try { backendMessage = JSON.parse(errorText)?.error; } catch { /* Not a JSON error body. */ }
+    throw new Error(typeof backendMessage === 'string' ? backendMessage : `Backend Error: ${res.status} ${errorText}`);
   }
   return res.json();
 }
@@ -78,7 +81,7 @@ export async function getConsolidatedBoqItemsByProjectId(projectId: string) {
 
 export async function createJobOrder(data: any) {
   try {
-    const result = await fetchWithAuth(`${API_ROUTE_PREFIX}/createJobOrder`, {
+    const result = await fetchWithAuth(JOB_ORDER_WRITE_ROUTE, {
       method: 'POST',
       body: JSON.stringify(data)
     });
@@ -94,12 +97,13 @@ export async function createJobOrder(data: any) {
 
 export async function updateJobOrder(id: string, data: any) {
   try {
-    const result = await fetchWithAuth(`${API_ROUTE_PREFIX}/updateJobOrder`, {
-      method: 'POST',
-      body: JSON.stringify({ id, data }) // Pass both id and data in the body for the RPC call
+    const result = await fetchWithAuth(`${JOB_ORDER_WRITE_ROUTE}/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
     });
     
     revalidatePath('/job-orders/dashboard');
+    revalidatePath(`/job-orders/${id}`);
     return result; // Original returned result of fetchWithAuth, matches backend
   } catch (error: any) {
     console.error("Update Job Order Error:", error);
