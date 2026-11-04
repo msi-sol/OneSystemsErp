@@ -2,8 +2,12 @@
 import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 import { validateBOQUploadFile } from '@/lib/boq/upload-input';
+import { approveTemplateUploadForCurrentActor } from '@/lib/boq/approve-template-upload';
+import { updateTemplateUploadReviewStatus, type TemplateReviewAction } from '@/lib/boq/template-review';
 
 import { cookies } from 'next/headers';
+
+class BOQRequestError extends Error {}
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies();
@@ -24,8 +28,13 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   });
 
   if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    const message = res.status === 401 ? 'Your session has expired. Please sign in again.'
+      : res.status === 403 ? 'You do not have permission to upload or access this project BOQ.'
+      : res.status === 404 ? 'This upload status is no longer available. Please check the project documents.'
+      : res.status === 400 ? 'The workbook could not be accepted. Check its filename, format and size.'
+      : res.status === 503 ? 'BOQ processing is busy. Please try again shortly.'
+      : 'BOQ processing is unavailable. Please try again.';
+    throw new BOQRequestError(message);
   }
   return res.json();
 }
@@ -49,7 +58,7 @@ export async function uploadAndParseBOQ(formData: FormData) {
     return result;
   } catch (error) {
     console.error("BOQ Upload dispatch error:", error);
-    return { success: false, error: 'Unable to start the BOQ upload. Please try again.' };
+    return { success: false, error: error instanceof BOQRequestError ? error.message : 'Unable to start the BOQ upload. Please try again.' };
   }
 }
 
@@ -65,12 +74,16 @@ export async function checkBoqUploadStatus(jobId: string) {
 
 export async function approveBOQUpload(uploadId: string) {
   try {
-    const result = await fetchWithAuth('/api/consolidation/approve', {
-      method: 'POST',
-      body: JSON.stringify({ uploadId })
-    });
-    return result;
+    return await approveTemplateUploadForCurrentActor(uploadId);
   } catch (error) {
-     return { success: false, error: error instanceof Error ? error.message : 'Unable to approve BOQ upload.' };
+     return { success: false as const, error: error instanceof Error ? error.message : 'Unable to approve BOQ upload.' };
+  }
+}
+
+export async function reviewBOQUpload(uploadId: string, action: TemplateReviewAction) {
+  try {
+    return await updateTemplateUploadReviewStatus(uploadId, action);
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Unable to update BOQ review status.' };
   }
 }

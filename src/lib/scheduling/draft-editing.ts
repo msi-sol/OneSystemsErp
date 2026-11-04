@@ -139,7 +139,8 @@ export async function createDraftScheduleActivity(args: {
     'plannedStartDate', 'plannedFinishDate', 'unit', 'plannedQuantity', 'expectedRowVersion',
   ]));
   if (typeof body.name !== 'string' || !body.name.trim()) invalid('INVALID_NAME');
-  validateStringLength(body.name.trim(), 191, 'NAME_TOO_LONG');
+  const name = body.name.trim();
+  validateStringLength(name, 191, 'NAME_TOO_LONG');
   const expectedRowVersionInput = body.expectedRowVersion;
   if (expectedRowVersionInput === undefined) invalid('MISSING_EXPECTED_ROW_VERSION');
   if (typeof expectedRowVersionInput !== 'number' || !Number.isSafeInteger(expectedRowVersionInput) || expectedRowVersionInput < 0) {
@@ -177,7 +178,7 @@ export async function createDraftScheduleActivity(args: {
     const activity = await tx.scheduleActivity.create({
       data: {
         scheduleId: schedule.id,
-        name: body.name.trim(),
+        name,
         activityCode: typeof activityCode === 'string' ? activityCode.trim() || null : null,
         description: typeof body.description === 'string' ? body.description : null,
         wbsId: typeof body.wbsId === 'string' ? body.wbsId : null,

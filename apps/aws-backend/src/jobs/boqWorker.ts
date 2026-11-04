@@ -1,10 +1,5 @@
-import { prisma } from '../lib/prisma';
-// @ts-nocheck
 import ExcelJS from "exceljs";
-import { PrismaClient } from "@prisma/client";
-import { uploadFileToS3 as put } from "../services/s3.service";
-import fs from "fs";
-import path from "path";
+import { persistBOQUpload } from './boqUploadPersistence';
 function normalizeHeader(text: string) {
   if (!text) return "";
   return text
@@ -64,25 +59,6 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
         if (colNum === 10 && i === 4) cpRate = (Number(cell.value) || 0) * 100; // J4
         if (colNum === 11 && i === 4) vatRate = (Number(cell.value) || 0) * 100; // K4
       });
-    }
-
-    let targetProjectId = projectId;
-    if (!targetProjectId) {
-      if (!projectName) {
-        // Fallback to fileName without extension if no project name is found inside the sheet
-        projectName = fileName.replace(/\.[^/.]+$/, "") || `New Project ${new Date().toISOString().split('T')[0]}`;
-      }
-      const newProject = await prisma.project.create({
-        data: {
-          name: projectName,
-          location: location || "",
-          description: subject || "Uploaded from BOQ Template Center",
-          status: "PLANNING",
-          startDate: new Date(),
-          endDate: new Date(),
-        }
-      });
-      targetProjectId = newProject.id;
     }
 
     // Helper to safely get string from cell (handles rich text)
@@ -203,8 +179,6 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
     let errorRowsCount = 0;
     let warningRowsCount = 0;
 
-    let consecutiveBlank = 0;
-
     // According to instructions, formulas start around row 5. The actual data row is headerRowNumber + 1 (might be +2 if headers are merged)
     let currentRowNum = headerRowNumber + 1;
     // Skip remaining header rows (rows 2, 3, 4 etc) by checking if the ITEM col or DESC col contains header-like text
@@ -231,12 +205,11 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
       }
 
       if (!descCell && !itemNumberRaw) {
-        consecutiveBlank++;
-        if (consecutiveBlank >= 10) break;
+        // The official template reserves blank item rows before its grand total.
+        // Keep scanning the bounded sheet so a short BOQ still reads that total.
         currentRowNum++;
         continue;
       }
-      consecutiveBlank = 0;
 
       let itemNumber = itemNumberRaw;
       
@@ -318,68 +291,8 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
 
     const validationStatus = errors.length > 0 ? "VALIDATION_FAILED" : "DRAFT_UPLOADED";
 
-    // Securely preserve original file
-    let blobUrl = '';
-    if (process.env.AWS_ACCESS_KEY_ID) {
-      const mimeType = fileName.endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/octet-stream';
-      const key = `boq-uploads/${targetProjectId}/${Date.now()}-${fileName}`;
-      await put(buffer, key, mimeType);
-      blobUrl = `https://${process.env.S3_BUCKET_NAME}.s3.amazonaws.com/${key}`;
-    } else {
-      console.warn("BLOB_READ_WRITE_TOKEN is missing. Falling back to local filesystem for upload.");
-      try {
-        const dir = path.join(process.cwd(), 'public', 'uploads', 'boq-uploads', targetProjectId);
-        fs.mkdirSync(dir, { recursive: true });
-        const safeName = `${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-        const filePath = path.join(dir, safeName);
-        fs.writeFileSync(filePath, buffer);
-        blobUrl = `/uploads/boq-uploads/${targetProjectId}/${safeName}`;
-      } catch (err) {
-        console.warn("Could not save file to local filesystem (likely Vercel read-only environment). Continuing without saving file.", err);
-      }
-    }
-
-    // Step 6: Save BOQTemplateUpload record
-    // @ts-ignore - Prisma client typing mismatch for BOQTemplateUpload
-    let uploadRecord = await prisma.bOQTemplateUpload.create({
-      data: {
-        projectId: targetProjectId,
-        uploadedByUserId: user.id,
-        uploadedByName: user.name || "Unknown",
+    const report = {
         fileName,
-        templateVersion,
-        status: validationStatus,
-        grandTotal,
-        totalPercentage: totalPercentage * 100, // store as 100.00
-        ocmRate,
-        cpRate,
-        vatRate,
-        validRows: validRowsCount,
-        errorRows: errorRowsCount,
-        warningRows: warningRowsCount,
-        fileUrl: blobUrl,
-        validationReport: JSON.stringify({ errors, warnings, items }),
-      }
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        userRole: user.role,
-        moduleName: "BOQ_TEMPLATE_CENTER",
-        transactionId: uploadRecord.id,
-        actionType: "FILE_UPLOADED_AND_VALIDATED",
-        remarks: `Uploaded BOQ ${fileName}. Status: ${validationStatus}. ValidRows: ${validRowsCount}, Errors: ${errorRowsCount}`,
-      }
-    });
-
-    return {
-      success: true,
-      uploadId: uploadRecord.id,
-      status: validationStatus,
-      report: {
-        fileName,
-        fileUrl: blobUrl,
         templateVersion,
         projectName,
         location,
@@ -395,8 +308,11 @@ export async function runBoqUploadJob(jobId: string, projectId: string | null | 
         totalPercentage: totalPercentage * 100,
         errors,
         warnings,
-      }
     };
+    // Parse/validate first; all database records are then saved together.
+    const saved = await persistBOQUpload({ projectId, projectName, location, subject, templateVersion,
+      fileName, buffer, items, user, validationStatus, grandTotal, report });
+    return { success: true, status: validationStatus, ...saved };
 
   } catch (error: any) {
     console.error("BOQ Upload Parse Error:", error);

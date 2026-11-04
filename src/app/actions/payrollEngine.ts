@@ -34,7 +34,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
  * AI-Assisted Payroll Computation Engine
  */
 export async function computePayrollForPeriod(payrollPeriodId: string) {
-  const result = await fetchWithAuth('/api/payrollEngine/computePayrollForPeriod', {
+  const result = await fetchWithAuth('/api/payroll/engine/compute', {
     method: 'POST',
     body: JSON.stringify({ payrollPeriodId })
   });
@@ -43,7 +43,7 @@ export async function computePayrollForPeriod(payrollPeriodId: string) {
 }
 
 export async function deletePayrollPeriod(periodId: string) {
-  const result = await fetchWithAuth(`/api/payrollEngine/deletePayrollPeriod/${periodId}`, {
+  const result = await fetchWithAuth(`/api/payroll/period/${periodId}`, {
     method: 'DELETE'
   });
   revalidatePath('/payroll');

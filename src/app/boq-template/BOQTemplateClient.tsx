@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { generateBOQTemplate } from "@/app/actions/boqTemplateService";
-import { uploadAndParseBOQ, checkBoqUploadStatus, approveBOQUpload } from "@/app/actions/boqUploadParser";
+import { uploadAndParseBOQ, checkBoqUploadStatus, approveBOQUpload, reviewBOQUpload } from "@/app/actions/boqUploadParser";
 import { validateBOQUploadFile } from "@/lib/boq/upload-input";
 import { Download, Upload, FileSpreadsheet, CheckCircle, AlertTriangle, XCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,6 +39,7 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
   const [isDownloading, setIsDownloading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
   
   const [uploadResult, setUploadResult] = useState<BOQUploadResult | null>(null);
   const mountedRef = useRef(true);
@@ -74,6 +75,7 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
       toast.success("Template downloaded successfully");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "An error occurred");
@@ -185,12 +187,30 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
         toast.success("BOQ successfully approved and activated!");
         setUploadResult({ ...uploadResult, status: "APPROVED" });
       } else {
-        toast.error("Failed to approve");
+        toast.error(res.error || "Failed to approve");
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setIsApproving(false);
+    }
+  };
+
+  const handleReview = async (action: 'SUBMIT_FOR_REVIEW' | 'RETURN_FOR_CORRECTION') => {
+    if (!uploadResult) return;
+    setIsReviewing(true);
+    try {
+      const result = await reviewBOQUpload(uploadResult.uploadId, action);
+      if (!result.success) {
+        toast.error(result.error || 'Unable to update review status.');
+        return;
+      }
+      setUploadResult({ ...uploadResult, status: result.status });
+      toast.success(action === 'SUBMIT_FOR_REVIEW' ? 'Submitted for review.' : 'Returned for correction. Upload a corrected workbook.');
+    } catch {
+      toast.error('Unable to update review status. Please try again.');
+    } finally {
+      setIsReviewing(false);
     }
   };
 
@@ -291,6 +311,10 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
               <span className={`${styles.badge} ${styles.approved}`}>
                 <CheckCircle size={16} style={{ marginRight: '8px' }} /> Approved
               </span>
+            ) : uploadResult.status === 'SUBMITTED_FOR_REVIEW' || uploadResult.status === 'RETURNED_FOR_CORRECTION' ? (
+              <span className={`${styles.badge} ${styles.ready}`}>
+                {uploadResult.status === 'SUBMITTED_FOR_REVIEW' ? 'Submitted for Review' : 'Returned for Correction'}
+              </span>
             ) : (
               <span className={`${styles.badge} ${styles.ready}`}>
                 <CheckCircle size={16} style={{ marginRight: '8px' }} /> Ready for Import
@@ -346,18 +370,18 @@ export default function BOQTemplateClient({ projects }: { projects: { id: string
           )}
 
           <div className={styles.actions}>
-            <button className={styles.secondaryBtn} onClick={() => setUploadResult(null)}>
-              Cancel
+            <button className={styles.secondaryBtn} disabled={isApproving || isReviewing} onClick={() => setUploadResult(null)}>
+              Close Report
             </button>
-            <button className={styles.warningBtn} onClick={() => setUploadResult(null)}>
+            <button className={styles.warningBtn} disabled={isApproving || isReviewing || uploadResult.status === 'APPROVED' || uploadResult.status === 'RETURNED_FOR_CORRECTION'} onClick={() => handleReview('RETURN_FOR_CORRECTION')}>
               Return for Correction
             </button>
-            <button className={styles.submitBtn} disabled={uploadResult.status === "VALIDATION_FAILED" || uploadResult.status === "APPROVED"} onClick={() => toast.success("Submitted for review!")}>
+            <button className={styles.submitBtn} disabled={isReviewing || isApproving || uploadResult.status === "VALIDATION_FAILED" || uploadResult.status === "APPROVED" || uploadResult.status === 'SUBMITTED_FOR_REVIEW' || uploadResult.status === 'RETURNED_FOR_CORRECTION'} onClick={() => handleReview('SUBMIT_FOR_REVIEW')}>
               Submit for Review
             </button>
             <button 
               className={styles.successBtn}
-              disabled={uploadResult.status === "VALIDATION_FAILED" || uploadResult.status === "APPROVED" || isApproving}
+              disabled={uploadResult.status === "VALIDATION_FAILED" || uploadResult.status === "APPROVED" || uploadResult.status === 'RETURNED_FOR_CORRECTION' || isApproving || isReviewing}
               onClick={handleApprove}
             >
               {isApproving && <Loader2 size={16} className={styles.spin} />}

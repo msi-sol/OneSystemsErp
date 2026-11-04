@@ -1,6 +1,8 @@
 jest.mock('@/lib/backend-fetch', () => ({ backendFetch: jest.fn() }));
 jest.mock('@/lib/dal/auth', () => ({ verifySession: jest.fn() }));
 jest.mock('next/headers', () => ({ cookies: jest.fn() }));
+jest.mock('@/lib/boq/approve-template-upload', () => ({ approveTemplateUploadForCurrentActor: jest.fn() }));
+jest.mock('@/lib/boq/template-review', () => ({ updateTemplateUploadReviewStatus: jest.fn() }));
 
 import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
@@ -63,4 +65,14 @@ test('returns a safe actionable failure when dispatch fails', async () => {
   } finally {
     log.mockRestore();
   }
+});
+
+test('explains permission denial without exposing backend diagnostics', async () => {
+  const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  try {
+    (backendFetch as jest.Mock).mockResolvedValue(new Response('Private diagnostics', { status: 403 }));
+    await expect(uploadAndParseBOQ(workbook(new Uint8Array([1])))).resolves.toEqual({
+      success: false, error: 'You do not have permission to upload or access this project BOQ.',
+    });
+  } finally { log.mockRestore(); }
 });

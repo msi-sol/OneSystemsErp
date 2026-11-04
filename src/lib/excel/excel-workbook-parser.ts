@@ -1,8 +1,26 @@
-// @ts-nocheck
 import ExcelJS from 'exceljs';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { extractLayout } from './excel-layout-snapshot';
 import { extractStyles } from './excel-style-extractor';
+
+interface CellSnapshot {
+  uploadedWorkbookFileId: string;
+  sheetName: string;
+  cellAddress: string;
+  rowNumber: number;
+  columnLetter: string;
+  rawValue: string;
+  displayValue: string;
+  formula: string;
+  dataType: string;
+  numberFormat: string | null;
+  styleJson: string;
+  isMerged: boolean;
+  mergedRange: string | null;
+  isFormulaCell: boolean;
+  isEditableCell: boolean;
+}
 
 export async function parseWorkbook(
   buffer: Buffer,
@@ -10,7 +28,7 @@ export async function parseWorkbook(
   projectId: string
 ) {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  await workbook.xlsx.load(new Uint8Array(buffer).buffer);
 
   const sheet = workbook.getWorksheet('BOQ_DATA_ENTRY');
   if (!sheet) {
@@ -19,36 +37,31 @@ export async function parseWorkbook(
 
   // 1. Extract Layout
   const layout = extractLayout(sheet);
-  await prisma.workbookLayoutSnapshot.create({
-    data: {
-      uploadedWorkbookFileId,
-      sheetName: 'BOQ_DATA_ENTRY',
-      columnWidthsJson: JSON.stringify(layout.columns),
-      rowHeightsJson: JSON.stringify(layout.rows),
-      mergedCellsJson: JSON.stringify(layout.merges),
-    }
-  });
 
   // 2. Extract Cell Snapshots
-  const cellSnapshots: any[] = [];
+  const cellSnapshots: CellSnapshot[] = [];
   
   sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
     row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      // Only capture columns B to P (2 to 16) and rows up to roughly 200 to prevent infinite snapshotting
+      // Preserve the existing snapshot bounds: columns B:P and rows 1:500.
       if (colNumber >= 2 && colNumber <= 16 && rowNumber <= 500) {
         
         let rawValue = cell.value?.toString() || '';
-        let displayValue = cell.text || '';
-        let formula = cell.formula || cell.sharedFormula || '';
-        let isFormula = !!cell.formula || !!cell.sharedFormula;
+        const displayValue = cell.text || '';
+        let formula = cell.formula || '';
+        let isFormula = !!cell.formula;
 
         if (typeof cell.value === 'object' && cell.value !== null) {
           if ('formula' in cell.value) {
-            formula = (cell.value as any).formula;
+            formula = cell.value.formula || '';
+            isFormula = true;
+          }
+          if ('sharedFormula' in cell.value) {
+            formula = cell.value.sharedFormula || '';
             isFormula = true;
           }
           if ('result' in cell.value) {
-            rawValue = (cell.value as any).result?.toString() || '';
+            rawValue = cell.value.result?.toString() || '';
           }
         }
 
@@ -75,12 +88,34 @@ export async function parseWorkbook(
     });
   });
 
-  // Batch insert cell snapshots to avoid DB timeouts
+  // Persist snapshots in the existing audit model; there are no snapshot tables.
+  // Keep cell batches bounded and write the layout and all batches atomically.
+  const auditEntries: Prisma.WorkbookExtractionAuditCreateManyInput[] = [{
+    uploadedWorkbookFileId,
+    projectId,
+    action: 'WORKBOOK_LAYOUT_SNAPSHOT',
+    status: 'SUCCESS',
+    detailsJson: JSON.stringify({
+      schemaVersion: 1,
+      sheetName: sheet.name,
+      columnWidthsJson: JSON.stringify(layout.columns),
+      rowHeightsJson: JSON.stringify(layout.rows),
+      mergedCellsJson: JSON.stringify(layout.merges),
+      cellCount: cellSnapshots.length,
+    }),
+  }];
   const chunkSize = 500;
   for (let i = 0; i < cellSnapshots.length; i += chunkSize) {
     const chunk = cellSnapshots.slice(i, i + chunkSize);
-    await prisma.workbookCellSnapshot.createMany({ data: chunk });
+    auditEntries.push({
+      uploadedWorkbookFileId,
+      projectId,
+      action: 'WORKBOOK_CELL_SNAPSHOT',
+      status: 'SUCCESS',
+      detailsJson: JSON.stringify({ schemaVersion: 1, sheetName: sheet.name, chunkIndex: i / chunkSize, cells: chunk }),
+    });
   }
+  await prisma.workbookExtractionAudit.createMany({ data: auditEntries });
 
   return { layout, cellCount: cellSnapshots.length, workbook };
 }
