@@ -2627,7 +2627,7 @@ model NotebookReferenceVersion {
   versionNumber     Int
   fileName          String
   filePath          String
-  extractedText     String?
+  extractedText     String? @db.LongText
   aiSummary         String? @db.LongText
   aiKeywords        String?
   fileHash          String?
