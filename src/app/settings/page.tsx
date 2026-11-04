@@ -4,6 +4,7 @@ import styles from '../projects/page.module.css';
 import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
 import { resetTransactionData, getCurrentUserRole } from '@/app/actions/systemResetActions';
+import type { TemporaryCredential } from '@/lib/role-account-seed';
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
@@ -11,6 +12,7 @@ export default function SettingsPage() {
   const [resetConfirmation, setResetConfirmation] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [issuedCredentials, setIssuedCredentials] = useState<TemporaryCredential[]>([]);
 
   useEffect(() => {
     getCurrentUserRole().then(role => setUserRole(role));
@@ -38,12 +40,26 @@ export default function SettingsPage() {
       toast.success('Transactional data has been successfully cleared. Users, roles, permissions, database structure, and system settings were preserved.', { duration: 10000 });
       setIsResetModalOpen(false);
       setResetConfirmation('');
-      // Force refresh to clear any cached layout data
-      setTimeout(() => window.location.reload(), 2000);
+      // Force refresh to clear any cached layout data, unless one-time passwords are still on screen
+      if (result.temporaryCredentials?.length) {
+        setIssuedCredentials(result.temporaryCredentials);
+      } else {
+        setTimeout(() => window.location.reload(), 2000);
+      }
     } else {
       toast.error(result.error || 'Failed to reset transaction data.');
     }
     setResetLoading(false);
+  };
+
+  const handleCopyCredentials = async () => {
+    const text = issuedCredentials.map(credential => `${credential.email}\t${credential.temporaryPassword}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Passwords copied to the clipboard.');
+    } catch {
+      toast.error('Could not copy. Please copy the passwords manually.');
+    }
   };
 
   return (
@@ -260,6 +276,74 @@ export default function SettingsPage() {
                 }}
               >
                 {resetLoading ? '⏳ Clearing All Data...' : '🔄 Confirm Master Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ONE-TIME PASSWORDS ISSUED BY THE RESET */}
+      {issuedCredentials.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--glass-border)',
+            padding: '2rem',
+            borderRadius: '12px',
+            maxWidth: '640px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}>
+            <h2 style={{ color: 'var(--text-primary)', marginBottom: '1rem' }}>New account passwords</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', lineHeight: '1.6', fontSize: '0.95rem' }}>
+              These accounts were created by the reset. Each password is shown only here and must be changed at first sign-in. Copy them before closing this window.
+            </p>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-secondary)' }}>
+                  <th style={{ padding: '0.5rem' }}>Email</th>
+                  <th style={{ padding: '0.5rem' }}>One-time password</th>
+                </tr>
+              </thead>
+              <tbody>
+                {issuedCredentials.map(credential => (
+                  <tr key={credential.email} style={{ borderTop: '1px solid var(--glass-border)', color: 'var(--text-primary)' }}>
+                    <td style={{ padding: '0.5rem', wordBreak: 'break-all' }}>{credential.email}</td>
+                    <td style={{ padding: '0.5rem', fontFamily: 'monospace', wordBreak: 'break-all' }}>{credential.temporaryPassword}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleCopyCredentials}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--glass-border)',
+                  padding: '0.75rem 1.5rem',
+                  borderRadius: '6px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Copy all
+              </button>
+              <button
+                className={styles.primaryButton}
+                onClick={() => window.location.reload()}
+              >
+                I have saved them
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { seedRoleAccounts, type TemporaryCredential } from '../../../../src/lib/role-account-seed';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -13,6 +14,7 @@ const router = Router();
 // or suitable for database files.
 
 router.post('/resetTransactionData', async (req, res) => {
+  let temporaryCredentials: TemporaryCredential[] = [];
   try {
     const { confirmationText, sessionId } = req.body; // Identity is replaced by authenticated middleware.
 
@@ -60,7 +62,7 @@ router.post('/resetTransactionData', async (req, res) => {
     // ============================================================================
 
     // 2. Perform the deletions in dependency-safe bottom-up order
-    await prisma.$transaction(async (tx) => {
+    temporaryCredentials = await prisma.$transaction(async (tx) => {
       // --- PHASE 1: Logs, AI Results, Activity Tracking ---
       await tx.aIValidationLog.deleteMany({});
       await tx.auditLog.deleteMany({});
@@ -236,54 +238,8 @@ router.post('/resetTransactionData', async (req, res) => {
       await tx.userRole.deleteMany({ where: { user: { email: { startsWith: 'sample.' } } } });
       await tx.user.deleteMany({ where: { email: { startsWith: 'sample.' } } });
 
-      const rolesToSeed = [
-        { email: 'director@onesystemserp.com', name: 'Project Director', roleCode: 'PROJECT_DIRECTOR' },
-        { email: 'manager@onesystemserp.com', name: 'Project Manager', roleCode: 'PROJECT_MANAGER' },
-        { email: 'purchasing@onesystemserp.com', name: 'Purchasing Officer', roleCode: 'PURCHASING_OFFICER' },
-        { email: 'finance@onesystemserp.com', name: 'Finance Officer', roleCode: 'FINANCE_OFFICER' },
-        { email: 'accounting@onesystemserp.com', name: 'Accountant', roleCode: 'ACCOUNTANT' },
-        { email: 'billing@onesystemserp.com', name: 'Billing Engineer', roleCode: 'BILLING_ENGINEER' },
-        { email: 'engineer@onesystemserp.com', name: 'Site Engineer', roleCode: 'SITE_ENGINEER' },
-        { email: 'admin@onesystemserp.com', name: 'Site Admin', roleCode: 'SITE_ADMIN' }
-      ];
-
-      for (const u of rolesToSeed) {
-        let user = await tx.user.findFirst({ where: { email: u.email } });
-        if (!user) {
-          user = await tx.user.create({
-            data: {
-              name: u.name,
-              email: u.email,
-              passwordHash: '$2b$10$6VGqOkFNU48h/2NcmMYShuHLyRKZ9wlbVDfEtGpxSuhZO5t9A8O5u', // admin001
-              password: 'admin001', // fallback
-              role: u.roleCode,
-              status: 'ACTIVE',
-              defaultRole: u.roleCode
-            }
-          });
-        } else {
-          user = await tx.user.update({
-            where: { id: user.id },
-            data: {
-              passwordHash: '$2b$10$6VGqOkFNU48h/2NcmMYShuHLyRKZ9wlbVDfEtGpxSuhZO5t9A8O5u',
-              password: 'admin001',
-              role: u.roleCode,
-              defaultRole: u.roleCode
-            }
-          });
-        }
-        const roleRecord = await tx.role.findFirst({ where: { roleCode: u.roleCode } });
-        if (roleRecord) {
-          const existingUserRole = await tx.userRole.findFirst({
-            where: { userId: user.id, roleId: roleRecord.id }
-          });
-          if (!existingUserRole) {
-            await tx.userRole.create({
-              data: { userId: user.id, roleId: roleRecord.id }
-            });
-          }
-        }
-      }
+      // Make sure the role-based accounts exist; existing accounts keep their passwords
+      const issued = await seedRoleAccounts(tx);
 
       // ============================================================================
       // PROTECTED (NOT deleted):
@@ -303,11 +259,13 @@ router.post('/resetTransactionData', async (req, res) => {
       await tx.auditLog.create({
         data: {
           user: { connect: { id: currentUserId } },
-          remarks: 'MASTER RESET: All transactional and master data wiped. Only Users, System Roles, Access Matrix, and Knowledge Base preserved.',
+          remarks: `MASTER RESET: All transactional and master data wiped. Only Users, System Roles, Access Matrix, and Knowledge Base preserved. Temporary passwords issued: ${issued.length}.`,
           moduleName: 'SYSTEM_SETTINGS',
           actionType: 'DELETE'
         }
       });
+
+      return issued;
     }, {
       timeout: 60000 // Allow up to 60s for the transaction
     });
@@ -333,10 +291,11 @@ router.post('/resetTransactionData', async (req, res) => {
       console.log('Cleared all uploaded files.');
     }
 
-    return res.json({ success: true });
+    return res.json({ success: true, temporaryCredentials });
   } catch (error: any) {
     console.error('Failed to reset transaction data:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    // Upload cleanup runs after the commit, so passwords issued by a committed reset still go back
+    return res.status(500).json({ success: false, error: error.message, temporaryCredentials });
   }
 });
 
