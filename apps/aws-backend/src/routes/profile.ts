@@ -6,7 +6,7 @@ const router = Router();
 
 router.post('/updateProfile', async (req: Request, res: Response) => {
   try {
-    const { userId, name, email, password, confirmPassword } = req.body;
+    const { userId, name, email, password } = req.body;
 
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized. User ID is missing.' });
@@ -16,21 +16,14 @@ router.post('/updateProfile', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Name and email are required.' });
     }
 
-    if (password && password !== confirmPassword) {
-      return res.status(400).json({ success: false, error: 'Passwords do not match.' });
+    if (password) {
+      return res.status(400).json({ success: false, error: 'Change your password from the Change Password page.' });
     }
 
     const dataToUpdate: any = {
       name,
       email,
     };
-
-    if (password) {
-      // In a real application, ensure you hash the password before saving. 
-      // Based on auth.ts, passwords here might be plain text for prototype, 
-      // but update this as per project security standards.
-      dataToUpdate.password = password; // Assuming plain text for now as per original comment
-    }
 
     await prisma.user.update({
       where: { id: userId },

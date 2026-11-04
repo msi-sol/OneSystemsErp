@@ -2,11 +2,26 @@
 
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/prisma';
+import { prismaBase } from '@/lib/prisma-base';
 import bcrypt from 'bcryptjs';
 import { validatePasswordPolicy } from '@/lib/passwordPolicy';
 import { requirePermission } from '@/lib/permissions';
 import { verifySession } from '@/lib/dal/auth';
 import { signOut } from '@/auth';
+import {
+  canAdministerUsers,
+  canManageAccountRole,
+  createUserWithTemporaryPassword,
+  normalizeRoleName,
+  resetPasswordForUser,
+  validateNewPassword,
+} from '@/lib/user-credentials';
+
+async function _requireUserAdmin() {
+  const actor = await verifySession();
+  if (!actor || actor.mustChangePassword || !canAdministerUsers(actor.role)) return null;
+  return actor;
+}
 
 // Internal helper to avoid code duplication
 async function _internalCreateSystemRole(roleName: string) {
@@ -155,12 +170,22 @@ export async function createSystemRole(roleName: string) {
 
 export async function createUser(data: { name: string, email: string, role: string }) {
   try {
+    const actor = await _requireUserAdmin();
+    if (!actor) {
+      return { success: false, error: 'Unauthorized: You do not have permission to create users.' };
+    }
+
     if (!data.name || !data.email || !data.role) {
       return { success: false, error: 'All fields are required.' };
     }
 
+    if (!canManageAccountRole(actor.role, data.role)) {
+      return { success: false, error: 'Unauthorized: Only a Super Admin can create administrator accounts.' };
+    }
+
+    const email = data.email.trim();
     const existingUser = await prisma.user.findUnique({
-      where: { email: data.email }
+      where: { email }
     });
     if (existingUser) {
       return { success: false, error: 'A user with this email already exists.' };
@@ -171,26 +196,38 @@ export async function createUser(data: { name: string, email: string, role: stri
       return { success: false, error: 'Failed to resolve system role.' };
     }
 
-    await prisma.user.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        role: finalRole.name!,
-        password: 'admin001',
-      }
-    });
+    const temporaryPassword = await prismaBase.$transaction((tx) => createUserWithTemporaryPassword(
+      tx,
+      { id: actor.id, role: actor.role },
+      { name: data.name, email, role: finalRole.name! },
+    ));
 
     revalidatePath('/users');
-    return { success: true };
+    return { success: true, temporaryPassword };
   } catch (err: any) {
-    return { success: false, error: err.message || 'An unexpected database error occurred.' };
+    // Prisma messages can echo the attempted values, which here include the password hash.
+    return { success: false, error: err?.code === 'P2002' ? 'A user with this email already exists.' : 'An unexpected database error occurred.' };
   }
 }
 
-export async function updateUser(id: string, data: { name: string, email: string, role: string, password?: string }) {
+export async function updateUser(id: string, data: { name: string, email: string, role: string }) {
   try {
+    const actor = await _requireUserAdmin();
+    if (!actor) {
+      return { success: false, error: 'Unauthorized: You do not have permission to update users.' };
+    }
+
     if (!id || !data || !data.name || !data.email || !data.role) {
       return { success: false, error: 'User ID, Name, Email, and Role are required.' };
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id } });
+    if (!targetUser) {
+      return { success: false, error: 'Target user not found.' };
+    }
+
+    if (!canManageAccountRole(actor.role, targetUser.role) || !canManageAccountRole(actor.role, normalizeRoleName(data.role))) {
+      return { success: false, error: 'Unauthorized: Only a Super Admin can change administrator accounts.' };
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -205,15 +242,12 @@ export async function updateUser(id: string, data: { name: string, email: string
       return { success: false, error: 'Failed to resolve system role.' };
     }
 
+    // Passwords change only through resetUserPassword, which hashes and audits them.
     const updateData: any = {
       name: data.name,
       email: data.email,
       role: finalRole.name!,
     };
-
-    if (data.password && data.password.trim() !== '') {
-      updateData.password = data.password;
-    }
 
     await prisma.user.update({
       where: { id },
@@ -252,8 +286,8 @@ export async function resetUserPassword(targetUserId: string, newPasswordRaw: st
     
     const actorUserId = actorSession.id;
     const actorRole = actorSession.role;
-    
-    if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'SYSTEM_ADMIN' && actorRole !== 'PROJECT_DIRECTOR') {
+
+    if (actorSession.mustChangePassword || !canAdministerUsers(actorRole)) {
        return { success: false, error: 'Unauthorized: You do not have permission to reset passwords.' };
     }
 
@@ -266,42 +300,21 @@ export async function resetUserPassword(targetUserId: string, newPasswordRaw: st
       return { success: false, error: 'Target user not found.' };
     }
 
-    const policyResult = validatePasswordPolicy(newPasswordRaw, targetUser.email || '');
+    if (!canManageAccountRole(actorRole, targetUser.role)) {
+      return { success: false, error: 'Unauthorized: Only a Super Admin can reset administrator passwords.' };
+    }
+
+    const policyResult = validateNewPassword(newPasswordRaw, targetUser.email || '');
     if (!policyResult.valid) {
       return { success: false, error: policyResult.error };
     }
 
-    const passwordHash = await bcrypt.hash(newPasswordRaw, 10);
-
-    await prisma.user.update({
-      where: { id: targetUserId },
-      data: {
-        passwordHash,
-        password: null,
-        mustChangePassword: true,
-        sessionVersion: { increment: 1 }
-      }
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        userId: actorUserId,
-        userRole: actorRole,
-        moduleName: 'USER_MANAGEMENT',
-        actionType: 'PASSWORD_RESET_COMPLETED',
-        remarks: `Password reset initiated and completed for user ${targetUser.email}`,
-      }
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        userId: actorUserId,
-        userRole: actorRole,
-        moduleName: 'USER_MANAGEMENT',
-        actionType: 'USER_SESSIONS_REVOKED',
-        remarks: `Sessions revoked for user ${targetUser.email} via sessionVersion increment`,
-      }
-    });
+    await prismaBase.$transaction((tx) => resetPasswordForUser(
+      tx,
+      { id: actorUserId, role: actorRole },
+      { id: targetUser.id, email: targetUser.email },
+      newPasswordRaw,
+    ));
 
     revalidatePath('/users');
     return { success: true };
