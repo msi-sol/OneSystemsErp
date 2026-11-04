@@ -1,16 +1,16 @@
 import { prisma } from '../lib/prisma';
-// @ts-nocheck
 import { Router } from 'express';
+import type { AuthenticatedRequest } from '../middleware/auth';
 import ExcelJS from "exceljs";
 import path from "path";
 import fs from "fs";
-import { PrismaClient } from '@prisma/client';
 const router = Router();
 
-router.post('/generateBOQTemplate', async (req, res) => {
+router.post('/generateBOQTemplate', async (req: AuthenticatedRequest, res) => {
   try {
-    // Extract arguments and email for audit log from request body
-    const { projectId, email } = req.body; 
+    const user = req.user;
+    if (!user) return res.status(401).json({ success: false, error: 'An active session is required.' });
+    const { projectId } = req.body;
 
     const templatePath = path.join(process.cwd(), "public", "templates", "Final_BOQ_Bid_Detailed_Cost_Breakdown_Template.xlsx");
     
@@ -81,21 +81,16 @@ router.post('/generateBOQTemplate', async (req, res) => {
 
     const buffer = await workbook.xlsx.writeBuffer();
     
-    // Audit Log
-    if (email) { // Use email passed in req.body from the client for audit log
-      const user = await prisma.user.findFirst({ where: { email } });
-      if (user) {
-        await prisma.auditLog.create({
-          data: {
-            userId: user.id,
-            userRole: user.role,
-            moduleName: "BOQ_TEMPLATE_CENTER",
-            actionType: "TEMPLATE_DOWNLOADED",
-            remarks: `Downloaded blank BOQ template for project: ${projectId || 'None'}`
-          }
-        });
+    // Attribute the download to the authenticated actor, never a client email.
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        moduleName: "BOQ_TEMPLATE_CENTER",
+        actionType: "TEMPLATE_DOWNLOADED",
+        remarks: `Downloaded blank BOQ template for project: ${projectId || 'None'}`
       }
-    }
+    });
     
     res.json({
       success: true,
@@ -103,11 +98,11 @@ router.post('/generateBOQTemplate', async (req, res) => {
       fileName: `BOQ_Template_${projectId || "Blank"}.xlsx`
     });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error generating BOQ template:", error);
     res.status(500).json({
       success: false,
-      error: error.message || "Failed to generate BOQ template."
+      error: error instanceof Error ? error.message : 'Failed to generate BOQ template.'
     });
   }
 });
