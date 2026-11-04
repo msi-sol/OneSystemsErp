@@ -650,7 +650,7 @@ model PettyCashReplenishment {
   cashOnHand       Float
   amountRequested  Float
   reviewerAction   String?
-  reviewerRemarks  String?
+  reviewerRemarks  String? @db.LongText
   approverId       String?
   approvalDate     DateTime?
   releaseDate      DateTime?
@@ -1538,7 +1538,7 @@ model AIVariationOrderValidation {
   confidenceLevel     String
   riskLevel           String
   findings            String? @db.LongText
-  missingRequirements String?
+  missingRequirements String? @db.LongText
   duplicateWarnings   String?
   recommendedAction   String?
   variationOrderId    String
@@ -1837,7 +1837,7 @@ model JobOrder {
   subcontractorId            String?
   packageId                  String?
   description                String @db.LongText
-  boqReferenceId             String?
+  boqReferenceId             String? @db.LongText
   location                   String @db.LongText
   contractAmount             Float
   paymentBasis               PaymentTerms
@@ -2111,7 +2111,7 @@ model PaymentBatch {
   reconciliationFileUrl  String?
   remarks                String? @db.LongText
   aiRiskLevel            String?
-  aiAuditNotes           String?
+  aiAuditNotes           String? @db.LongText
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
   payrollBankAccount     PayrollBankAccount @relation(fields: [payrollBankAccountId], references: [id], onDelete: Cascade)
@@ -2708,7 +2708,7 @@ model AITransactionValidation {
   validationStatus   String
   riskLevel          String
   aiFindings         String? @db.LongText
-  aiRecommendation   String?
+  aiRecommendation   String? @db.LongText
   blockingFlag       Boolean                   @default(false)
   overrideAllowed    Boolean                   @default(false)
   createdAt          DateTime                  @default(now())
@@ -3768,7 +3768,7 @@ model ScheduleActivity {
   predecessorData          String? // JSON representation for complex dependencies
   allocatedAmount          Decimal @default(0)
   classificationConfidence Float?
-  aiRationale              String?
+  aiRationale              String? @db.LongText
   durationMethod           String?
   productivityAssumption   Float?
   crewCountAssumption      Int?
@@ -3880,7 +3880,7 @@ model ScheduleDelayRecord {
   delayEndDate         DateTime?
   delayDays            Int       @default(0)
   category             String    @default("UNKNOWN")
-  cause                String
+  cause                String @db.LongText
   impactToCriticalPath Boolean   @default(false)
   approvalStatus       String    @default("PENDING")
   reportedById         String?
@@ -3996,7 +3996,7 @@ model AiAccessAuditLog {
   userId           String
   userRole         String?
   projectId        String?
-  question         String
+  question         String @db.LongText
   answerStatus     String   @default("SUCCESS") // SUCCESS, DENIED, ERROR
   denialReason     String? @db.LongText
   sourcesRetrieved Int      @default(0)
@@ -4045,7 +4045,7 @@ model AiRagKeywordRegistry {
   relatedModule            String?
   databaseTable            String?
   databaseField            String?
-  businessMeaning          String?
+  businessMeaning          String? @db.LongText
   synonyms                 String? // JSON or comma separated
   aliases                  String? // JSON or comma separated
   abbreviations            String? // JSON or comma separated
@@ -4132,7 +4132,7 @@ model AiKnowledgeMap {
   fieldName          String?
   fieldLabel         String?
   normalizedName     String
-  businessMeaning    String?
+  businessMeaning    String? @db.LongText
   detectedKeywords   String? // JSON
   generatedAliases   String? // JSON
   generatedSynonyms  String? // JSON
@@ -4142,7 +4142,7 @@ model AiKnowledgeMap {
   relatedTables      String? // JSON
   relatedFields      String? // JSON
   relationshipType   String?
-  sampleQuestions    String? // JSON
+  sampleQuestions    String? @db.LongText // JSON
   accessLevel        String    @default("PUBLIC")
   requiredRole       String? // JSON
   requiredPermission String? @db.LongText // JSON
@@ -4546,8 +4546,8 @@ model UploadedWorkbookFile {
   fileHash                 String
   mimeType                 String
   fileSize                 Int
-  storagePath              String
-  preservedOriginalUrl     String?
+  storagePath              String @db.LongText
+  preservedOriginalUrl     String? @db.LongText
   latestPreservedVersionId String?
   uploadedBy               String
   uploadedAt               DateTime @default(now())
