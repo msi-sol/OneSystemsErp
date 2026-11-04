@@ -59,12 +59,12 @@ test('requires authentication for both dispatch and status reads', async () => {
   expect(runBoqUploadJob).not.toHaveBeenCalled();
 });
 
-test('requires canEdit for existing projects and preserves dispatch/status response contracts', async () => {
+test('requires canEditDraft for existing projects and preserves dispatch/status response contracts', async () => {
   const response = await post();
   const dispatch = await response.json();
   expect(response.status).toBe(200);
   expect(dispatch).toEqual({ success: true, status: 'PROCESSING', jobId: expect.stringMatching(/^boq-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) });
-  expect(hasPermission).toHaveBeenCalledWith('actor-1', 'PROJECT_MANAGEMENT', 'canEdit', undefined);
+  expect(hasPermission).toHaveBeenCalledWith('actor-1', 'PROJECT_MANAGEMENT', 'canEditDraft', undefined);
   expect(runBoqUploadJob).toHaveBeenCalledWith(dispatch.jobId, 'project-1', payload.fileBufferBase64, 'BOQ.xlsx', expect.objectContaining({ id: 'actor-1' }));
   const status = await fetch(`${origin}/${dispatch.jobId}`, { headers: { 'x-test-actor': 'actor-1' } });
   expect(await status.json()).toEqual({ success: true, status: 'COMPLETED', result: expect.objectContaining({ uploadId: 'upload-1' }) });
@@ -85,7 +85,7 @@ test('denies new-project creation when global canCreate is absent', async () => 
 test('allows existing projects through active assignment role permission', async () => {
   (hasPermission as jest.Mock).mockResolvedValue(false);
   (prisma.projectUserAssignment.findUnique as jest.Mock).mockResolvedValue({ assignmentStatus: 'active', projectRole: 'PROJECT_ENGINEER' });
-  (getPermissionsForRole as jest.Mock).mockResolvedValue({ PROJECT_MANAGEMENT: { canEdit: true } });
+  (getPermissionsForRole as jest.Mock).mockResolvedValue({ PROJECT_MANAGEMENT: { canEditDraft: true } });
   expect((await post()).status).toBe(200);
   expect(prisma.projectUserAssignment.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { userId_projectId: { userId: 'actor-1', projectId: 'project-1' } } }));
   expect(getPermissionsForRole).toHaveBeenCalledWith('PROJECT_ENGINEER');
@@ -98,10 +98,10 @@ test.each(['inactive', 'removed'])('denies %s project assignments', async assign
   expect(runBoqUploadJob).not.toHaveBeenCalled();
 });
 
-test('requires assigned role canEdit rather than view-only permission', async () => {
+test('requires assigned role canEditDraft rather than view-only permission', async () => {
   (hasPermission as jest.Mock).mockResolvedValue(false);
   (prisma.projectUserAssignment.findUnique as jest.Mock).mockResolvedValue({ assignmentStatus: 'active', projectRole: 'VIEWER' });
-  (getPermissionsForRole as jest.Mock).mockResolvedValue({ PROJECT_MANAGEMENT: { canView: true, canEdit: false } });
+  (getPermissionsForRole as jest.Mock).mockResolvedValue({ PROJECT_MANAGEMENT: { canView: true, canEditDraft: false } });
   expect((await post()).status).toBe(403);
   expect(runBoqUploadJob).not.toHaveBeenCalled();
 });
@@ -109,7 +109,7 @@ test('requires assigned role canEdit rather than view-only permission', async ()
 test('honors signed simulated role without falling back to actual assignments', async () => {
   (hasPermission as jest.Mock).mockResolvedValue(false);
   expect((await post(payload, 'actor-1', 'GUEST_USER')).status).toBe(403);
-  expect(hasPermission).toHaveBeenCalledWith('actor-1', 'PROJECT_MANAGEMENT', 'canEdit', 'GUEST_USER');
+  expect(hasPermission).toHaveBeenCalledWith('actor-1', 'PROJECT_MANAGEMENT', 'canEditDraft', 'GUEST_USER');
   expect(prisma.projectUserAssignment.findUnique).not.toHaveBeenCalled();
 });
 

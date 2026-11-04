@@ -72,7 +72,7 @@ router.post('/getHikvisionDevices', async (req, res) => {
 router.post('/registerHikvisionDevice', async (req, res) => {
   try {
     const { userId, data } = req.body; // userId and original 'data' object are passed
-    await requirePermission(userId, 'EQUIPMENT', 'canEdit');
+    await requirePermission(userId, 'EQUIPMENT', 'canCreate');
 
     const {
       deviceName,

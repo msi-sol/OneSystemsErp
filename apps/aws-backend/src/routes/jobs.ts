@@ -34,7 +34,7 @@ function cleanupJobs() {
 }
 
 async function mayUpload(userId: string, projectId: string | null, simulatedRole?: string) {
-  if (await hasPermission(userId, 'PROJECT_MANAGEMENT', projectId ? 'canEdit' : 'canCreate', simulatedRole)) return true;
+  if (await hasPermission(userId, 'PROJECT_MANAGEMENT', projectId ? 'canEditDraft' : 'canCreate', simulatedRole)) return true;
   if (!projectId || simulatedRole) return false;
   const assignment = await prisma.projectUserAssignment.findUnique({
     where: { userId_projectId: { userId, projectId } },
@@ -42,7 +42,7 @@ async function mayUpload(userId: string, projectId: string | null, simulatedRole
   });
   if (!assignment || assignment.assignmentStatus !== 'active') return false;
   const permissions = await getPermissionsForRole(assignment.projectRole);
-  return permissions.PROJECT_MANAGEMENT?.canEdit === true;
+  return permissions.PROJECT_MANAGEMENT?.canEditDraft === true;
 }
 
 router.post('/boq-upload', async (req: AuthenticatedRequest, res) => {

@@ -15,6 +15,13 @@ function getPbacContext(req: any) {
   };
 }
 
+// Approval locks a period, and funding and bank files are built from its figures.
+async function assertPeriodUnlocked(payrollPeriodId: string) {
+  const period = await prisma.payrollPeriod.findUnique({ where: { id: payrollPeriodId }, select: { isLocked: true } });
+  if (!period) throw new Error('Payroll period not found');
+  if (period.isLocked) throw new Error('This payroll period is approved and locked.');
+}
+
 /**
  * AI-Assisted Payroll Computation Engine
  */
@@ -253,9 +260,10 @@ async function computePayrollForPeriod(payrollPeriodId: string) {
 router.post('/engine/compute', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'PAYROLL', 'canEdit', simulatedRole);
-    
+    await requirePermission(userId!, 'PAYROLL', 'canEditDraft', simulatedRole);
+
     const { payrollPeriodId } = req.body;
+    await assertPeriodUnlocked(payrollPeriodId);
     const result = await computePayrollForPeriod(payrollPeriodId);
     res.json(result);
   } catch (error: any) {
@@ -345,7 +353,7 @@ router.post('/period/create', async (req, res) => {
 router.delete('/period/:id', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'PAYROLL', 'canDelete', simulatedRole);
+    await requirePermission(userId!, 'PAYROLL', 'canDeleteDraft', simulatedRole);
     const { id } = req.params;
 
     const period = await prisma.payrollPeriod.findUnique({ where: { id } });
@@ -366,8 +374,9 @@ router.delete('/period/:id', async (req, res) => {
 router.post('/dtr/save-manual', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'PAYROLL', 'canEdit', simulatedRole);
+    await requirePermission(userId!, 'PAYROLL', 'canEditDraft', simulatedRole);
     const { data, payrollPeriodId } = req.body;
+    await assertPeriodUnlocked(payrollPeriodId);
     const { workerId, date, timeIn, timeOut, regularHours, overtimeHours } = data;
 
     const parsedDate = new Date(date);
@@ -410,8 +419,9 @@ router.post('/dtr/save-manual', async (req, res) => {
 router.post('/dtr/save-bulk', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'PAYROLL', 'canEdit', simulatedRole);
+    await requirePermission(userId!, 'PAYROLL', 'canEditDraft', simulatedRole);
     const { workerId, payrollPeriodId, entries } = req.body;
+    await assertPeriodUnlocked(payrollPeriodId);
 
     for (const entry of entries) {
       const parsedDate = new Date(entry.date);

@@ -5,6 +5,20 @@ import { PrismaClient } from '@prisma/client';
 import { requirePermission } from '../lib/permissions';
 
 const router = Router();
+
+// The status moves these routes make and the right each needs. Moving only from
+// the step before stops a holder of a later right from skipping the approval.
+type StatusMoves = Record<string, { from: string; action: string }>;
+const DEPLOYMENT_MOVES: StatusMoves = {
+  APPROVED: { from: 'REQUESTED', action: 'canApprove' },
+  DISPATCHED: { from: 'APPROVED', action: 'canEditDraft' },
+  RETURNED: { from: 'DISPATCHED', action: 'canEditDraft' },
+};
+const MAINTENANCE_MOVES: StatusMoves = {
+  IN_PROGRESS: { from: 'SCHEDULED', action: 'canEditDraft' },
+  COMPLETED: { from: 'IN_PROGRESS', action: 'canEditDraft' },
+};
+
 function getPbacContext(req: any) {
   return {
     userId: req.headers['x-user-session'] as string | undefined,
@@ -164,8 +178,14 @@ router.put('/deployment/:id/status', async (req, res) => {
     const { id } = req.params;
     const { newStatus } = req.body;
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'EQUIPMENT', 'canEdit', simulatedRole);
-    
+    if (!Object.hasOwn(DEPLOYMENT_MOVES, newStatus)) return res.status(400).json({ error: 'newStatus is not a valid deployment status.' });
+    const move = DEPLOYMENT_MOVES[newStatus];
+    await requirePermission(userId!, 'EQUIPMENT', move.action, simulatedRole);
+
+    const deployment = await prisma.equipmentDeployment.findUnique({ where: { id }, select: { status: true } });
+    if (!deployment) throw new Error('Deployment not found');
+    if (deployment.status !== move.from) return res.status(409).json({ error: `Only a ${move.from} deployment can move to ${newStatus}.` });
+
     const updateData: any = { status: newStatus };
     if (newStatus === 'APPROVED') updateData.approvedById = userId;
     else if (newStatus === 'DISPATCHED') {
@@ -324,7 +344,7 @@ router.post('/utilization/sync', async (req, res) => {
 router.delete('/utilization/:id', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'EQUIPMENT', 'canEdit', simulatedRole);
+    await requirePermission(userId!, 'EQUIPMENT', 'canDeleteDraft', simulatedRole);
     const { id } = req.params;
 
     const log = await prisma.equipmentUtilization.findUnique({ where: { id } });
@@ -436,13 +456,15 @@ router.post('/maintenance/create', async (req, res) => {
 router.put('/maintenance/:id/status', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'EQUIPMENT', 'canEdit', simulatedRole);
-
     const { id } = req.params;
     const { newStatus, completionData } = req.body;
+    if (!Object.hasOwn(MAINTENANCE_MOVES, newStatus)) return res.status(400).json({ error: 'newStatus is not a valid maintenance status.' });
+    const move = MAINTENANCE_MOVES[newStatus];
+    await requirePermission(userId!, 'EQUIPMENT', move.action, simulatedRole);
 
     const maintenance = await prisma.equipmentMaintenance.findUnique({ where: { id } });
     if (!maintenance) throw new Error('Maintenance record not found');
+    if (maintenance.status !== move.from) return res.status(409).json({ error: `Only a ${move.from} record can move to ${newStatus}.` });
 
     const updateData: any = { status: newStatus };
     if (newStatus === 'IN_PROGRESS') {
@@ -465,11 +487,13 @@ router.put('/maintenance/:id/status', async (req, res) => {
 router.delete('/maintenance/:id', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'EQUIPMENT', 'canEdit', simulatedRole);
+    await requirePermission(userId!, 'EQUIPMENT', 'canDeleteDraft', simulatedRole);
     const { id } = req.params;
 
     const record = await prisma.equipmentMaintenance.findUnique({ where: { id } });
     if (!record) throw new Error('Maintenance record not found');
+    // A completed record holds a final cost, so it is past being a draft.
+    if (record.status === 'COMPLETED') await requirePermission(userId!, 'EQUIPMENT', 'canVoidRecord', simulatedRole);
 
     if (record.status === 'IN_PROGRESS') {
       await prisma.equipment.update({ where: { id: record.equipmentId }, data: { status: 'ACTIVE' } });
@@ -526,7 +550,7 @@ router.post('/ai/validations', async (req, res) => {
 router.put('/ai/validations/:id/status', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'EQUIPMENT', 'canEdit', simulatedRole);
+    await requirePermission(userId!, 'EQUIPMENT', 'canReview', simulatedRole);
     const { id } = req.params;
     const { newStatus } = req.body;
 

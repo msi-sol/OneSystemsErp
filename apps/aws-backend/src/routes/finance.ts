@@ -138,8 +138,7 @@ router.post('/payment/issue', async (req, res) => {
 router.put('/payment/:payableId/clear-accrued', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    // Assuming clearing accrued requires the same permission
-    await requirePermission(userId!, 'PAYMENT_ISSUANCE', 'canEdit', simulatedRole);
+    await requirePermission(userId!, 'PAYMENT_ISSUANCE', 'canMarkAsPaid', simulatedRole);
     
     const { payableId } = req.params;
     const payable = await prisma.accountsPayable.findUnique({ where: { id: payableId } });

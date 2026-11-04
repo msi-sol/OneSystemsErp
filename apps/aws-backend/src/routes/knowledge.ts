@@ -78,8 +78,10 @@ router.post('/records', async (req, res) => {
 router.delete('/records/:id', async (req, res) => {
   try {
     const { userId, simulatedRole } = getPbacContext(req);
-    await requirePermission(userId!, 'SYSTEM_SETTINGS', 'canDelete', simulatedRole);
-    
+    await requirePermission(userId!, 'SYSTEM_SETTINGS', 'canDeleteDraft', simulatedRole);
+
+    const record = await prisma.knowledgeRecord.findUnique({ where: { id: req.params.id }, select: { status: true } });
+    if (record && record.status !== 'Draft') return res.status(409).json({ success: false, error: 'Only a draft knowledge record can be deleted.' });
     await prisma.knowledgeRecord.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
