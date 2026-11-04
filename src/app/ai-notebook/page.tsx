@@ -1,9 +1,8 @@
-'use client';
-
-import { useState } from 'react';
 import styles from './page.module.css';
 import UploadReferenceButton from './UploadReferenceButton';
 import { getReferenceFiles } from '../actions/notebookActions';
+
+export const dynamic = 'force-dynamic';
 
 export default async function AINotebookPage() {
   const files = await getReferenceFiles();
