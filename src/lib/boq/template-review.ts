@@ -44,7 +44,7 @@ export async function updateTemplateUploadReviewStatus(
     throw new TemplateReviewError('BOQ upload was not found.', 'UPLOAD_NOT_FOUND');
   }
 
-  const permission = action === 'SUBMIT_FOR_REVIEW' ? 'canEdit' : 'canApprove';
+  const permission = action === 'SUBMIT_FOR_REVIEW' ? 'canSubmit' : 'canApprove';
   const access = await checkSchedulingAccess(actor.id, actor.role, upload.projectId, permission);
   if (!access.allowed) {
     throw new TemplateReviewError(

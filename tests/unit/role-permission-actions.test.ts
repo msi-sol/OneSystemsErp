@@ -42,15 +42,16 @@ const rolePermissionActions = new Set(
     .map((field) => field.name),
 );
 
-// permissions.ts lists names for the admin and guest shortcuts, which are not checks.
 const BACKEND_SOURCE = path.join(__dirname, '../../apps/aws-backend/src');
-const PERMISSIONS_LIB = path.join(BACKEND_SOURCE, 'lib/permissions.ts');
+const NEXT_SOURCE = path.join(__dirname, '../../src');
+// permissions.ts lists names for the admin and guest shortcuts, which are not checks.
+const PERMISSIONS_LIBS = [BACKEND_SOURCE, NEXT_SOURCE].map((root) => path.join(root, 'lib/permissions.ts'));
 
 function sourceFiles(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) return sourceFiles(full);
-    return full.endsWith('.ts') && full !== PERMISSIONS_LIB ? [full] : [];
+    return /\.tsx?$/.test(full) && !PERMISSIONS_LIBS.includes(full) ? [full] : [];
   });
 }
 
@@ -59,17 +60,24 @@ function actionNames(source: string): string[] {
   return [...source.matchAll(/['"`](can[A-Z]\w*)['"`]|\.(can[A-Z]\w*)\b/g)].map((match) => match[1] ?? match[2]);
 }
 
-describe('permission actions used by the backend', () => {
-  test('the scan finds quoted names and property reads', () => {
-    expect(actionNames(`check(id, 'SUBCONTRACTING', 'canEdit'); const a = x ? "canDelete" : 'canView'; perms.EQUIPMENT?.canUpdate; perms.canLock;`))
-      .toEqual(['canEdit', 'canDelete', 'canView', 'canUpdate', 'canLock']);
+describe('permission actions used by the code', () => {
+  test('the scan finds quoted names, guard props and property reads', () => {
+    expect(actionNames(`check(id, 'SUBCONTRACTING', 'canEdit'); const a = x ? "canDelete" : 'canView'; perms.EQUIPMENT?.canUpdate; perms.canLock; <PermissionGuard action="canPay">`))
+      .toEqual(['canEdit', 'canDelete', 'canView', 'canUpdate', 'canLock', 'canPay']);
   });
 
-  test('every action is a RolePermission column', () => {
-    const files = sourceFiles(BACKEND_SOURCE);
-    const used = files.flatMap((file) => actionNames(fs.readFileSync(file, 'utf8')).map((action) => ({ file: path.relative(BACKEND_SOURCE, file), action })));
+  test.each([
+    ['backend', BACKEND_SOURCE],
+    ['Next app', NEXT_SOURCE],
+  ])('every action in the %s is a RolePermission column', (_name, root) => {
+    const used = sourceFiles(root).flatMap((file) => actionNames(fs.readFileSync(file, 'utf8')).map((action) => ({ file: path.relative(root, file), action })));
     expect(used.length).toBeGreaterThan(50);
     expect(used.filter(({ action }) => !rolePermissionActions.has(action))).toEqual([]);
+  });
+
+  test('the Next app does not build action names at run time, where the scan cannot read them', () => {
+    const built = sourceFiles(NEXT_SOURCE).filter((file) => fs.readFileSync(file, 'utf8').includes('`can$' + '{'));
+    expect(built).toEqual([]);
   });
 
   test('the columns are the ones the role matrix offers', () => {

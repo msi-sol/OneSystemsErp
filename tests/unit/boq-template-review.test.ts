@@ -45,7 +45,7 @@ test.each(['PENDING', 'RETURNED_FOR_CORRECTION'])('submits a %s upload after suc
   await expect(updateTemplateUploadReviewStatus('upload-1', 'SUBMIT_FOR_REVIEW'))
     .resolves.toEqual({ success: true, status: 'SUBMITTED_FOR_REVIEW' });
 
-  expect(checkSchedulingAccess).toHaveBeenCalledWith('actor-1', 'PROJECT_DIRECTOR', 'project-1', 'canEdit');
+  expect(checkSchedulingAccess).toHaveBeenCalledWith('actor-1', 'PROJECT_DIRECTOR', 'project-1', 'canSubmit');
   expect(tx.uploadedWorkbookFile.updateMany).toHaveBeenCalledWith({
     where: { id: 'upload-1', commitStatus },
     data: { commitStatus: 'SUBMITTED_FOR_REVIEW' },

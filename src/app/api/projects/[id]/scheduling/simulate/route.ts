@@ -2,7 +2,15 @@ import { NextResponse } from 'next/server';
 import { runAIOrchestrator } from '@/lib/scheduling/aiOrchestrator';
 import { getSessionActor, checkSchedulingAccess } from '@/lib/scheduling/authUtils';
 import { prisma } from '@/lib/prisma';
+import { EDITABLE_STATUSES } from '@/lib/scheduling/scheduleWorkflow';
+import { ProjectScheduleWorkflowStatus } from '@prisma/client';
 import * as crypto from 'crypto';
+
+const RETIRED_STATUSES: ProjectScheduleWorkflowStatus[] = [
+  ProjectScheduleWorkflowStatus.SUPERSEDED_BASELINE,
+  ProjectScheduleWorkflowStatus.ARCHIVED_BASELINE,
+  ProjectScheduleWorkflowStatus.REJECTED,
+];
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -13,7 +21,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     try {
       actor = await getSessionActor();
     } catch (e) {
-      if (process.env.SCHEDULING_GENERATION_MODE === 'RECONSTRUCTION_GATE_8C') {
+      // A sessionless run acts as a project manager, so it must never be reachable in production.
+      if (process.env.SCHEDULING_GENERATION_MODE === 'RECONSTRUCTION_GATE_8C' && process.env.NODE_ENV !== 'production') {
           actor = await prisma.user.findFirst({ where: { role: 'PROJECT_MANAGER' } });
           if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
       } else {
@@ -21,7 +30,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
     }
 
-    const pbac = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canEdit');
+    const pbac = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canEditDraft');
     if (!pbac.allowed) {
       return NextResponse.json({ error: 'FORBIDDEN_PROJECT_ACCESS' }, { status: 403 });
     }
@@ -50,6 +59,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
            scheduleId: existing.newScheduleId
          });
       }
+    }
+
+    // Generating retires every existing schedule, and the hub then hides them. A draft right may only replace drafts.
+    const scheduleInProgress = await prisma.projectSchedule.findFirst({
+      where: {
+        projectId,
+        workflowStatus: { notIn: [...EDITABLE_STATUSES, ...RETIRED_STATUSES] },
+        status: { not: 'LEGACY_INVALID_DRAFT' },
+      },
+      select: { id: true },
+    });
+    if (scheduleInProgress) {
+      return NextResponse.json({ error: 'SCHEDULE_PAST_DRAFT: This project has a schedule past drafting. Create a revision instead of generating a new schedule.' }, { status: 409 });
     }
 
     // 3. Locked BOQ Validation

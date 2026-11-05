@@ -100,7 +100,7 @@ export async function getUserPermissions(userId: string) {
     // Auto-populate commonly checked modules to bypass manual checks in frontend
     MASTER_ADMIN_MODULES.forEach(mod => {
       if (!aggregatedPermissions[mod]) aggregatedPermissions[mod] = {};
-      const actions = ['canView', 'canCreate', 'canEdit', 'canDelete', 'canApprove', 'canSubmit', 'canLock', 'canExport', 'canEditDraft'];
+      const actions = ['canView', 'canCreate', 'canEditDraft', 'canDeleteDraft', 'canApprove', 'canSubmit', 'canLock', 'canExport'];
       actions.forEach(action => {
         aggregatedPermissions[mod][action] = true;
       });
@@ -197,7 +197,7 @@ export async function getPermissionsForRole(roleCode: string) {
     aggregatedPermissions['IS_ADMIN'] = true;
     MASTER_ADMIN_MODULES.forEach(mod => {
       if (!aggregatedPermissions[mod]) aggregatedPermissions[mod] = {};
-      const actions = ['canView', 'canCreate', 'canEdit', 'canDelete', 'canApprove', 'canSubmit', 'canLock', 'canExport', 'canEditDraft'];
+      const actions = ['canView', 'canCreate', 'canEditDraft', 'canDeleteDraft', 'canApprove', 'canSubmit', 'canLock', 'canExport'];
       actions.forEach(action => {
         aggregatedPermissions[mod][action] = true;
       });

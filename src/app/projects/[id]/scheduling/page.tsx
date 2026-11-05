@@ -133,6 +133,7 @@ export default async function ProjectSchedulingHub({ params }: { params: Promise
   }) : [];
   const workPackageSummary = selectedSchedule ? buildWorkPackageSummary(selectedSchedule, scopeBoq) : undefined;
   const editAccess = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canEditDraft');
+  const deleteAccess = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canDeleteDraft');
 
   return (
     <SchedulingHubClient 
@@ -142,6 +143,7 @@ export default async function ProjectSchedulingHub({ params }: { params: Promise
       actor={actor}
       workPackageSummary={workPackageSummary}
       canEditDraft={editAccess.allowed}
+      canDeleteDraft={deleteAccess.allowed}
     />
   );
 }

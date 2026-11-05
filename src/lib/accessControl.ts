@@ -46,8 +46,8 @@ export async function checkUserAccess(
     // Map action string to the existing DB permission fields (canView, canCreate, etc.)
     let actionKey = "canView"; // Default mapped property
     if (action === "CREATE") actionKey = "canCreate";
-    else if (action === "EDIT" || action === "UPDATE") actionKey = "canEdit";
-    else if (action === "DELETE") actionKey = "canDelete";
+    else if (action === "EDIT" || action === "UPDATE") actionKey = "canEditDraft";
+    else if (action === "DELETE") actionKey = "canDeleteDraft";
     else if (action === "APPROVE") actionKey = "canApprove";
     else if (action === "SUBMIT") actionKey = "canSubmit";
     else if (action === "EXPORT") actionKey = "canExport";

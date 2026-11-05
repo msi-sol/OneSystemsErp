@@ -48,7 +48,8 @@ export default async function ProjectsPage() {
     }
   });
 
-  const canAssignManager = permissions?.PROJECT_MANAGEMENT?.canUpdate || false;
+  // Changing a project's manager is not a draft edit, so canEditDraft does not cover it.
+  const canAssignManager = permissions?.PROJECT_MANAGEMENT?.canApprove || false;
   let users: any[] = [];
   if (canAssignManager || permissions?.PROJECT_MANAGEMENT?.canCreate) {
     users = await prisma.user.findMany({ 
@@ -137,9 +138,8 @@ export default async function ProjectsPage() {
                 </td>
                 <td style={{ display: 'flex', gap: '15px', alignItems: 'center', height: '100%' }}>
                   <Link href={`/projects/${project.id}`} className={styles.actionLink}>View Details</Link>
-                  <PermissionGuard permissions={permissions} moduleName="PROJECT_MANAGEMENT" action="canDelete">
-                    <DeleteProjectButton projectId={project.id} />
-                  </PermissionGuard>
+                  {/* The backend deletes a project for administrators only, and no matrix right covers it. */}
+                  {permissions?.IS_ADMIN && <DeleteProjectButton projectId={project.id} />}
                 </td>
               </tr>
             )})}

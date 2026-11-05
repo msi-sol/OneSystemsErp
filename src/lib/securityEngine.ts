@@ -16,6 +16,21 @@ export interface SecurityContext {
   requestPath?: string;
 }
 
+const ACTION_RIGHTS: Record<ActionType, string> = {
+  view: 'canView',
+  read: 'canView',
+  create: 'canCreate',
+  edit: 'canEditDraft',
+  write: 'canEditDraft',
+  delete: 'canDeleteDraft',
+  approve: 'canApprove',
+  submit: 'canSubmit',
+  lock: 'canLock',
+  export: 'canExport',
+  upload: 'canUploadAttachment',
+  download: 'canDownloadAttachment',
+};
+
 export async function canAccess(context: SecurityContext): Promise<boolean> {
   const { userId, projectId, module, action } = context;
 
@@ -40,12 +55,7 @@ export async function canAccess(context: SecurityContext): Promise<boolean> {
       return false;
     }
     
-    // Check specific action (mapping simple actions to permission keys)
-    let actionKey = `can${action.charAt(0).toUpperCase() + action.slice(1)}`;
-    if (action === 'read') actionKey = 'canView';
-    if (action === 'write') actionKey = 'canEdit';
-
-    if (modulePerms[actionKey] === false) {
+    if (!modulePerms[ACTION_RIGHTS[action]]) {
       await logSecurityEvent({ ...context, status: 'BLOCKED', threatType: 'UNAUTHORIZED_ACTION', severity: 'MEDIUM', message: `No permission to ${action} in ${module}` });
       return false;
     }

@@ -22,6 +22,7 @@ export default function SchedulingHubClient({
   actor,
   workPackageSummary,
   canEditDraft = false,
+  canDeleteDraft = false,
 }: { 
   project: any; 
   initialSchedule: any; 
@@ -29,6 +30,7 @@ export default function SchedulingHubClient({
   actor?: any;
   workPackageSummary?: WorkPackageSummaryResult;
   canEditDraft?: boolean;
+  canDeleteDraft?: boolean;
 }) {
   const router = useRouter();
   const [schedule, setSchedule] = useState(initialSchedule);
@@ -217,7 +219,7 @@ export default function SchedulingHubClient({
               </span>
             )}
             
-            {schedule.workflowStatus !== 'ACTIVE_BASELINE' && (
+            {canDeleteDraft && schedule.workflowStatus !== 'ACTIVE_BASELINE' && (
               <button
                 onClick={handleDeleteSchedule}
                 disabled={isDeleting}
