@@ -8,6 +8,8 @@ The stage must be empty. Keep build dependencies installed until tracing finishe
 
 The package unions Next's standalone files with the backend and Prisma CLI dependency traces from the official `@vercel/nft` package. It includes runtime scheduling JSON, public templates, PDFKit fonts, ExcelJS/XLSX assets, immutable migrations, and the Debian/OpenSSL 3 Prisma query/schema engines. It excludes credentials, uploads, caches, and other-platform Prisma binaries from the stage. Build-host binaries remain available during the build.
 
+Upload exclusions apply only to the mutable `uploads/` and `public/uploads/` storage roots, including their copies under `.next/standalone/`. Compiled API routes with an `uploads` segment remain in the artifact. Before packaging proceeds, every module listed in Next's `app-paths-manifest.json` must exist in the stage; a missing route stops the release before deployment.
+
 Trace warnings are printed for review; direct backend package imports must resolve in both the build tree and the completed stage. Packaging prints the actual uncompressed size. Measure compressed archive size in CI before claiming savings, and smoke-test the frontend, backend, PDF/Excel generation, and Prisma CLI on Linux before activation. Runtime configuration is serialized into Next's standalone server; the Serwist build plugin is not loaded at startup.
 
 Application changes still produce a fresh release, using the saved npm and `.next/cache` caches. Documentation and deployment-configuration-only pushes run the lightweight safety checks and skip the application build, artifact transfer and deployment. Changes to this packager are runtime inputs and do trigger a release. Manual workflow dispatch forces a build/deployment.

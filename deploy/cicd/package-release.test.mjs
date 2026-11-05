@@ -1,13 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { includeRuntimePath, releaseManifest, packageRelease } from './package-release.mjs';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { includeRuntimePath, releaseManifest, packageRelease, verifyAppRoutes } from './package-release.mjs';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 test('runtime packaging excludes credentials, mutable uploads/cache and nonproduction engines', () => {
   for (const path of ['.next/standalone/.env', 'node_modules/foo/.env.production', 'public/uploads/a.xlsx', 'uploads/a', '.next/cache/foo', 'node_modules/.prisma/client/libquery_engine-debian-openssl-1.1.x.so.node', 'node_modules/@prisma/engines/schema-engine-darwin-arm64', 'node_modules/.prisma/client/query_engine-windows.dll.node']) assert.equal(includeRuntimePath(path), false, path);
   for (const path of ['public/templates/test.xlsx', 'node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node', 'node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x', 'prisma/migrations/20261103000000_mysql_baseline/migration.sql', 'node_modules/prisma/build/query_engine_bg.mysql.wasm', 'src/lib/scheduling/blueprints/historical-validated-v1.json']) assert.equal(includeRuntimePath(path), true, path);
+});
+
+test('mutable upload roots are excluded without dropping compiled upload API routes', () => {
+  for (const prefix of ['', '.next/standalone/']) {
+    for (const file of ['uploads', 'uploads/private.xlsx', 'public/uploads', 'public/uploads/proof.pdf']) {
+      assert.equal(includeRuntimePath(prefix + file), false, prefix + file);
+    }
+    for (const file of ['.next/server/app/api/boq-workspace/uploads',
+      '.next/server/app/api/boq-workspace/uploads/[uploadId]/original/route.js',
+      '.next/server/app/api/uploads/file/route.js']) {
+      assert.equal(includeRuntimePath(prefix + file), true, prefix + file);
+    }
+  }
+});
+
+test('release validation rejects a missing route declared in the Next app manifest', async t => {
+  const stage = await mkdtemp(join(tmpdir(), 'erp-route-package-test-'));
+  t.after(() => rm(stage, { recursive: true, force: true }));
+  const server = join(stage, '.next/server');
+  const file = 'app/api/boq-workspace/uploads/[uploadId]/original/route.js';
+  await mkdir(server, { recursive: true });
+  await writeFile(join(server, 'app-paths-manifest.json'), JSON.stringify({ '/api/boq-workspace/uploads/[uploadId]/original/route': file }));
+  await assert.rejects(verifyAppRoutes(stage), /App route was not packaged/);
+  await mkdir(join(server, 'app/api/boq-workspace/uploads/[uploadId]/original'), { recursive: true });
+  await writeFile(join(server, file), 'module.exports = {};');
+  await verifyAppRoutes(stage);
 });
 
 test('format 2 manifest binds the GitHub revision, protected branch and run attempt', () => {

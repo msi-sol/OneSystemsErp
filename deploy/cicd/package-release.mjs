@@ -1,5 +1,5 @@
 // Run after `npm ci` and `npm run build`, before pruning any build dependencies.
-import { cp, mkdir, readdir, stat, writeFile, access } from 'node:fs/promises';
+import { cp, mkdir, readdir, stat, writeFile, readFile, access } from 'node:fs/promises';
 import { resolve, relative, dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire, isBuiltin } from 'node:module';
@@ -11,13 +11,28 @@ const normalized = path => path.split(sep).join('/');
 export function includeRuntimePath(path) {
   const parts = normalized(path).split('/');
   if (parts.some(part => part === '.git' || part === '.env' || part.startsWith('.env.'))) return false;
-  if (parts.includes('uploads') || parts.includes('.cache')) return false;
+  // Only exclude mutable storage roots. `uploads` is also a legitimate API
+  // route segment (including BOQ originals), whose compiled modules must ship.
+  const runtimePath = normalized(path).replace(/^\.next\/standalone\//, '');
+  if (/^(?:public\/)?uploads(?:\/|$)/.test(runtimePath) || parts.includes('.cache')) return false;
   if (normalized(path).includes('.next/cache')) return false;
   const name = parts.at(-1);
   // EC2 uses Debian/OpenSSL 3. Keep build-host engines in node_modules, but
   // never ship them alongside the explicit production engine.
   if (/^(?:libquery_engine-|query_engine-|schema-engine-)/.test(name) && !name.includes('debian-openssl-3.0.x')) return false;
   return true;
+}
+
+export async function verifyAppRoutes(stage) {
+  const serverRoot = resolve(stage, '.next/server');
+  const routes = JSON.parse(await readFile(join(serverRoot, 'app-paths-manifest.json'), 'utf8'));
+  for (const [route, file] of Object.entries(routes)) {
+    const target = resolve(serverRoot, file);
+    if (!target.startsWith(serverRoot + sep)) throw new Error(`Invalid packaged app route: ${route}`);
+    try { await access(target); }
+    catch { throw new Error(`App route was not packaged: ${route} (${file})`); }
+  }
+  console.log(`Packaged app route modules verified: ${Object.keys(routes).length}`);
 }
 
 export function releaseManifest(env = process.env, node = process.version) {
@@ -77,6 +92,7 @@ export async function packageRelease(stagePath) {
   await copyTree(standalone, stage);
   await copyTree(join(root, 'public'), join(stage, 'public'));
   await copyTree(join(root, '.next/static'), join(stage, '.next/static'));
+  await verifyAppRoutes(stage);
 
   // Keep build output inside the tracing root, but outside the standalone tree.
   const buildDir = join(root, '.next/deployment-backend');
