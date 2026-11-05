@@ -357,13 +357,13 @@ versions; audit records are appended. Existing schedule metadata remains in the
 schedule description under BOQ_WPS_WORKSPACE_V1, preserving legacy notes.
 No existing migration is rewritten and no database reset is required.
 
-Originals use configured S3 (`AWS_S3_BUCKET_NAME`, or the existing backend BOQ
-setting `S3_BUCKET_NAME`; the backend default is `onesystemserp-storage`). A
-configured S3 failure stops the save instead of silently switching storage.
-Without S3, local development uses private `.runtime/boq-workspace`; Linux
-production uses `uploads/.boq-workspace` in the existing retained backend upload
-mount, outside the read-only release. Its records use the
-`retained:boq-workspace/` storage prefix; existing local paths remain readable.
+Production originals use configured private S3 (`AWS_S3_BUCKET_NAME` or the
+existing backend alias `S3_BUCKET_NAME`). Missing configuration or S3 failure
+stops the save; production never falls back to disk. Local development always
+uses private `.runtime/boq-workspace`, even if S3 settings exist. Historical
+`retained:boq-workspace/` paths remain readable through the retained backend
+upload mount. The production bucket, role, configuration and recovery procedure
+are owned by [the deployment guide](../../deploy/cicd/README.md#application-uploads).
 Original downloads enforce project access. Retained files and database backups belong together operationally
 and stay out of source/release packaging. Local backend proxy operations need
 BACKEND_INTERNAL_URL and BACKEND_INTERNAL_SECRET configured for the Express

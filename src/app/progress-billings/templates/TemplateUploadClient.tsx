@@ -14,17 +14,12 @@ export default function TemplateUploadClient({ initialTemplates }: { initialTemp
     toast.info(`Uploading ${templateName}...`);
 
     try {
-      // In a real app, you would upload to S3/Cloud Storage here.
-      // We will simulate a file upload URL for this prototype.
-      const simulatedFileUrl = `https://storage.googleapis.com/pgh-pms-templates/${Date.now()}_${file.name}`;
-
       const formData = new FormData();
-      formData.append("fileUrl", simulatedFileUrl);
+      formData.append("file", file);
       formData.append("fileName", file.name);
       formData.append("templateName", templateName);
       formData.append("templateType", templateType);
       
-      // Assume user is mock user ID for now or leave null
       const res = await uploadDocumentTemplate(formData);
 
       if (res.success) {

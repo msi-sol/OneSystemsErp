@@ -1,7 +1,7 @@
 // @ts-nocheck
 import ExcelJS from 'exceljs';
 import { prisma } from '@/lib/prisma';
-import fs from 'fs';
+import { readStoredUpload } from '@/lib/s3';
 
 export async function generatePreservedExport(uploadedWorkbookFileId: string) {
   const upload = await prisma.uploadedWorkbookFile.findUnique({
@@ -10,7 +10,7 @@ export async function generatePreservedExport(uploadedWorkbookFileId: string) {
 
   if (!upload) throw new Error('Upload not found');
 
-  const buffer = fs.readFileSync(upload.storagePath);
+  const buffer = await readStoredUpload(upload.storagePath);
   
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);

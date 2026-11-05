@@ -2,35 +2,15 @@ import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { uploadToS3 as put } from '../../../../src/lib/s3';
+import { uploadToS3 as put, readStoredUpload, type UploadContext } from '../../../../src/lib/s3';
 import ExcelJS from "exceljs";
-import fs from 'fs';
-import path from 'path';
 
 const router = Router();
 
 // Helper function, moved from original Next.js Server Action
-async function saveFileLocallyOrBlob(directory: string, fileName: string, buffer: Buffer, contentType?: string): Promise<string> {
-  // NOTE: process.env.BLOB_READ_WRITE_TOKEN is Vercel-specific, for AWS we only consider S3.
-  // We'll assume if AWS_ACCESS_KEY_ID is set, we use S3, otherwise local storage (for dev/test)
-  if (process.env.AWS_ACCESS_KEY_ID) {
-    const blob = await put(`${directory}/${fileName}`, buffer, {
-      access: 'public', // Or specific ACL
-      contentType: contentType || "application/octet-stream",
-    });
-    return blob.url;
-  } else {
-    // Local storage path needs to be absolute for the AWS backend context
-    // This part might need adjustment based on where the Express app runs and its file system access
-    const uploadDir = path.join(process.cwd(), 'uploads', directory); // Using 'uploads' directory
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    fs.writeFileSync(path.join(uploadDir, fileName), buffer);
-    // For local storage, the URL would typically be served by the Express app itself or is internal.
-    // For simplicity, let's return a simulated URL for local.
-    return `${process.env.AWS_BACKEND_URL || 'http://localhost:4000'}/uploads/${directory}/${fileName}`; // Adjust if serving locally
-  }
+async function saveFileLocallyOrBlob(directory: string, fileName: string, buffer: Buffer, contentType: string | undefined, context: UploadContext): Promise<string> {
+  const stored = await put(fileName, buffer, { ...context, contentType: contentType || 'application/octet-stream' });
+  return stored.url;
 }
 
 // Handler for uploadAccomplishmentFileAction
@@ -48,7 +28,7 @@ router.post('/uploadAccomplishmentFileAction', async (req, res) => {
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
     const newFileName = `${uniqueId}-${sanitizedFileName}`;
 
-    const publicPath = await saveFileLocallyOrBlob("accomplishments", newFileName, buffer, fileType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const publicPath = await saveFileLocallyOrBlob("accomplishments", newFileName, buffer, fileType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", { module: 'ACCOMPLISHMENTS', projectId, uploadedBy: String(req.headers['x-user-session'] || '') });
 
     const newFileRecord = await prisma.projectAccomplishmentFile.create({
       data: {
@@ -58,7 +38,7 @@ router.post('/uploadAccomplishmentFileAction', async (req, res) => {
         fileSize: fileSize,
         fileType: fileType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         isLockedOriginal: false,
-        uploadedById: currentUserId,
+        uploadedById: String(req.headers['x-user-session'] || ''),
         status: "UPLOADED",
         fileVersion: 1, // Initial version
         workingFilePath: publicPath, // Initial working path is the original
@@ -172,20 +152,13 @@ router.post('/createWorkingCopyAction', async (req, res) => {
     let sourceBuffer: Buffer;
     // Assuming file is accessible via HTTP or S3 direct URL for the backend
     try {
-      const fetchUrl = sourcePath.startsWith('/uploads/') // Backend needs to fetch its own local uploads if relevant
-        ? `${process.env.AWS_BACKEND_URL || 'http://localhost:4000'}${sourcePath}`
-        : sourcePath;
-      const response = await fetch(fetchUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch source file: ${response.status} ${response.statusText}`);
-      }
-      sourceBuffer = Buffer.from(await response.arrayBuffer());
+      sourceBuffer = await readStoredUpload(sourcePath);
     } catch (fetchError: any) {
       console.error("Error fetching source file for working copy:", fetchError);
       return res.status(500).json({ success: false, error: `Failed to fetch original file: ${fetchError.message}` });
     }
 
-    const publicPath = await saveFileLocallyOrBlob("accomplishments", newFileName, sourceBuffer, fileRecord.fileType);
+    const publicPath = await saveFileLocallyOrBlob("accomplishments", newFileName, sourceBuffer, fileRecord.fileType, { module: 'ACCOMPLISHMENTS', projectId: fileRecord.projectId, uploadedBy: String(req.headers['x-user-session'] || '') });
 
     const updatedFileRecord = await prisma.projectAccomplishmentFile.update({
       where: { id: fileId },
@@ -224,7 +197,7 @@ router.post('/saveFileEditAction', async (req, res) => {
 
     const buffer = Buffer.from(base64Data, "base64");
 
-    const publicPath = await saveFileLocallyOrBlob("accomplishments", newFileName, buffer, fileRecord.fileType);
+    const publicPath = await saveFileLocallyOrBlob("accomplishments", newFileName, buffer, fileRecord.fileType, { module: 'ACCOMPLISHMENTS', projectId: fileRecord.projectId, uploadedBy: String(req.headers['x-user-session'] || '') });
 
     const versionNumber = fileRecord.fileVersion + 1;
 
@@ -268,7 +241,7 @@ router.post('/saveAsNewAccomplishmentFileAction', async (req, res) => {
 
     const buffer = Buffer.from(base64Data, "base64");
 
-    const publicPath = await saveFileLocallyOrBlob("accomplishments", newPhysicalFileName, buffer, originalFileType);
+    const publicPath = await saveFileLocallyOrBlob("accomplishments", newPhysicalFileName, buffer, originalFileType, { module: 'ACCOMPLISHMENTS', projectId, uploadedBy: String(req.headers['x-user-session'] || '') });
 
     const newFile = await prisma.projectAccomplishmentFile.create({
       data: {
@@ -343,14 +316,7 @@ router.post('/createSuccessiveBillingAction', async (req, res) => {
     try {
       let sourceBuffer: Buffer;
       // Backend needs to fetch files, potentially from S3 or its own local storage
-      const fetchUrl = fileUrl.startsWith('/uploads/')
-        ? `${process.env.AWS_BACKEND_URL || 'http://localhost:4000'}${fileUrl}`
-        : fileUrl;
-      const res = await fetch(fetchUrl);
-      if (!res.ok) {
-        throw new Error(`Failed to fetch original file for billing: ${res.status} ${res.statusText}`);
-      }
-      sourceBuffer = Buffer.from(await res.arrayBuffer());
+      sourceBuffer = await readStoredUpload(fileUrl);
 
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(sourceBuffer as any);
@@ -390,21 +356,14 @@ router.post('/createSuccessiveBillingAction', async (req, res) => {
       console.error("Failed to manipulate Excel columns (backend):", excelError);
       // Fallback: if excel manipulation fails, just re-upload the original content
       try {
-        const fetchUrl = fileUrl.startsWith('/uploads/')
-          ? `${process.env.AWS_BACKEND_URL || 'http://localhost:4000'}${fileUrl}`
-          : fileUrl;
-        const res = await fetch(fetchUrl);
-        if (!res.ok) {
-          throw new Error(`Failed to fetch original file for billing (fallback): ${res.status} ${res.statusText}`);
-        }
-        finalBuffer = Buffer.from(await res.arrayBuffer());
+        finalBuffer = await readStoredUpload(fileUrl);
       } catch (fallbackFetchError: any) {
         console.error("Failed to fetch original file even in fallback:", fallbackFetchError);
         return res.status(500).json({ success: false, error: `Failed to process or fetch original file: ${fallbackFetchError.message}` });
       }
     }
 
-    const publicPath = await saveFileLocallyOrBlob("accomplishments", newPhysicalFileName, finalBuffer, latestBilling.fileType);
+    const publicPath = await saveFileLocallyOrBlob("accomplishments", newPhysicalFileName, finalBuffer, latestBilling.fileType, { module: 'ACCOMPLISHMENTS', projectId, uploadedBy: String(req.headers['x-user-session'] || '') });
 
     const newBillingFile = await prisma.projectAccomplishmentFile.create({
       data: {

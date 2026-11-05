@@ -4,17 +4,9 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
+import { uploadToS3 } from '../../../../src/lib/s3';
 
 const router = Router();
-
-// --- Helper for file operations (adjust path for AWS environment) ---
-// In a real AWS setup, this would typically interact with S3 or similar cloud storage.
-// For this migration, we are preserving the original local file system logic.
-const getUploadDirPath = () => {
-  // In an Express app, process.cwd() is typically the root of the Express application.
-  // Ensure 'public/uploads/documents' exists relative to where your Express app runs.
-  return path.join(process.cwd(), 'public', 'uploads', 'documents');
-};
 
 router.post('/uploadDocument', async (req, res) => {
   try {
@@ -24,21 +16,15 @@ router.post('/uploadDocument', async (req, res) => {
       return res.status(400).json({ success: false, error: 'No file content provided.' });
     }
 
-    const uploadDir = getUploadDirPath();
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-
     const fileExtension = path.extname(fileName);
     const baseName = path.basename(fileName, fileExtension);
     const safeBaseName = baseName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const uniqueName = `${safeBaseName}_${Date.now()}${fileExtension}`;
-    const filePath = path.join(uploadDir, uniqueName);
-
     const buffer = Buffer.from(fileContentBase64, 'base64');
-    fs.writeFileSync(filePath, buffer);
-
-    const fileUrl = `/uploads/documents/${uniqueName}`;
+    const actorId = String(req.headers['x-user-session'] || '');
+    const { url: fileUrl } = await uploadToS3(uniqueName, buffer, {
+      contentType: fileType || 'application/octet-stream', module: 'DOCUMENTS', projectId: projectId || null, uploadedBy: actorId,
+    });
 
     await prisma.document.create({
       data: {
@@ -48,7 +34,7 @@ router.post('/uploadDocument', async (req, res) => {
         fileType: fileType || 'application/octet-stream',
         fileSize: fileSize,
         projectId: projectId || null,
-        uploaderId: uploaderId || null
+        uploaderId: actorId
       }
     });
 

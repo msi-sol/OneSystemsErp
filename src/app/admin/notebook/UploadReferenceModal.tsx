@@ -10,7 +10,7 @@ const CATEGORIES = [
   'AI Validation Criteria', 'Approval Matrix', 'Role Permission Matrix'
 ];
 
-export default function UploadReferenceModal({ onClose, currentUser }: { onClose: () => void, currentUser: any }) {
+export default function UploadReferenceModal({ onClose }: { onClose: () => void, currentUser: any }) {
   const [isUploading, setIsUploading] = useState(false);
   const [formData, setFormData] = useState({
     fileName: '',
@@ -19,24 +19,12 @@ export default function UploadReferenceModal({ onClose, currentUser }: { onClose
     projectAssignment: ''
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsUploading(true);
     try {
-      // In a real app, you'd upload the file to S3/Cloudinary first and get a URL.
-      // For this implementation, we will mock the URL.
-      const mockFileUrl = `https://storage.onesystemserp.com/refs/${formData.fileName.replace(/\s+/g, '_')}.pdf`;
-      
-      await uploadReferenceFile({
-        userId: currentUser.id,
-        userRole: currentUser.role,
-        fileName: formData.fileName,
-        fileType: 'PDF',
-        fileUrl: mockFileUrl,
-        referenceCategory: formData.referenceCategory,
-        moduleAssignment: formData.moduleAssignment,
-        projectAssignment: formData.projectAssignment
-      });
+      const uploadData = new FormData(e.currentTarget);
+      await uploadReferenceFile(uploadData);
       
       onClose();
     } catch (err: any) {
@@ -66,6 +54,7 @@ export default function UploadReferenceModal({ onClose, currentUser }: { onClose
             <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-primary)', fontSize: '0.9rem' }}>File Name</label>
             <input 
               required
+              name="fileName"
               type="text" 
               value={formData.fileName}
               onChange={e => setFormData({...formData, fileName: e.target.value})}
@@ -77,6 +66,7 @@ export default function UploadReferenceModal({ onClose, currentUser }: { onClose
           <div>
             <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-primary)', fontSize: '0.9rem' }}>Reference Category</label>
             <select 
+              name="referenceCategory"
               value={formData.referenceCategory}
               onChange={e => setFormData({...formData, referenceCategory: e.target.value})}
               style={{ width: '100%', padding: '10px', borderRadius: '8px', backgroundColor: 'var(--bg-dark)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)' }}
@@ -88,6 +78,7 @@ export default function UploadReferenceModal({ onClose, currentUser }: { onClose
           <div>
             <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-primary)', fontSize: '0.9rem' }}>Target Module (Optional)</label>
             <input 
+              name="moduleAssignment"
               type="text" 
               value={formData.moduleAssignment}
               onChange={e => setFormData({...formData, moduleAssignment: e.target.value})}
@@ -100,6 +91,7 @@ export default function UploadReferenceModal({ onClose, currentUser }: { onClose
             <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-primary)', fontSize: '0.9rem' }}>Select File (PDF/Excel)</label>
             <input 
               type="file" 
+              name="file"
               required
               style={{ width: '100%', padding: '10px', borderRadius: '8px', backgroundColor: 'var(--bg-dark)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)' }}
             />

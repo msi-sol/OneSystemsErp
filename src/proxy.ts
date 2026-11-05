@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { verifySession } from '@/lib/dal/auth';
+import { validLocalIntegrationDownload } from '@/lib/local-upload-token';
 
 const PRODUCTION_SETUP_ROUTES = new Set([
   '/api/auth/debug', '/api/debug-db', '/api/debug-perms', '/api/fix-users',
@@ -12,6 +13,7 @@ const PRODUCTION_SETUP_ROUTES = new Set([
 export default async function proxy(request: NextRequest) {
   // Extract path
   const pathname = request.nextUrl.pathname;
+  if (pathname === '/api/uploads/file' && validLocalIntegrationDownload(new URL(request.url), request.nextUrl.searchParams.get('key') || '')) return NextResponse.next();
   const normalizedPath = pathname.toLowerCase().replace(/\/+$/, '');
   if (process.env.NODE_ENV === 'production' &&
       (PRODUCTION_SETUP_ROUTES.has(normalizedPath) || normalizedPath.startsWith('/api/internal/'))) {

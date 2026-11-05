@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { generateText } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { uploadToS3 } from '../../../../src/lib/s3';
 
 const router = Router();
 const google = createGoogleGenerativeAI({
@@ -212,7 +213,7 @@ router.post('/quotations', async (req, res) => {
         const buffer = Buffer.from(file.base64, 'base64');
         const fileName = `${Date.now()}-${file.name}`;
         
-        let fileUrl = 'Unsaved_Memory_Only'; // We skip S3 upload here for brevity or mock it
+        const { url: fileUrl } = await uploadToS3(fileName, buffer, { module: 'PROCUREMENT', projectId: canvass.projectId, uploadedBy: String(req.headers['x-user-session'] || ''), contentType: file.type || 'application/octet-stream' });
 
         const prompt = `Act as an AI Procurement Data Extractor.
 You are analyzing a scanned supplier's quotation document for a Canvass.

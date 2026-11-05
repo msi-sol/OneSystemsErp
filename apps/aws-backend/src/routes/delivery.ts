@@ -6,6 +6,8 @@ import { requirePermission } from '../lib/permissions';
 import { submitTransaction, approveTransaction } from '../lib/workflow';
 import { validateTransactionWithAI, verifyDeliveryDocumentWithAI } from '../lib/aiValidation';
 import { uploadFileToS3 } from '../services/s3.service';
+import { privateUploadUrl } from '../../../../src/lib/s3';
+import { randomUUID } from 'node:crypto';
 
 const router = Router();
 function getPbacContext(req: any) {
@@ -43,8 +45,9 @@ router.post('/encode', async (req, res) => {
     if (fileBase64 && mimeType && fileName) {
       const buffer = Buffer.from(fileBase64, 'base64');
       
-      const s3Key = `deliveries/${Date.now()}-${fileName}`;
-      proofFileUrl = await uploadFileToS3(buffer, s3Key, mimeType);
+      const s3Key = `deliveries/${randomUUID()}`;
+      const uploadProject = await prisma.purchaseOrder.findUnique({ where: { id: poId }, select: { mr: { select: { projectId: true } } } });
+      proofFileUrl = privateUploadUrl(await uploadFileToS3(buffer, s3Key, mimeType, { module: 'DELIVERY_RECEIVING', uploadedBy: userId, projectId: uploadProject?.mr.projectId }));
 
       const po = await prisma.purchaseOrder.findUnique({
         where: { id: poId },
@@ -289,8 +292,8 @@ router.post('/:id/upload-proof', async (req, res) => {
     if (!delivery) return res.status(404).json({ error: 'Delivery not found' });
 
     const buffer = Buffer.from(fileBase64, 'base64');
-    const s3Key = `deliveries/${Date.now()}-delayed-${fileName}`;
-    const proofFileUrl = await uploadFileToS3(buffer, s3Key, mimeType);
+    const s3Key = `deliveries/${randomUUID()}`;
+    const proofFileUrl = privateUploadUrl(await uploadFileToS3(buffer, s3Key, mimeType, { module: 'DELIVERY_RECEIVING', uploadedBy: String(req.headers['x-user-session'] || '') }));
 
     const poDetails = {
       poNumber: delivery.po.poNumber,

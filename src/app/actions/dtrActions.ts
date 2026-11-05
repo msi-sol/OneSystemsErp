@@ -4,8 +4,6 @@ import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
-import { promises as fs } from 'fs';
-import path from 'path';
 import Papa from 'papaparse';
 import { uploadToS3 as put } from '@/lib/s3';
 
@@ -64,43 +62,25 @@ export async function saveBulkManualDtr(workerId: string, payrollPeriodId: strin
 
 export async function processAIBiometrics(formData: FormData) {
   try {
+    const actor = await verifySession();
+    if (!actor) throw new Error('Unauthorized: sign in before uploading biometrics.');
+
     const file = formData.get('file') as File;
     const payrollPeriodId = formData.get('periodId') as string;
-    const currentUserId = formData.get('userId') as string;
 
     if (!file) {
       return { success: false, error: 'No file provided' };
     }
 
-    // Save the file to S3/Blob or local fallback
+    // Save the source workbook to private S3.
     const buffer = Buffer.from(await file.arrayBuffer());
     const safeFileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    
-    let fileUrl = '';
-    
-    if (process.env.BLOB_READ_WRITE_TOKEN) {
-      try {
-        const blob = await put(`biometrics/${safeFileName}`, buffer, {
-          access: 'public',
-          addRandomSuffix: false
-        });
-        fileUrl = blob.url;
-      } catch (e) {
-        console.warn("Vercel Blob upload failed, falling back to local storage:", e);
-        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'biometrics');
-        await fs.mkdir(uploadDir, { recursive: true });
-        const filePath = path.join(uploadDir, safeFileName);
-        await fs.writeFile(filePath, buffer);
-        fileUrl = `/uploads/biometrics/${safeFileName}`;
-      }
-    } else {
-      // Local fallback for development
-      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'biometrics');
-      await fs.mkdir(uploadDir, { recursive: true });
-      const filePath = path.join(uploadDir, safeFileName);
-      await fs.writeFile(filePath, buffer);
-      fileUrl = `/uploads/biometrics/${safeFileName}`;
-    }
+    const storedFile = await put(`biometrics/${safeFileName}`, buffer, {
+      contentType: file.type || 'application/octet-stream',
+      module: 'PAYROLL',
+      uploadedBy: actor.id,
+    });
+    const fileUrl = storedFile.url;
     
     let rows: any[] = [];
     

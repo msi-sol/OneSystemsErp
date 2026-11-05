@@ -49,6 +49,45 @@ The original RDS CA bundles are copied into `/etc/onesystemserp/` and the shared
 
 Inside the two ERP services, the selected release is mounted read-only at the original `/home/ubuntu/onesystemserp` working path. This keeps absolute upload references stable across release replacement. Other home-directory content stays hidden; uploads resolve to shared writable storage. Outside those service namespaces, the original checkout remains intact for recovery.
 
+## Application uploads
+
+Production file uploads use the private bucket
+`onesystemserp-uploads-173677044880-us-east-1` in `us-east-1`, separate from
+deployment artifacts. Block Public Access is enabled, ownership is
+bucket-owner-enforced, default encryption is SSE-S3, and versioning is enabled.
+The existing EC2 role `OneSystemsErpZenithArchiveRole` has the additive inline
+policy `OneSystemsErpPrivateUploads`: GetBucketLocation on this bucket and
+GetObject/PutObject/DeleteObject on its objects over HTTPS. Other role policies
+are preserved; no access keys are installed.
+
+The production environment sets `AWS_REGION`, `AWS_S3_BUCKET_NAME` and
+`S3_BUCKET_NAME` (both aliases name this upload bucket). Its previous settings
+are retained at
+`/var/lib/onesystemserp/backups/s3-uploads-20261105/production.env`. To restore
+the environment, restore that file and restart only the two ERP services; retain
+S3 objects and local originals for recovery. Uploads have no automatic expiry
+lifecycle and no DeleteObjectVersion grant.
+
+BOQ originals retain permission-checked original-download routes. Other files
+use durable `/api/uploads/file?key=...` URLs, with uploader/module/project context
+in private metadata and authorization before returning bytes. Trusted document
+integrations receive short-lived signed URLs, which are not persisted in database
+fields. Source bytes remain unchanged before extraction.
+
+Outside production, new files use private `.runtime/` storage even when S3
+settings exist. Local document integrations use expiring signed app URLs. Legacy
+local files remain readable and are not deleted. Legacy external reads permit
+the previous S3 defaults and Vercel Blob hosts; an explicitly reviewed additional
+historical host can be configured with `LEGACY_UPLOAD_HOSTS`. Production uploads
+never fall back to local files, another provider, or placeholder URLs.
+
+The shared handler covers BOQ/work-package sources, legacy BOQ intake, documents,
+delivery proofs, accomplishment/billing originals and edits, quotations, payroll
+imports, project/materials/billing templates, notebook references and knowledge
+source binaries. Analyze/preview steps keep their existing no-commit behavior;
+JSON-only text ingestion is not a file upload. Storage routing introduces no
+schema, approval or calculation change.
+
 ## Operations
 
 See the **Production release** workflow under GitHub Actions for build/deployment results. `DEPLOYMENT_SUCCEEDED <commit>` identifies a completed host deployment. Preflight/history/scope failures stop before SQL. Migration or post-migration verification failures stop application activation and preserve private diagnostics/recovery backups; SQL already applied is not undone. A failed build or staged application check does not replace the running application release.

@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { prisma } from '../lib/prisma';
 import { uploadFileToS3 } from '../services/s3.service';
+import { privateUploadUrl } from '../../../../src/lib/s3';
 
 export type ParsedBOQItem = {
   sourceRowNumber: number; itemCode: string; description: string; unit: string;
@@ -35,24 +34,15 @@ export async function persistBOQUpload(input: UploadInput) {
       } });
     }
 
-    const safeName = `${randomUUID()}-${path.basename(input.fileName).replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const safeName = `${randomUUID()}.xlsx`;
     const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     let storagePath: string;
     let fileUrl: string;
-    if (process.env.AWS_ACCESS_KEY_ID) {
+    {
       storagePath = `boq-uploads/${project.id}/${safeName}`;
-      await uploadFileToS3(input.buffer, storagePath, mimeType);
-      fileUrl = `https://${process.env.S3_BUCKET_NAME || 'onesystemserp-storage'}.s3.amazonaws.com/${storagePath}`;
-    } else {
-      const root = path.resolve(process.cwd(), 'public', 'uploads', 'boq-uploads');
-      const directory = path.resolve(root, project.id);
-      const relative = path.relative(root, directory);
-      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Invalid upload storage path.');
-      fs.mkdirSync(directory, { recursive: true });
-      storagePath = path.join(directory, safeName);
-      // Never overwrite an earlier original workbook, even on concurrent uploads.
-      fs.writeFileSync(storagePath, input.buffer, { flag: 'wx' });
-      fileUrl = `/uploads/boq-uploads/${project.id}/${safeName}`;
+      await uploadFileToS3(input.buffer, storagePath, mimeType, { module: 'PROJECT_MANAGEMENT', projectId: project.id, uploadedBy: input.user.id });
+      fileUrl = privateUploadUrl(storagePath);
+      storagePath = `s3:${storagePath}`;
     }
 
     const report = { ...input.report, fileUrl };

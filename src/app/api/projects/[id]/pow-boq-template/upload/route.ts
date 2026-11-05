@@ -3,37 +3,38 @@ import { prisma } from '@/lib/prisma';
 import { parseWorkbook } from '@/lib/excel/excel-workbook-parser';
 import { extractBOQItems } from '@/lib/boq/boq-item-extractor';
 import { validateFormulas } from '@/lib/excel/excel-formula-validator';
-import fs from 'fs';
-import path from 'path';
+import { createHash } from 'node:crypto';
+import { uploadToS3 } from '@/lib/s3';
+import { verifyApiSession } from '@/lib/dal/auth';
+import { actorCanAccessProject } from '@/lib/boq/workspace-service';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }>}) {
   try {
+    const actor = await verifyApiSession();
+    if (!actor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const projectId = (await params).id;
+    if (!await actorCanAccessProject(actor, projectId, ['canEdit', 'canEditDraft'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     const formData = await req.formData();
     const file = formData.get('file') as File;
     if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
 
-    const projectId = (await params).id;
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
     // 1. Save Layer 1: Source File
-    const dir = path.join(process.cwd(), 'public', 'uploads', 'templates', projectId);
-    fs.mkdirSync(dir, { recursive: true });
-    const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    const filePath = path.join(dir, safeName);
-    fs.writeFileSync(filePath, buffer);
+    const stored = await uploadToS3(file.name, buffer, { contentType: file.type || 'application/octet-stream', module: 'PROJECT_MANAGEMENT', projectId, uploadedBy: actor.id });
 
     // 2. Create Upload Record
     const upload = await prisma.uploadedWorkbookFile.create({
       data: {
         projectId,
         originalFilename: file.name,
-        fileHash: "pending",
+        fileHash: createHash('sha256').update(buffer).digest('hex'),
         mimeType: file.type || "application/octet-stream",
         fileSize: file.size,
-        storagePath: filePath,
-        preservedOriginalUrl: `/uploads/templates/${projectId}/${safeName}`,
-        uploadedBy: 'SYSTEM_USER', // Or from session
+        storagePath: stored.url,
+        preservedOriginalUrl: stored.url,
+        uploadedBy: actor.id,
         extractionStatus: 'PROCESSING'
       }
     });

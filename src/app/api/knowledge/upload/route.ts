@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { chunkText, generateEmbedding } from '@/lib/ai-indexer';
 import { cookies } from 'next/headers';
 import { getUserPermissions } from '@/lib/permissions';
+import { uploadToS3 } from '@/lib/s3';
+import { createHash } from 'node:crypto';
 
 const pdfParse = require('pdf-parse');
 
@@ -49,12 +51,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Could not extract readable text from this file." }, { status: 400 });
     }
 
+    // Original binaries remain restricted to the uploading administrator/admins;
+    // existing per-role/project rules continue governing indexed knowledge chunks.
+    const original = await uploadToS3(file.name, buffer, { module: 'KNOWLEDGE_CENTER', uploadedBy: userId, contentType: file.type || 'application/octet-stream', adminOnly: true });
     // Create the Knowledge Source record
     const source = await prisma.aiKnowledgeSource.create({
       data: {
         sourceType: 'uploaded_file',
         title,
         originalFilename: file.name,
+        filePath: `s3:${original.pathname}`,
+        storageUrl: original.url,
         mimeType: file.type,
         uploadedById: userId,
         visibilityScope,
@@ -64,6 +71,7 @@ export async function POST(req: Request) {
       }
     });
 
+    await prisma.auditLog.create({ data: { userId, userRole: __session!.role, moduleName: 'KNOWLEDGE_CENTER', transactionId: source.id, actionType: 'KNOWLEDGE_ORIGINAL_STORED', newValue: JSON.stringify({ sourceId: source.id, storageKey: original.pathname, originalUrl: original.url, fileHash: createHash('sha256').update(buffer).digest('hex'), fileSize: buffer.length }) } });
     const chunks = chunkText(textContent);
     let chunksProcessed = 0;
     
@@ -98,6 +106,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ 
       success: true, 
       sourceId: source.id, 
+      originalUrl: original.url,
       chunksProcessed,
       totalChunks: chunks.length 
     });

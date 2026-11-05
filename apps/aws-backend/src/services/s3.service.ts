@@ -1,45 +1,31 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { uploadStorageClient, uploadBucket, putPrivateUpload, privateUploadUrl, validateUploadKey, type UploadContext } from '../../../../src/lib/s3';
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-  },
-});
-
-const BUCKET_NAME = process.env.S3_BUCKET_NAME || 'onesystemserp-storage';
-
-export async function generateUploadUrl(key: string, contentType: string): Promise<string> {
+export async function generateUploadUrl(key: string, contentType: string, context: UploadContext): Promise<string> {
+  if (process.env.NODE_ENV !== 'production') throw new Error('Direct S3 uploads are disabled locally. Use the module upload form.');
   const command = new PutObjectCommand({
-    Bucket: BUCKET_NAME,
-    Key: key,
+    Bucket: uploadBucket(),
+    Key: validateUploadKey(key),
     ContentType: contentType,
+    Metadata: { module: context.module, uploadedby: context.uploadedBy, ...(context.projectId ? { projectid: context.projectId } : {}), filename: encodeURIComponent(key.split('/').pop() || 'file') },
   });
 
-  return getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  return getSignedUrl(uploadStorageClient(), command, { expiresIn: 900 });
 }
 
 export async function generateDownloadUrl(key: string): Promise<string> {
+  validateUploadKey(key);
+  if (process.env.NODE_ENV !== 'production') return privateUploadUrl(key);
   const command = new GetObjectCommand({
-    Bucket: BUCKET_NAME,
+    Bucket: uploadBucket(),
     Key: key,
   });
 
-  return getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  return getSignedUrl(uploadStorageClient(), command, { expiresIn: 900 });
 }
 
-export async function uploadFileToS3(buffer: Buffer, key: string, contentType: string): Promise<string> {
-  const command = new PutObjectCommand({
-    Bucket: BUCKET_NAME,
-    Key: key,
-    Body: buffer,
-    ContentType: contentType,
-  });
-
-  await s3Client.send(command);
-  // Return the public URL pattern (or the key itself depending on how you read it later)
-  // We'll return just the key for now, and the UI can request a presigned download URL
+export async function uploadFileToS3(buffer: Buffer, key: string, contentType: string, context: UploadContext): Promise<string> {
+  await putPrivateUpload(buffer, key, contentType, context);
   return key;
 }

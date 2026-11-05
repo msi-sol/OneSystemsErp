@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { getUserPermissions } from '@/lib/permissions';
 import { cookies } from 'next/headers';
 import { generateEmbedding } from '@/lib/ai-indexer';
+import { uploadToS3 } from '@/lib/s3';
+import { createHash } from 'node:crypto';
 // @ts-ignore - pdf-parse types are broken
 import pdfParse from 'pdf-parse';
 
@@ -44,6 +46,8 @@ export async function POST(req: Request) {
       return Response.json({ success: false, message: "Could not extract text from file." }, { status: 400 });
     }
 
+    const original = await uploadToS3(file.name, buffer, { module: 'KNOWLEDGE_CENTER', uploadedBy: sessionId, contentType: file.type || 'application/octet-stream', adminOnly: true });
+    const originalMetadata = JSON.stringify({ originalUrl: original.url, storageKey: original.pathname, fileHash: createHash('sha256').update(buffer).digest('hex'), fileSize: buffer.length });
     // Basic chunking: split by double newlines or large blocks
     const chunks = content
       .split(/\n\s*\n/)
@@ -63,6 +67,7 @@ export async function POST(req: Request) {
             sourceTextChunk: chunk.substring(0, 5000), // Safety truncation
             embeddingVector: JSON.stringify(vector),
             confidentialityLevel: confidentiality,
+            metadataJson: originalMetadata,
           }
         });
         
@@ -74,6 +79,7 @@ export async function POST(req: Request) {
 
     return Response.json({
       success: true,
+      originalUrl: original.url,
       message: `Document ingested successfully. Created ${ingestedCount} vector embeddings from ${file.name}.`
     });
 

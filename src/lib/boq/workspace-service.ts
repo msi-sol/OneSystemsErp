@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { Prisma } from '@prisma/client';
 import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -9,6 +9,7 @@ import { BOQ_CANONICALIZATION_VERSION } from '@/lib/boq/canonical-checksum';
 import { buildDraftBOQChecksum, type DraftBOQLine } from '@/lib/boq/draft-workflow';
 import { createBOQReviewDocument, type BOQSourceRow } from '@/lib/boq/review-state';
 import { buildWorkspaceBOQFindings } from '@/lib/boq/workspace-findings';
+import { readStoredUpload, uploadBucket, uploadStorageClient } from '@/lib/s3';
 import { parseWorkspaceWorkbook } from './workspace-parser';
 import { WorkspaceError, type WorkspaceAnalysis, type WorkspaceBreakdownMapping } from './workspace-types';
 
@@ -37,21 +38,12 @@ function localOriginalPath(storagePath:string):string {
   return path.join(process.cwd(),'.runtime','boq-workspace',path.basename(normalized));
 }
 // Accept the existing backend BOQ upload setting as well as the frontend alias.
-const s3Bucket = () => process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET_NAME || 'onesystemserp-storage';
-let s3Client: S3Client | undefined;
-
-function getS3Client(): S3Client {
-  if (!s3Client) {
-    const credentials = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-      ? { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY, ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}) }
-      : undefined;
-    s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1', ...(credentials ? { credentials } : {}) });
-  }
-  return s3Client;
-}
+const s3Bucket = uploadBucket;
+const getS3Client = uploadStorageClient;
 
 function cloudStorageConfigured(): boolean {
-  return Boolean(process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET_NAME || (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY));
+  // Never let a copied production setting send local/demo files to the live bucket.
+  return process.env.NODE_ENV === 'production';
 }
 
 function projectRoleAllows(rolePermissions: Record<string, Record<string, boolean> | undefined>, actions: string[]): boolean {
@@ -144,9 +136,7 @@ export async function storeWorkspaceOriginal(uploadId: string, projectId: string
     }));
     return `s3:${key}`;
   }
-  const relativePath = process.env.NODE_ENV === 'production' && process.platform === 'linux'
-    ? `retained:boq-workspace/${uploadId}.xlsx`
-    : path.join(STORAGE_DIR, `${uploadId}.xlsx`);
+  const relativePath = path.join(STORAGE_DIR, `${uploadId}.xlsx`);
   const absolutePath = localOriginalPath(relativePath);
   await fs.mkdir(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
   await fs.writeFile(absolutePath, buffer, { flag: 'wx', mode: 0o600 });
@@ -482,9 +472,7 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
 
 export async function readWorkspaceOriginal(storagePath: string): Promise<Buffer> {
   if (storagePath.startsWith('s3:')) {
-    const response = await getS3Client().send(new GetObjectCommand({ Bucket: s3Bucket(), Key: storagePath.slice(3) }));
-    if (!response.Body) throw new WorkspaceError('The original workbook is unavailable.', 404);
-    return Buffer.from(await response.Body.transformToByteArray());
+    return readStoredUpload(storagePath);
   }
   const absolutePath = localOriginalPath(storagePath);
   try {

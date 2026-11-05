@@ -2,6 +2,8 @@
 
 import { backendFetch } from '@/lib/backend-fetch';
 import { revalidatePath } from 'next/cache';
+import { verifySession } from '@/lib/dal/auth';
+import { uploadToS3 } from '@/lib/s3';
 
 // Basic fetchWithAuth definition (replace with your actual implementation)
 // This placeholder adds Content-Type header for POST requests
@@ -41,13 +43,18 @@ async function fetchWithAuth(
 
 export async function uploadDocumentTemplate(formData: FormData) {
   try {
-    // Convert FormData to a plain object to send as JSON
+    const actor = await verifySession();
+    if (!actor) throw new Error('Sign in before uploading a template.');
+    const file = formData.get('file');
+    if (!file || typeof file === 'string' || !file.size) throw new Error('Choose the original template file.');
+    const stored = await uploadToS3(file.name, Buffer.from(await file.arrayBuffer()), { module: 'ACCOMPLISHMENTS', uploadedBy: actor.id, contentType: file.type || 'application/octet-stream' });
+    // Keep the existing template registry, with an actual preserved original.
     const payload = {
-      fileUrl: formData.get('fileUrl') as string,
-      fileName: formData.get('fileName') as string,
+      fileUrl: stored.url,
+      fileName: file.name,
       templateName: formData.get('templateName') as string,
       templateType: formData.get('templateType') as string,
-      uploadedById: formData.get('uploadedById') as string | null,
+      uploadedById: actor.id,
     };
 
     const response = await fetchWithAuth(

@@ -1,8 +1,8 @@
 import { verifySession } from '@/lib/dal/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import fs from 'fs';
-import path from 'path';
+import { uploadToS3 } from '@/lib/s3';
+import { actorCanAccessProject } from '@/lib/boq/workspace-service';
 import crypto from 'crypto';
 import { cookies } from 'next/headers';
 
@@ -11,13 +11,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const cookieStore = await cookies();
     const __session = await verifySession();
   const userId = __session?.id || '';
-    const user = userId ? await prisma.user.findUnique({ where: { id: userId } }) : await prisma.user.findFirst();
+    const user = userId ? await prisma.user.findUnique({ where: { id: userId } }) : null;
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id: projectId } = await params;
+    if (!await actorCanAccessProject(user, projectId, ['canEdit', 'canEditDraft'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const templateCode = formData.get('templateCode') as string || 'POW_BOQ_TEMPLATE';
@@ -32,18 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const buffer = Buffer.from(arrayBuffer);
     
     const hash = crypto.createHash('sha256').update(buffer).digest('hex');
-    const filename = `${projectId}_${Date.now()}_${file.name}`;
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'boq_originals');
-    
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    
-    const storagePath = path.join(uploadDir, filename);
-    const publicUrl = `/uploads/boq_originals/${filename}`;
-
-    // 2. Save original file exactly as uploaded
-    await fs.promises.writeFile(storagePath, buffer);
+    const stored = await uploadToS3(file.name, buffer, { contentType: file.type || 'application/octet-stream', module: 'PROJECT_MANAGEMENT', projectId, uploadedBy: user.id });
 
     // 3. Store metadata in database
     const uploadedFile = await prisma.uploadedWorkbookFile.create({
@@ -55,7 +45,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         mimeType: file.type || "application/octet-stream",
         fileSize: file.size,
         fileHash: hash,
-        storagePath: publicUrl,
+        storagePath: stored.url,
+        preservedOriginalUrl: stored.url,
         uploadedBy: user.id || 'system',
         validationStatus: 'PENDING',
         extractionStatus: 'PENDING',

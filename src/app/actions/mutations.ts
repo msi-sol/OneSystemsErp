@@ -4,12 +4,21 @@ import { verifySession } from '@/lib/dal/auth';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import * as xlsx from 'xlsx';
-import { uploadToS3 as put } from '@/lib/s3';
+import { getStoredUploadDownloadUrl, readStoredUpload, uploadToS3 as put } from '@/lib/s3';
+import { actorCanAccessProject } from '@/lib/boq/workspace-service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import ExcelJS from 'exceljs';
 import { cookies } from 'next/headers';
+
+async function requireProjectTemplateView(projectId: string) {
+  const actor = await verifySession();
+  if (!actor || actor.mustChangePassword) throw new Error('Unauthorized: sign in to view this project template.');
+  if (!await actorCanAccessProject(actor, projectId, ['canView'])) {
+    throw new Error('Unauthorized: you do not have permission to view this project template.');
+  }
+}
 
 async function parseBoqWithGemini(buffer: Buffer | null, mimeType: string, rawTextContent?: string) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -97,6 +106,9 @@ async function parseBoqWithGemini(buffer: Buffer | null, mimeType: string, rawTe
 
 
 export async function createProject(formData: FormData) {
+  const actor = await verifySession();
+  if (!actor) throw new Error('Unauthorized: sign in before creating a project.');
+
   const boqFile = formData.get('boqFile') as File | null;
   const managerId = formData.get('managerId') as string | null;
   const startDateStr = formData.get('startDate') as string | null;
@@ -112,8 +124,6 @@ export async function createProject(formData: FormData) {
   let contractAmount = 0;
   
   let parsedItems: any[] = [];
-  let savedFilePath = '';
-
   // Process file in memory for parsing
   const buffer = Buffer.from(await boqFile.arrayBuffer());
   
@@ -485,8 +495,7 @@ export async function createProject(formData: FormData) {
   });
 
   const cookieStore = await cookies();
-  const __session = await verifySession();
-  const sessionId = __session?.id || '';
+  const sessionId = actor.id;
   const simulatedRole = cookieStore.get('simulatedRole')?.value;
 
   if (sessionId) {
@@ -507,48 +516,38 @@ export async function createProject(formData: FormData) {
     }
   }
 
-  // Upload Awarded BOQ Template to Blob Storage
-  if (boqFile.name.endsWith('.xlsx')) {
-    let blobUrl = '';
-    
-    if (process.env.BLOB_READ_WRITE_TOKEN) {
-      const blob = await put(`templates/${project.id}/awarded-boq-template.xlsx`, buffer, {
-        access: 'public',
-        addRandomSuffix: true,
-      });
-      blobUrl = blob.url;
-    } else {
-      console.warn("BLOB_READ_WRITE_TOKEN is missing. Falling back to local filesystem for upload.");
-      const fs = require('fs');
-      const path = require('path');
-      try {
-        const dir = path.join(process.cwd(), 'public', 'uploads', 'templates', project.id);
-        fs.mkdirSync(dir, { recursive: true });
-        const filePath = path.join(dir, 'awarded-boq-template.xlsx');
-        fs.writeFileSync(filePath, buffer);
-        blobUrl = `/uploads/templates/${project.id}/awarded-boq-template.xlsx`;
-      } catch (err) {
-        console.warn("Could not save file to local filesystem (likely Vercel read-only environment). Continuing without saving file.", err);
-      }
-    }
+  // Preserve every accepted source file; only XLSX files act as editable awarded templates.
+  const isXlsxSource = boqFile.name.toLowerCase().endsWith('.xlsx');
+  const sourceContentType = boqFile.type || (isXlsxSource
+    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    : 'application/octet-stream');
+  const storedFile = await put(`projects/${project.id}/boq-source/${boqFile.name}`, buffer, {
+    contentType: sourceContentType,
+    module: 'PROJECT_MANAGEMENT',
+    projectId: project.id,
+    uploadedBy: actor.id,
+  });
 
-    await prisma.document.create({
-      data: {
-        projectId: project.id,
-        title: 'Awarded BOQ Template',
-        category: 'AWARDED_BOQ_TEMPLATE',
-        fileUrl: blobUrl,
-        fileType: boqFile.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        fileSize: buffer.length
-      }
-    });
-  }
+  await prisma.document.create({
+    data: {
+      projectId: project.id,
+      title: isXlsxSource ? 'Awarded BOQ Template' : boqFile.name,
+      category: isXlsxSource ? 'AWARDED_BOQ_TEMPLATE' : 'PROJECT_BOQ_SOURCE',
+      fileUrl: storedFile.url,
+      fileType: sourceContentType,
+      fileSize: buffer.length,
+      uploaderId: actor.id,
+    }
+  });
 
   revalidatePath('/projects');
   revalidatePath('/');
 }
 
 export async function uploadProcurementBenchmark(formData: FormData) {
+  const actor = await verifySession();
+  if (!actor) throw new Error('Unauthorized: sign in before uploading a procurement benchmark.');
+
   const projectId = formData.get('projectId') as string;
   const boqFile = formData.get('benchmarkFile') as File | null;
   if (!boqFile || boqFile.size === 0) {
@@ -753,6 +752,16 @@ export async function uploadProcurementBenchmark(formData: FormData) {
   }
 
   // Clear existing un-locked items and insert new ones
+  const contentType = boqFile.type || (boqFile.name.toLowerCase().endsWith('.xls')
+    ? 'application/vnd.ms-excel'
+    : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  const storedFile = await put(`projects/${projectId}/procurement-benchmark/${boqFile.name}`, buffer, {
+    contentType,
+    module: 'PROJECT_MANAGEMENT',
+    projectId,
+    uploadedBy: actor.id,
+  });
+
   await prisma.procurementBenchmarkItem.deleteMany({
     where: { projectId }
   });
@@ -779,6 +788,18 @@ export async function uploadProcurementBenchmark(formData: FormData) {
       });
     }
   }
+
+  await prisma.document.create({
+    data: {
+      projectId,
+      title: `Procurement Benchmark: ${boqFile.name}`,
+      category: 'PROCUREMENT_BENCHMARK_SOURCE',
+      fileUrl: storedFile.url,
+      fileType: contentType,
+      fileSize: buffer.length,
+      uploaderId: actor.id,
+    }
+  });
 
   revalidatePath(`/projects/${projectId}`);
 }
@@ -1105,6 +1126,7 @@ export async function deleteLotBreakdown(breakdownId: string) {
 import { convertExcelToHtml } from '@/lib/excel/excelToHtml';
 
 export async function getExactExcelHtml(projectId: string) {
+  await requireProjectTemplateView(projectId);
   const templateDoc = await prisma.document.findFirst({
     where: { projectId, category: 'AWARDED_BOQ_TEMPLATE' },
     orderBy: { createdAt: 'desc' }
@@ -1114,23 +1136,11 @@ export async function getExactExcelHtml(projectId: string) {
     throw new Error('No Awarded BOQ template found for this project.');
   }
 
-  let arrayBuffer: ArrayBuffer;
-  if (templateDoc.fileUrl.startsWith('/uploads/')) {
-    const filePath = path.join(process.cwd(), 'public', templateDoc.fileUrl.replace(/^\//, ''));
-    const fileBuffer = await fs.promises.readFile(filePath);
-    arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
-  } else {
-    const response = await fetch(templateDoc.fileUrl);
-    if (!response.ok) {
-      throw new Error('Failed to fetch template file from storage.');
-    }
-    arrayBuffer = await response.arrayBuffer();
-  }
-  
-  return await convertExcelToHtml(arrayBuffer);
+  return await convertExcelToHtml(await readStoredUpload(templateDoc.fileUrl));
 }
 
 export async function downloadRawOriginalBOQTemplate(projectId: string) {
+  await requireProjectTemplateView(projectId);
   const templateDoc = await prisma.document.findFirst({
     where: { projectId, category: 'AWARDED_BOQ_TEMPLATE' },
     orderBy: { createdAt: 'desc' }
@@ -1140,20 +1150,8 @@ export async function downloadRawOriginalBOQTemplate(projectId: string) {
     throw new Error('No Awarded BOQ template found for this project.');
   }
 
-  let arrayBuffer: ArrayBuffer;
-  if (templateDoc.fileUrl.startsWith('/uploads/')) {
-    const filePath = path.join(process.cwd(), 'public', templateDoc.fileUrl.replace(/^\//, ''));
-    const fileBuffer = await fs.promises.readFile(filePath);
-    arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
-  } else {
-    const response = await fetch(templateDoc.fileUrl);
-    if (!response.ok) {
-      throw new Error('Failed to fetch template file from storage.');
-    }
-    arrayBuffer = await response.arrayBuffer();
-  }
-  
-  const base64String = Buffer.from(arrayBuffer).toString('base64');
+  const buffer = await readStoredUpload(templateDoc.fileUrl);
+  const base64String = buffer.toString('base64');
   return base64String;
 }
 
@@ -1161,6 +1159,7 @@ import * as jwt from 'jsonwebtoken';
 const JWT_SECRET = process.env.ONLYOFFICE_JWT_SECRET || 'super-secret-key-for-dev';
 
 export async function getAwardedBOQOnlyofficeConfig(projectId: string, baseUrl: string) {
+  await requireProjectTemplateView(projectId);
   const templateDoc = await prisma.document.findFirst({
     where: { projectId, category: 'AWARDED_BOQ_TEMPLATE' },
     orderBy: { createdAt: 'desc' }
@@ -1172,11 +1171,10 @@ export async function getAwardedBOQOnlyofficeConfig(projectId: string, baseUrl: 
 
   const documentKey = `awarded-boq-${projectId}-${templateDoc.id}-${Date.now()}`;
   
-  // Construct the full URL. If templateDoc.fileUrl is relative, prepend baseUrl.
-  let fileUrl = templateDoc.fileUrl;
-  if (fileUrl.startsWith('/')) {
-    fileUrl = `${baseUrl}${fileUrl}`;
-  }
+  // The storage helper returns a short-lived URL for private S3 objects. Keep
+  // legacy relative upload paths absolute for the OnlyOffice document server.
+  const storedUrl = await getStoredUploadDownloadUrl(templateDoc.fileUrl);
+  const fileUrl = storedUrl.startsWith('/') ? `${baseUrl}${storedUrl}` : storedUrl;
 
   const config = {
     document: {
@@ -1212,6 +1210,7 @@ export async function getAwardedBOQOnlyofficeConfig(projectId: string, baseUrl: 
 }
 
 export async function downloadAwardedBOQTemplate(projectId: string) {
+  await requireProjectTemplateView(projectId);
   const templateDoc = await prisma.document.findFirst({
     where: { projectId, category: 'AWARDED_BOQ_TEMPLATE' },
     orderBy: { createdAt: 'desc' }
@@ -1221,21 +1220,10 @@ export async function downloadAwardedBOQTemplate(projectId: string) {
     throw new Error('No Awarded BOQ template found for this project.');
   }
 
-  let arrayBuffer: ArrayBuffer;
-  if (templateDoc.fileUrl.startsWith('/uploads/')) {
-    const filePath = path.join(process.cwd(), 'public', templateDoc.fileUrl.replace(/^\//, ''));
-    const fileBuffer = await fs.promises.readFile(filePath);
-    arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
-  } else {
-    const response = await fetch(templateDoc.fileUrl);
-    if (!response.ok) {
-      throw new Error('Failed to fetch template file from storage.');
-    }
-    arrayBuffer = await response.arrayBuffer();
-  }
+  const sourceBuffer = await readStoredUpload(templateDoc.fileUrl);
   
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(arrayBuffer);
+  await workbook.xlsx.load(sourceBuffer as any);
 
   const sheet = workbook.worksheets[0];
   

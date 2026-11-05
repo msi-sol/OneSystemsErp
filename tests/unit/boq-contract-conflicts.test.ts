@@ -81,9 +81,11 @@ const parsedAnalysis = {
 
 describe('BOQ contract mismatch workflow', () => {
   const previousAws = { bucket: process.env.AWS_S3_BUCKET_NAME, access: process.env.AWS_ACCESS_KEY_ID, secret: process.env.AWS_SECRET_ACCESS_KEY };
+  const previousNodeEnv = process.env.NODE_ENV;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.NODE_ENV = 'production';
     process.env.AWS_S3_BUCKET_NAME = 'unit-test-bucket';
     process.env.AWS_ACCESS_KEY_ID = 'unit-test-access';
     process.env.AWS_SECRET_ACCESS_KEY = 'unit-test-secret';
@@ -91,6 +93,7 @@ describe('BOQ contract mismatch workflow', () => {
   });
 
   afterAll(() => {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
     if (previousAws.bucket === undefined) delete process.env.AWS_S3_BUCKET_NAME; else process.env.AWS_S3_BUCKET_NAME = previousAws.bucket;
     if (previousAws.access === undefined) delete process.env.AWS_ACCESS_KEY_ID; else process.env.AWS_ACCESS_KEY_ID = previousAws.access;
     if (previousAws.secret === undefined) delete process.env.AWS_SECRET_ACCESS_KEY; else process.env.AWS_SECRET_ACCESS_KEY = previousAws.secret;

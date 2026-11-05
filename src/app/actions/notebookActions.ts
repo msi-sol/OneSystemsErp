@@ -1,11 +1,11 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { verifySession } from '@/lib/dal/auth';
 import { revalidatePath } from 'next/cache';
 
 
 import { uploadToS3 as put } from '@/lib/s3';
-import * as fs from 'fs';
 import path from 'path';
 const pdfParse = require('pdf-parse');
 import * as xlsx from 'xlsx';
@@ -18,6 +18,9 @@ const google = createGoogleGenerativeAI({
 
 export async function uploadReferenceFile(formData: FormData) {
   try {
+    const actor = await verifySession();
+    if (!actor) throw new Error('Unauthorized: sign in before uploading a notebook reference.');
+
     const title = formData.get('title') as string;
     const category = formData.get('category') as string;
     const isMandatory = formData.get('isMandatory') === 'true';
@@ -28,15 +31,13 @@ export async function uploadReferenceFile(formData: FormData) {
       return { success: false, error: 'Missing required fields' };
     }
 
-    // 1. Save file to disk
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'notebook');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
     const safeFilename = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    const filePath = path.join(uploadDir, safeFilename);
     const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(filePath, buffer);
+    const storedFile = await put(`notebook/${safeFilename}`, buffer, {
+      contentType: file.type || 'application/octet-stream',
+      module: 'KNOWLEDGE_CENTER',
+      uploadedBy: actor.id,
+    });
 
     // 2. Extract Text based on file type
     let extractedText = '';
@@ -115,22 +116,22 @@ ${extractedText.substring(0, 15000)}
         category,
         fileName: file.name,
         fileType: file.type || 'unknown',
-        filePath: `/uploads/notebook/${safeFilename}`,
+        filePath: storedFile.url,
         mandatoryFlag: isMandatory,
         status: 'ACTIVE',
-        uploadedBy: 'user-stub', 
-        uploadedByRole: 'SUPER_ADMIN', 
+        uploadedBy: actor.id,
+        uploadedByRole: actor.role,
         moduleScope: targetModule || 'GENERAL',
         versions: {
           create: {
             versionNumber: 1,
             fileName: file.name,
-            filePath: `/uploads/notebook/${safeFilename}`,
+            filePath: storedFile.url,
             extractedText: extractedText.substring(0, 60000), // Max length safety
             aiSummary,
             aiKeywords,
             indexedStatus,
-            uploadedBy: 'user-stub',
+            uploadedBy: actor.id,
           }
         }
       },

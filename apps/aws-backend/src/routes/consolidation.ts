@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { readStoredUpload } from '../../../../src/lib/s3';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -300,15 +301,10 @@ router.post('/:projectId/download-template', async (req, res) => {
       return res.status(404).json({ success: false, error: 'No BOQ template found for this project.' });
     }
 
-    const response = await fetch(templateDoc.fileUrl); // Fetch the template file from its URL (e.g., S3)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch template file from storage. Status: ${response.status}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
+    const arrayBuffer = await readStoredUpload(templateDoc.fileUrl);
     
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(arrayBuffer); // Load the Excel template
+    await workbook.xlsx.load(arrayBuffer as any); // Load the Excel template
 
     const sheet = workbook.worksheets[0];
     

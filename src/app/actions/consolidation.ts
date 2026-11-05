@@ -55,6 +55,9 @@ export async function autoConsolidateBOQ(projectId: string, force: boolean = fal
 }
 
 export async function uploadMasterMaterialsList(formData: FormData) {
+  const actor = await verifySession();
+  if (!actor) throw new Error('Unauthorized: sign in before uploading the master materials list.');
+
   const projectId = formData.get('projectId') as string;
   const materialsFile = formData.get('materialsFile') as File | null;
   if (!materialsFile || materialsFile.size === 0) {
@@ -63,25 +66,16 @@ export async function uploadMasterMaterialsList(formData: FormData) {
 
   const buffer = Buffer.from(await materialsFile.arrayBuffer());
 
-  let blobUrl = '';
-  // S3 upload logic remains in this Next.js Server Action as it's file storage, not Prisma logic
-  if (process.env.BLOB_READ_WRITE_TOKEN || process.env.AWS_ACCESS_KEY_ID) {
-    const blob = await put(`templates/${projectId}/master-materials-template.xlsx`, buffer, {
-      access: 'public',
-      addRandomSuffix: true,
-    });
-    blobUrl = blob.url;
-  } else {
-    // Local filesystem fallback should be handled carefully in a Vercel/AWS environment.
-    // For this migration, we'll log a warning and provide a mock URL.
-    console.warn("BLOB_READ_WRITE_TOKEN is missing. In a production AWS environment, S3 upload is expected.");
-    // In a real scenario, you might throw an error or use a robust fallback storage.
-    blobUrl = `/uploads/templates/${projectId}/${materialsFile.name}-${Date.now()}.xlsx`; // Mock local path
-  }
+  const storedFile = await put(`templates/${projectId}/master-materials-template.xlsx`, buffer, {
+    contentType: materialsFile.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    module: 'PROJECT_MANAGEMENT',
+    projectId,
+    uploadedBy: actor.id,
+  });
 
   const documentData = {
     title: 'Master Materials Template',
-    fileUrl: blobUrl,
+    fileUrl: storedFile.url,
     fileType: materialsFile.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     fileSize: buffer.length
   };

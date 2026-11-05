@@ -7,15 +7,13 @@ import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { runBoqUploadJob } from '../../apps/aws-backend/src/jobs/boqWorker';
 import { prisma } from '../../apps/aws-backend/src/lib/prisma';
+import { uploadFileToS3 } from '../../apps/aws-backend/src/services/s3.service';
 
 const actor = { id: 'actor-1', role: 'SUPER_ADMIN', name: 'Test actor' };
 let uploadData: Record<string, unknown> | undefined;
 let failSave = false;
 let committed = false;
-let fileWrite: jest.SpyInstance;
-let directoryCreate: jest.SpyInstance;
 let errorLog: jest.SpyInstance;
-const originalAccessKey = process.env.AWS_ACCESS_KEY_ID;
 const tx = {
   project: { create: jest.fn(), findUnique: jest.fn() },
   projectUserAssignment: { create: jest.fn() },
@@ -39,9 +37,6 @@ async function encodedWorkbook(options: { sheet?: string; headers?: boolean; val
 beforeEach(() => {
   jest.resetAllMocks();
   uploadData = undefined; failSave = false; committed = false;
-  delete process.env.AWS_ACCESS_KEY_ID;
-  fileWrite = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
-  directoryCreate = jest.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined);
   errorLog = jest.spyOn(console, 'error').mockImplementation(() => undefined);
   tx.project.create.mockResolvedValue({ id: 'new-project' });
   tx.project.findUnique.mockResolvedValue({ id: 'existing-project' });
@@ -61,9 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fileWrite.mockRestore(); directoryCreate.mockRestore(); errorLog.mockRestore();
-  if (originalAccessKey === undefined) delete process.env.AWS_ACCESS_KEY_ID;
-  else process.env.AWS_ACCESS_KEY_ID = originalAccessKey;
+  errorLog.mockRestore();
 });
 
 test.each([null, 'existing-project'])('parses and saves a valid workbook with project %s', async (projectId) => {
@@ -75,7 +68,12 @@ test.each([null, 'existing-project'])('parses and saves a valid workbook with pr
     fileHash: createHash('sha256').update(bytes).digest('hex'), validationStatus: 'SUCCESS', commitStatus: 'PENDING',
     extractedItems: { create: [expect.objectContaining({ description: 'Concrete', quantity: 2, amount: 100 })] },
   });
-  expect(fileWrite).toHaveBeenCalledWith(expect.stringContaining('boq-uploads'), bytes, { flag: 'wx' });
+  expect(uploadFileToS3).toHaveBeenCalledWith(
+    bytes,
+    expect.stringMatching(new RegExp(`^boq-uploads/${projectId ?? 'new-project'}/[a-f0-9-]+\\.xlsx$`)),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    { module: 'PROJECT_MANAGEMENT', projectId: projectId ?? 'new-project', uploadedBy: actor.id },
+  );
   expect(tx.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: actor.id, transactionId: 'upload-1' }) });
   expect(tx.workbookExtractionAudit.create).toHaveBeenCalled();
   if (projectId) {
@@ -94,7 +92,7 @@ test.each([{ sheet: 'Wrong sheet' }, { headers: false }])('malformed workbook cr
   await expect(runBoqUploadJob('job', null, bytes.toString('base64'), 'bad.xlsx', actor)).resolves.toMatchObject({ success: false });
   expect(prisma.$transaction).not.toHaveBeenCalled();
   expect(tx.project.create).not.toHaveBeenCalled();
-  expect(fileWrite).not.toHaveBeenCalled();
+  expect(uploadFileToS3).not.toHaveBeenCalled();
 });
 
 test('reads the official grand total after its unused blank item rows', async () => {
@@ -119,11 +117,17 @@ test('database save failure never commits the new project or audits', async () =
 });
 
 test('storage failure never records an upload without its original file', async () => {
-  fileWrite.mockImplementation(() => { throw new Error('Read-only storage'); });
+  (uploadFileToS3 as jest.Mock).mockRejectedValue(new Error('S3 unavailable'));
   const bytes = await encodedWorkbook();
   await expect(runBoqUploadJob('job', null, bytes.toString('base64'), 'sample.xlsx', actor)).resolves.toMatchObject({ success: false });
   expect(committed).toBe(false);
   expect(tx.uploadedWorkbookFile.create).not.toHaveBeenCalled();
+  expect(uploadFileToS3).toHaveBeenCalledWith(
+    bytes,
+    expect.stringMatching(/^boq-uploads\/new-project\/[a-f0-9-]+-sample\.xlsx$/),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    { module: 'PROJECT_MANAGEMENT', projectId: 'new-project', uploadedBy: actor.id },
+  );
 });
 
 // Optional local verification of the workbook delivered to the user; no database/file writes.

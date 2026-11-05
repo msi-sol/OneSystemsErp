@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { prisma } from '@/lib/prisma';
+import { readStoredUpload } from '@/lib/s3';
 
 export async function extractPowBoqData(uploadId: string, projectId: string) {
   const upload = await prisma.uploadedWorkbookFile.findUnique({
@@ -8,15 +9,8 @@ export async function extractPowBoqData(uploadId: string, projectId: string) {
 
   if (!upload) throw new Error('Upload not found');
 
-  // We read the original file path
-  // Since we run locally and storagePath is /uploads/boq_originals/...
-  // we need the physical path
-  const fs = require('fs');
-  const path = require('path');
-  const physicalPath = path.join(process.cwd(), 'public', upload.storagePath);
-
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(physicalPath);
+  await workbook.xlsx.load(await readStoredUpload(upload.storagePath) as any);
 
   const sheet = workbook.getWorksheet('BOQ_DATA_ENTRY') || workbook.worksheets[0];
   if (!sheet) throw new Error('Missing worksheet');
