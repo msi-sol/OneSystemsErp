@@ -29,16 +29,21 @@ type ConfirmWorkspaceInput = {
 const STORAGE_DIR = path.join('.runtime', 'boq-workspace');
 function localOriginalPath(storagePath:string):string {
   const normalized=storagePath.replaceAll('\\','/');
+  if(/^retained:boq-workspace\/[A-Za-z0-9-]+\.xlsx$/.test(normalized)) {
+    // The release directory is read-only; uploads is linked to retained writable storage.
+    return path.join(process.cwd(),'uploads','.boq-workspace',path.basename(normalized));
+  }
   if(!/^\.runtime\/boq-workspace\/[A-Za-z0-9-]+\.xlsx$/.test(normalized))throw new WorkspaceError('The original workbook path is invalid.',404);
   return path.join(process.cwd(),'.runtime','boq-workspace',path.basename(normalized));
 }
-const s3Bucket = () => process.env.AWS_S3_BUCKET_NAME || 'onesystems-erp-bucket';
+// Accept the existing backend BOQ upload setting as well as the frontend alias.
+const s3Bucket = () => process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET_NAME || 'onesystemserp-storage';
 let s3Client: S3Client | undefined;
 
 function getS3Client(): S3Client {
   if (!s3Client) {
     const credentials = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-      ? { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY }
+      ? { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY, ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}) }
       : undefined;
     s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1', ...(credentials ? { credentials } : {}) });
   }
@@ -46,7 +51,7 @@ function getS3Client(): S3Client {
 }
 
 function cloudStorageConfigured(): boolean {
-  return Boolean(process.env.AWS_S3_BUCKET_NAME || (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY));
+  return Boolean(process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET_NAME || (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY));
 }
 
 function projectRoleAllows(rolePermissions: Record<string, Record<string, boolean> | undefined>, actions: string[]): boolean {
@@ -139,10 +144,12 @@ export async function storeWorkspaceOriginal(uploadId: string, projectId: string
     }));
     return `s3:${key}`;
   }
-  const relativePath = path.join(STORAGE_DIR, `${uploadId}.xlsx`);
+  const relativePath = process.env.NODE_ENV === 'production' && process.platform === 'linux'
+    ? `retained:boq-workspace/${uploadId}.xlsx`
+    : path.join(STORAGE_DIR, `${uploadId}.xlsx`);
   const absolutePath = localOriginalPath(relativePath);
-  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-  await fs.writeFile(absolutePath, buffer, { flag: 'wx' });
+  await fs.mkdir(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
+  await fs.writeFile(absolutePath, buffer, { flag: 'wx', mode: 0o600 });
   return relativePath.replace(/\\/g, '/');
 }
 
@@ -449,7 +456,7 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
       });
 
       return { success: true as const, uploadId, projectId, versionId: version.id, checksum, status: 'DRAFT_UPLOADED', report };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 15000, timeout: 30000 });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 15000, timeout: 120000 });
     if ('alreadyConfirmed' in result) {
       if (storedPath) await removeWorkspaceOriginal(storedPath);
       storedPath = null;
@@ -458,6 +465,17 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
   } catch (error) {
     if (storedPath) await removeWorkspaceOriginal(storedPath);
     if (error instanceof WorkspaceError) throw error;
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : null;
+    const name = error instanceof Error ? error.name : 'UnknownError';
+    console.error('BOQ workspace draft save failed', { code, name });
+    if (['AccessDenied', 'NoSuchBucket', 'InvalidAccessKeyId', 'SignatureDoesNotMatch', 'ExpiredToken', 'CredentialsProviderError', 'PermanentRedirect', 'AuthorizationHeaderMalformed'].includes(name)) {
+      throw new WorkspaceError('The workbook could not be saved to S3. Please ask your administrator to check the BOQ bucket configuration and upload permissions; no draft BOQ was saved.', 503);
+    }
+    if (code === 'EROFS' || code === 'EACCES' || code === 'ENOSPC') {
+      throw new WorkspaceError('The original workbook could not be preserved in server storage. Please contact your administrator; no draft BOQ was saved.', 503);
+    }
+    if (code === 'P2034') throw new WorkspaceError('The project changed while saving. Refresh and confirm the BOQ again.', 409);
+    if (code === 'P2028') throw new WorkspaceError('Saving the BOQ took too long. Please confirm it again; the incomplete draft was rolled back.', 503);
     throw new WorkspaceError('The draft BOQ could not be saved. Please try again.', 500);
   }
 }

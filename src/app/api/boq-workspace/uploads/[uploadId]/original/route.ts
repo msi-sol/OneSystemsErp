@@ -12,7 +12,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ upl
       where: { id: uploadId },
       select: { id: true, projectId: true, storagePath: true, originalFilename: true },
     });
-    if (!upload || !upload.storagePath.startsWith('s3:') && !upload.storagePath.startsWith('.runtime/boq-workspace/')) {
+    if (!upload || !upload.storagePath.startsWith('s3:') && !upload.storagePath.startsWith('.runtime/boq-workspace/') && !upload.storagePath.startsWith('retained:boq-workspace/')) {
       return new NextResponse('Not found', { status: 404 });
     }
     if (!await actorCanAccessProject(actor, upload.projectId, ['canView'])) {
