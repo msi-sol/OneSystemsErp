@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+test.skip(!process.env.LOCAL_TEST_PASSWORD, 'Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 test.describe('Assign Financial Reviewer', () => {
     test.setTimeout(120000);
@@ -8,7 +9,7 @@ test.describe('Assign Financial Reviewer', () => {
         
         await adminPage.goto('http://localhost:3000/login');
         await adminPage.fill('input[name="email"]', 'admin01@demo.com');
-        await adminPage.fill('input[name="password"]', 'admin001');
+        await adminPage.fill('input[name="password"]', process.env.LOCAL_TEST_PASSWORD!);
         await adminPage.click('button[type="submit"]');
         await adminPage.waitForURL('http://localhost:3000/dashboard');
 

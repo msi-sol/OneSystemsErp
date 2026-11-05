@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { PrismaClient, Prisma } from '@prisma/client';
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
+if (!process.env.LOCAL_TEST_NEW_PASSWORD) throw new Error('Set LOCAL_TEST_NEW_PASSWORD to the password to rotate the local test account to.');
 
 const prisma = new PrismaClient();
 
@@ -21,19 +23,19 @@ async function run() {
   console.log("Logging in as manager@onesystemserp.com...");
   await pageManager.goto('http://localhost:3000/login');
   await pageManager.fill('input[name="email"]', 'manager@onesystemserp.com');
-  await pageManager.fill('input[name="password"]', 'P@ssword12345!');
+  await pageManager.fill('input[name="password"]', process.env.LOCAL_TEST_PASSWORD!);
   await pageManager.click('button[type="submit"]');
   await pageManager.waitForURL(url => !url.href.includes('/login'));
   
   if (pageManager.url().includes('/change-password')) {
     console.log("Password change required for manager, updating...");
-    await pageManager.fill('input[name="newPassword"]', 'UAT_Admin_123!_NEW');
-    await pageManager.fill('input[name="confirmPassword"]', 'UAT_Admin_123!_NEW');
+    await pageManager.fill('input[name="newPassword"]', process.env.LOCAL_TEST_NEW_PASSWORD!);
+    await pageManager.fill('input[name="confirmPassword"]', process.env.LOCAL_TEST_NEW_PASSWORD!);
     await pageManager.click('button[type="submit"]');
     await pageManager.waitForLoadState('networkidle');
     // relogin
     await pageManager.fill('input[name="email"]', 'manager@onesystemserp.com');
-    await pageManager.fill('input[name="password"]', 'UAT_Admin_123!_NEW');
+    await pageManager.fill('input[name="password"]', process.env.LOCAL_TEST_NEW_PASSWORD!);
     await pageManager.click('button[type="submit"]');
     await pageManager.waitForLoadState('networkidle');
   }
@@ -73,19 +75,19 @@ async function run() {
   console.log("Logging in as director@onesystemserp.com...");
   await pageDirector.goto('http://localhost:3000/login');
   await pageDirector.fill('input[name="email"]', 'director@onesystemserp.com');
-  await pageDirector.fill('input[name="password"]', 'P@ssword12345!');
+  await pageDirector.fill('input[name="password"]', process.env.LOCAL_TEST_PASSWORD!);
   await pageDirector.click('button[type="submit"]');
   await pageDirector.waitForURL(url => !url.href.includes('/login'));
 
   if (pageDirector.url().includes('/change-password')) {
     console.log("Password change required for director, updating...");
-    await pageDirector.fill('input[name="newPassword"]', 'UAT_Admin_123!_NEW');
-    await pageDirector.fill('input[name="confirmPassword"]', 'UAT_Admin_123!_NEW');
+    await pageDirector.fill('input[name="newPassword"]', process.env.LOCAL_TEST_NEW_PASSWORD!);
+    await pageDirector.fill('input[name="confirmPassword"]', process.env.LOCAL_TEST_NEW_PASSWORD!);
     await pageDirector.click('button[type="submit"]');
     await pageDirector.waitForLoadState('networkidle');
     // relogin
     await pageDirector.fill('input[name="email"]', 'director@onesystemserp.com');
-    await pageDirector.fill('input[name="password"]', 'UAT_Admin_123!_NEW');
+    await pageDirector.fill('input[name="password"]', process.env.LOCAL_TEST_NEW_PASSWORD!);
     await pageDirector.click('button[type="submit"]');
     await pageDirector.waitForLoadState('networkidle');
   }

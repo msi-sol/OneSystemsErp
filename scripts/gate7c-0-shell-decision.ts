@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import { Client } from 'pg';
 import path from 'path';
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 async function run() {
   const envConfig = dotenv.parse(fs.readFileSync('.env'));
@@ -95,7 +96,7 @@ async function run() {
   // Login
   await page.goto('http://localhost:3000/login');
   await page.fill('input[type="email"]', 'manager@onesystemserp.com');
-  await page.fill('input[type="password"]', 'Password123!');
+  await page.fill('input[type="password"]', process.env.LOCAL_TEST_PASSWORD!);
   await page.click('button[type="submit"]');
   await page.waitForTimeout(2000);
 

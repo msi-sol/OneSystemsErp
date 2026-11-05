@@ -52,7 +52,7 @@ test.describe('Phase 3D-D API Integration Tests', () => {
     // For this NextAuth setup, we might need a test login route or standard NextAuth credentials login.
     const context = await request.newContext();
     // Simulate login by hitting a hypothetical test login endpoint
-    // await context.post('/api/auth/callback/credentials', { form: { email, password: 'password' } });
+    // await context.post('/api/auth/callback/credentials', { form: { email, password: process.env.LOCAL_TEST_PASSWORD } });
     return context;
   }
 

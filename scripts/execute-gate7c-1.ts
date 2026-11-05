@@ -1,5 +1,6 @@
 import { test, expect, chromium } from '@playwright/test';
 import * as fs from 'fs';
+if (!process.env.LOCAL_TEST_PASSWORD) throw new Error('Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 const PROJECT_ID = 'cmrirhhw30000ic0406v47smb';
 const APP_URL = 'http://localhost:3000';
@@ -15,7 +16,7 @@ async function loginAndFetch(email: string, endpoint: string, body: any) {
   await page.waitForTimeout(2000); // Wait for React to hydrate
   
   await page.fill('input[name="email"]', email);
-  await page.fill('input[name="password"]', 'Password123!');
+  await page.fill('input[name="password"]', process.env.LOCAL_TEST_PASSWORD!);
   await page.click('button:has-text("Sign In")');
   
   // Wait for redirect and dashboard load

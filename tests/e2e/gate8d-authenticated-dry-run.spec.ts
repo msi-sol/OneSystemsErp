@@ -1,14 +1,15 @@
 import { test, expect } from '@playwright/test';
+test.skip(!process.env.LOCAL_TEST_PASSWORD, 'Set LOCAL_TEST_PASSWORD to the password of the local test account.');
 
 test.describe('Gate 8D Authenticated Dry Run', () => {
-  // Use engineer@onesystemserp.com / Password123!
+  // Use engineer@onesystemserp.com / $LOCAL_TEST_PASSWORD
   
   test('Authenticate and Execute Dry Run', async ({ request, page }) => {
     test.setTimeout(120000);
     // 1. Login via UI to establish session cookies
     await page.goto('http://localhost:3000/login');
     await page.fill('input[type="email"]', 'engineer@onesystemserp.com');
-    await page.fill('input[type="password"]', 'Password123!');
+    await page.fill('input[type="password"]', process.env.LOCAL_TEST_PASSWORD!);
     await page.click('button:has-text("Sign In")');
 
     await page.waitForTimeout(3000);

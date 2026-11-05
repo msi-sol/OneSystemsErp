@@ -1,7 +1,17 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { validatePasswordPolicy } from '../src/lib/passwordPolicy';
+import { requireLocalDatabaseUrl } from './lib/local-database-guard.mjs';
 
-const prisma = new PrismaClient();
+// Local databases only. The test users take their password from LOCAL_TEST_PASSWORD
+// and must change it at first login.
+const databaseUrl = requireLocalDatabaseUrl(process.env.DATABASE_URL);
+const fixturePassword = process.env.LOCAL_TEST_PASSWORD;
+if (!fixturePassword) throw new Error('Set LOCAL_TEST_PASSWORD to the password for the test users.');
+const passwordCheck = validatePasswordPolicy(fixturePassword);
+if (!passwordCheck.valid) throw new Error(`LOCAL_TEST_PASSWORD is not acceptable: ${passwordCheck.error}`);
+
+const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
 async function main() {
   console.log('--- Setting up Test Fixtures for Phase 3D-D ---');
@@ -22,11 +32,11 @@ async function main() {
   let pmModule = await prisma.module.findUnique({ where: { moduleName: 'PROJECT_MANAGEMENT' } });
   if (!pmModule) {
     pmModule = await prisma.module.create({
-      data: { moduleName: 'PROJECT_MANAGEMENT', moduleGroup: 'OPERATIONS', description: 'Project Management', sortOrder: 1 }
+      data: { moduleName: 'PROJECT_MANAGEMENT', description: 'Project Management' }
     });
   }
 
-  const pwdHash = await bcrypt.hash('testpassword', 10);
+  const pwdHash = await bcrypt.hash(fixturePassword!, 10);
 
   async function ensureTestUser(email: string, name: string, roleCode: string) {
     let user = await prisma.user.findFirst({ where: { email } });
@@ -37,7 +47,7 @@ async function main() {
           name,
           role: roleCode,
           passwordHash: pwdHash,
-          password: 'testpassword'
+          mustChangePassword: true
         }
       });
       console.log(`Created user: ${email} with role: ${roleCode}`);

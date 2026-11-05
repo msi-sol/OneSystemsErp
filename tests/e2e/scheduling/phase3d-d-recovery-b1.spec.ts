@@ -21,8 +21,7 @@ test.describe('Phase 3D-D Recovery B1: Service Hardening', () => {
       data: {
         email: `test-actor-${Date.now()}@test.com`,
         name: 'Test Actor',
-        role: 'PROJECT_MANAGER',
-        password: 'dummy'
+        role: 'PROJECT_MANAGER'
       }
     });
   });

@@ -2,6 +2,8 @@
 
 A production application change on `main` or `master` builds a Linux release in GitHub Actions and deploys it to **i-05dbf6853ca3ecb33**, serving **https://erp.mavericksolutionsinc.ph**. Docs and deployment-configuration-only pushes run lightweight checks without rebuilding or restarting the website; test-only pushes run tests without deploying. Manual workflow runs force a build/deployment. Queued releases are skipped when newer application changes exist. Deployments are serialized and an in-progress deployment is never cancelled by a newer push.
 
+Every push also runs `deploy/cicd/literal-password-policy.test.mjs`, which fails on a literal password or password hash in tracked code. It reports file, line and rule only. Local scripts read `LOCAL_TEST_PASSWORD` instead, and any script that writes a password must call `scripts/lib/local-database-guard.mjs` first.
+
 ## What happens
 
 1. Restore npm and Next.js compiler caches, install the committed lockfile with Node **22.22.1**, run the focused production tests, generate the MySQL Prisma client, and build Next.js with webpack/Serwist.
