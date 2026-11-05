@@ -73,6 +73,7 @@ test.each([null, 'existing-project'])('parses and saves a valid workbook with pr
     expect.stringMatching(new RegExp(`^boq-uploads/${projectId ?? 'new-project'}/[a-f0-9-]+\\.xlsx$`)),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     { module: 'PROJECT_MANAGEMENT', projectId: projectId ?? 'new-project', uploadedBy: actor.id },
+    'sample.xlsx',
   );
   expect(tx.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: actor.id, transactionId: 'upload-1' }) });
   expect(tx.workbookExtractionAudit.create).toHaveBeenCalled();
@@ -124,9 +125,10 @@ test('storage failure never records an upload without its original file', async 
   expect(tx.uploadedWorkbookFile.create).not.toHaveBeenCalled();
   expect(uploadFileToS3).toHaveBeenCalledWith(
     bytes,
-    expect.stringMatching(/^boq-uploads\/new-project\/[a-f0-9-]+-sample\.xlsx$/),
+    expect.stringMatching(/^boq-uploads\/new-project\/[a-f0-9-]+\.xlsx$/),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     { module: 'PROJECT_MANAGEMENT', projectId: 'new-project', uploadedBy: actor.id },
+    'sample.xlsx',
   );
 });
 

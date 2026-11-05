@@ -25,7 +25,7 @@ export async function generateDownloadUrl(key: string): Promise<string> {
   return getSignedUrl(uploadStorageClient(), command, { expiresIn: 900 });
 }
 
-export async function uploadFileToS3(buffer: Buffer, key: string, contentType: string, context: UploadContext): Promise<string> {
-  await putPrivateUpload(buffer, key, contentType, context);
+export async function uploadFileToS3(buffer: Buffer, key: string, contentType: string, context: UploadContext, fileName?: string): Promise<string> {
+  await putPrivateUpload(buffer, key, contentType, context, fileName);
   return key;
 }

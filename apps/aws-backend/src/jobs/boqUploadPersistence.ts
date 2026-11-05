@@ -40,7 +40,7 @@ export async function persistBOQUpload(input: UploadInput) {
     let fileUrl: string;
     {
       storagePath = `boq-uploads/${project.id}/${safeName}`;
-      await uploadFileToS3(input.buffer, storagePath, mimeType, { module: 'PROJECT_MANAGEMENT', projectId: project.id, uploadedBy: input.user.id });
+      await uploadFileToS3(input.buffer, storagePath, mimeType, { module: 'PROJECT_MANAGEMENT', projectId: project.id, uploadedBy: input.user.id }, input.fileName);
       fileUrl = privateUploadUrl(storagePath);
       storagePath = `s3:${storagePath}`;
     }
