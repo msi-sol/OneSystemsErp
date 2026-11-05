@@ -3,23 +3,10 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import { requirePermission } from '../lib/permissions';
 
 // Use a fallback secret for local dev if not in env
 const SECRET_KEY = process.env.ENCRYPTION_SECRET || 'vOVH6sdmpNWjRRIqCc7rdxs01lwHzfr3'; 
-
-// Placeholder for permission check in Express context.
-// In a real AWS backend, this would typically be an authentication middleware
-// that extracts user ID from a token (e.g., JWT) in the request headers.
-// For this migration exercise, we assume userId is passed in req.body and validated.
-async function requirePermission(userId: string, resource: string, action: string) {
-  if (!userId) {
-    throw new Error('Authentication required: userId not provided.');
-  }
-  // In a production environment, this function would query a permission system
-  // or database to verify the user's rights for the given resource and action.
-  // For this example, we simply ensure a userId is present.
-  console.log(`User ${userId} attempting ${action} on ${resource}`);
-}
 
 function encrypt(text: string) {
   const iv = crypto.randomBytes(16);
@@ -39,13 +26,33 @@ function decrypt(text: string) {
   return decrypted.toString();
 }
 
+// requireAuth sets these headers from the signed backend token, replacing anything the caller sent.
+function verifiedUser(req: any) {
+  return {
+    userId: req.headers['x-user-session'] as string,
+    simulatedRole: req.headers['x-simulated-role'] as string | undefined,
+  };
+}
+
+// requirePermission in lib/permissions.ts words every refusal this way.
+function failureStatus(e: any) {
+  return e?.message?.startsWith('Unauthorized Action') ? 403 : 500;
+}
+
 const router = Router();
+
+router.use((req, res, next) => {
+  if (!verifiedUser(req).userId) {
+    return res.status(401).json({ success: false, error: 'Authentication required.' });
+  }
+  next();
+});
 
 // Maps to /hikvisionDeviceService/getHikvisionDevices
 router.post('/getHikvisionDevices', async (req, res) => {
   try {
-    const { userId } = req.body; // userId is passed from the Next.js proxy for permission checking
-    await requirePermission(userId, 'EQUIPMENT', 'canView');
+    const { userId, simulatedRole } = verifiedUser(req);
+    await requirePermission(userId, 'EQUIPMENT', 'canView', simulatedRole);
     
     const devices = await prisma.hikvisionDevice.findMany({
       include: {
@@ -64,15 +71,16 @@ router.post('/getHikvisionDevices', async (req, res) => {
     res.json({ success: true, data: safeDevices });
   } catch (e: any) {
     console.error('Error in getHikvisionDevices:', e);
-    res.status(500).json({ success: false, error: e.message });
+    res.status(failureStatus(e)).json({ success: false, error: e.message });
   }
 });
 
 // Maps to /hikvisionDeviceService/registerHikvisionDevice
 router.post('/registerHikvisionDevice', async (req, res) => {
   try {
-    const { userId, data } = req.body; // userId and original 'data' object are passed
-    await requirePermission(userId, 'EQUIPMENT', 'canCreate');
+    const { userId, simulatedRole } = verifiedUser(req);
+    await requirePermission(userId, 'EQUIPMENT', 'canCreate', simulatedRole);
+    const { data } = req.body;
 
     const {
       deviceName,
@@ -115,15 +123,16 @@ router.post('/registerHikvisionDevice', async (req, res) => {
     res.json({ success: true, data: newDevice });
   } catch (e: any) {
     console.error('Error in registerHikvisionDevice:', e);
-    res.status(500).json({ success: false, error: e.message });
+    res.status(failureStatus(e)).json({ success: false, error: e.message });
   }
 });
 
 // Maps to /hikvisionDeviceService/testDeviceConnection
 router.post('/testDeviceConnection', async (req, res) => {
   try {
-    const { userId, deviceId } = req.body; // userId and original 'deviceId' are passed
-    await requirePermission(userId, 'EQUIPMENT', 'canView');
+    const { userId, simulatedRole } = verifiedUser(req);
+    await requirePermission(userId, 'EQUIPMENT', 'canView', simulatedRole);
+    const { deviceId } = req.body;
     
     const device = await prisma.hikvisionDevice.findUnique({ where: { id: deviceId } });
     if (!device) {
@@ -148,7 +157,7 @@ router.post('/testDeviceConnection', async (req, res) => {
     res.json({ success: true, data: result }); // Wrap result in data for consistency
   } catch (e: any) {
     console.error('Error in testDeviceConnection:', e);
-    res.status(500).json({ success: false, error: e.message });
+    res.status(failureStatus(e)).json({ success: false, error: e.message });
   }
 });
 
