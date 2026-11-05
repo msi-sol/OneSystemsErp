@@ -232,47 +232,24 @@ async function moveJobOrderStatus(tx: Prisma.TransactionClient, id: string, from
   if (count === 0) throw new JobOrderRequestError('Job Order status changed while saving. Reload and try again.', 409);
 }
 
-// Splits the amount by master BOQ value, as the form does, because per-item costs
-// are not stored. Work with no BOQ items stays a project-level commitment.
-async function commitmentShares(tx: Prisma.TransactionClient, jobOrder: { projectId: string; boqReferenceId: string | null; consolidatedBoqItemId: string | null; contractAmount: number }) {
-  const references = boqItemIds(parseBoqReferenceIds(jobOrder.boqReferenceId));
-  const ids = references.length > 0 || !jobOrder.consolidatedBoqItemId ? references : [jobOrder.consolidatedBoqItemId];
-  const items = await tx.consolidatedBOQItem.findMany({
-    where: { id: { in: ids }, projectId: jobOrder.projectId },
-    select: { id: true, quantity: true, unitCost: true },
+// One row for the full contract amount, at project level because per-item costs are
+// not stored. Only a job order that names one item in consolidatedBoqItemId is tied to it.
+async function recordCommitment(tx: Prisma.TransactionClient, jobOrder: { id: string; projectId: string; consolidatedBoqItemId: string | null; contractAmount: number; subcontractor: { name: string } | null }) {
+  const { consolidatedBoqItemId, contractAmount } = jobOrder;
+  await tx.commitmentLedger.create({
+    data: {
+      projectId: jobOrder.projectId,
+      jobOrderId: jobOrder.id,
+      consolidatedBoqItemId,
+      commitmentType: 'SUBCONTRACT',
+      subcontractorName: jobOrder.subcontractor?.name || '',
+      approvedAmount: contractAmount,
+      remainingCommitment: contractAmount,
+      status: 'ACTIVE',
+    },
   });
-  if (items.length === 0) return [{ consolidatedBoqItemId: null, amount: jobOrder.contractAmount }];
-
-  const masterCost = (item: (typeof items)[number]) => (item.quantity || 0) * (item.unitCost || 0);
-  const totalMaster = items.reduce((sum, item) => sum + masterCost(item), 0);
-  const roundedTotal = Math.round(jobOrder.contractAmount * 100);
-  let allocated = 0;
-  return items.map((item, index) => {
-    const share = totalMaster > 0 ? masterCost(item) / totalMaster : 1 / items.length;
-    // Working in centavos lets the last item take the rounding remainder.
-    const cents = index === items.length - 1 ? roundedTotal - allocated : Math.round(roundedTotal * share);
-    allocated += cents;
-    return { consolidatedBoqItemId: item.id, amount: cents / 100 };
-  });
-}
-
-async function recordCommitments(tx: Prisma.TransactionClient, jobOrder: Parameters<typeof commitmentShares>[1] & { id: string; subcontractor: { name: string } | null }) {
-  for (const { consolidatedBoqItemId, amount } of await commitmentShares(tx, jobOrder)) {
-    await tx.commitmentLedger.create({
-      data: {
-        projectId: jobOrder.projectId,
-        jobOrderId: jobOrder.id,
-        consolidatedBoqItemId,
-        commitmentType: 'SUBCONTRACT',
-        subcontractorName: jobOrder.subcontractor?.name || '',
-        approvedAmount: amount,
-        remainingCommitment: amount,
-        status: 'ACTIVE',
-      },
-    });
-    if (consolidatedBoqItemId) {
-      await tx.consolidatedBOQItem.update({ where: { id: consolidatedBoqItemId }, data: { committedCost: { increment: amount } } });
-    }
+  if (consolidatedBoqItemId) {
+    await tx.consolidatedBOQItem.update({ where: { id: consolidatedBoqItemId }, data: { committedCost: { increment: contractAmount } } });
   }
 }
 
@@ -295,7 +272,7 @@ export async function changeJobOrderStatus(id: string, status: JobOrderStatus) {
     if (status !== 'ISSUED' && LOCKED_STATUSES.has(jobOrder.status)) throw new JobOrderRequestError('Job Order is approved and locked. Unlock it before changing its status.', 409);
 
     await moveJobOrderStatus(tx, id, jobOrder.status, status);
-    if (status === 'APPROVED') await recordCommitments(tx, jobOrder);
+    if (status === 'APPROVED') await recordCommitment(tx, jobOrder);
     return tx.jobOrder.findUniqueOrThrow({ where: { id } });
   });
   return withJobOrderReadFields(updated);
