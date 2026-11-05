@@ -4,6 +4,10 @@
   "main": "index.js",
   "scripts": {
     "dev": "npx tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "npm --prefix ../.. run db:generate",
+    "db:validate": "npm --prefix ../.. run db:validate",
+    "db:status": "npm --prefix ../.. run db:status",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

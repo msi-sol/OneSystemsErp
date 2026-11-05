@@ -1,9 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { prismaBase as prisma } from '../../src/lib/prisma-base';
 import { seedWorkers } from './seed-workers';
 import { seedSuppliers } from './seed-suppliers';
 import { seedSubcontractors } from './seed-subcontractors';
 
-const prisma = new PrismaClient();
 
 export async function seedDemoData() {
   console.log('--- STARTING DEMO DATA SEED ---');

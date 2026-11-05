@@ -82,7 +82,10 @@ jobs:
         if: steps.classify.outputs.app_changed == 'true' || steps.classify.outputs.tests_changed == 'true'
         run: |
           npx prisma generate
-          npx jest --config jest.config.js --runInBand tests/unit/boq-draft-workflow.test.ts tests/unit/draft-schedule-editing.test.ts tests/work-package-summary.test.ts tests/unit/scheduling-session.test.ts tests/unit/boq-upload-action.test.ts tests/unit/boq-template-download.test.ts tests/unit/boq-upload-worker.test.ts tests/unit/boq-jobs.test.ts tests/unit/boq-template-commit.test.ts tests/unit/approve-template-upload.test.ts tests/unit/boq-template-review.test.ts tests/unit/payroll-engine-actions.test.ts tests/unit/workbook-parser.test.ts
+          npm run db:validate
+          npm run test:unit
+          npx jest --config jest.config.js --runInBand tests/work-package-summary.test.ts
+          npm --prefix apps/aws-backend run typecheck
         env:
           DATABASE_URL: mysql://build:build@127.0.0.1:3306/onesystemserp
           DIRECT_URL: mysql://build:build@127.0.0.1:3306/onesystemserp

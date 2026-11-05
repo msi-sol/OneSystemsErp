@@ -19,6 +19,15 @@ export const EDITABLE_STATUSES: ProjectScheduleWorkflowStatus[] = [
   ProjectScheduleWorkflowStatus.TECHNICAL_REVISIONS_REQUIRED
 ];
 
+export const BOQ_WPS_WORKSPACE_RULES = 'BOQ_WPS_WORKSPACE_V1';
+
+/** Tagged Work Packages schedules use the Engineer → PM workflow only. */
+export function assertLegacySchedulingWorkflow(schedule: { generationRulesVersion?: string | null }) {
+  if (schedule.generationRulesVersion === BOQ_WPS_WORKSPACE_RULES) {
+    throw new Error('USE_BOQ_WPS_ENGINEER_PM_WORKFLOW');
+  }
+}
+
 export const VALID_WORKFLOW_TRANSITIONS: Record<string, string[]> = {
   [ProjectScheduleWorkflowStatus.AI_GENERATED_DRAFT]: [
     ProjectScheduleWorkflowStatus.READY_FOR_REVIEW,
@@ -169,6 +178,7 @@ export async function validateScheduleForReview({
   });
 
   if (!schedule || schedule.rowVersion !== expectedRowVersion) throw new Error('SCHEDULE_VERSION_CONFLICT');
+  assertLegacySchedulingWorkflow(schedule);
 
   // We are evaluating all components to see if they pass.
   const errors: string[] = [];
@@ -323,6 +333,7 @@ export async function startScheduleReview({
     where: { id: scheduleId, projectId }
   });
   if (!schedule || schedule.rowVersion !== expectedRowVersion) throw new Error('SCHEDULE_VERSION_CONFLICT');
+  assertLegacySchedulingWorkflow(schedule);
   assertValidTransition(schedule.workflowStatus, ProjectScheduleWorkflowStatus.UNDER_TECHNICAL_REVIEW);
 
   return prisma.projectSchedule.update({
@@ -409,6 +420,7 @@ export async function submitForBaselineApproval({
     where: { id: scheduleId, projectId }
   });
   if (!schedule || schedule.rowVersion !== expectedRowVersion) throw new Error('SCHEDULE_VERSION_CONFLICT');
+  assertLegacySchedulingWorkflow(schedule);
   assertValidTransition(schedule.workflowStatus, ProjectScheduleWorkflowStatus.PENDING_BASELINE_APPROVAL);
 
   return prisma.projectSchedule.update({
@@ -440,6 +452,7 @@ export async function returnScheduleForRevision({
       where: { id: scheduleId, projectId }
     });
     if (!schedule || schedule.rowVersion !== expectedRowVersion) throw new Error('SCHEDULE_VERSION_CONFLICT');
+    assertLegacySchedulingWorkflow(schedule);
     assertValidTransition(schedule.workflowStatus, ProjectScheduleWorkflowStatus.TECHNICAL_REVISIONS_REQUIRED);
 
     const user = await tx.user.findUnique({ where: { id: actorId } });
@@ -491,6 +504,7 @@ export async function rejectSchedule({
       where: { id: scheduleId, projectId }
     });
     if (!schedule || schedule.rowVersion !== expectedRowVersion) throw new Error('SCHEDULE_VERSION_CONFLICT');
+    assertLegacySchedulingWorkflow(schedule);
     assertValidTransition(schedule.workflowStatus, ProjectScheduleWorkflowStatus.REJECTED);
 
     const user = await tx.user.findUnique({ where: { id: actorId } });
@@ -553,6 +567,7 @@ export async function activateScheduleBaseline({
          throw new Error('IDEMPOTENCY_KEY_CONFLICT');
       }
       const existingSchedule = await tx.projectSchedule.findUnique({ where: { id: scheduleId } });
+      if (existingSchedule) assertLegacySchedulingWorkflow(existingSchedule);
       if (existingSchedule?.workflowStatus !== ProjectScheduleWorkflowStatus.ACTIVE_BASELINE || !existingSchedule.baselineCode) {
          throw new Error('IDEMPOTENCY_KEY_CONFLICT');
       }
@@ -565,6 +580,7 @@ export async function activateScheduleBaseline({
     });
 
     if (!schedule) throw new Error('SCHEDULE_NOT_FOUND');
+    assertLegacySchedulingWorkflow(schedule);
     
     if (schedule.workflowStatus === ProjectScheduleWorkflowStatus.ACTIVE_BASELINE) {
       throw new Error('SCHEDULE_ALREADY_ACTIVE');

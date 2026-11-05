@@ -48,6 +48,9 @@ describe('Monetary Validation Rules', () => {
 describe('Schedule Validation Safe Failures', () => {
   it('9. No invalid monetary value produces an unhandled HTTP 500; 10. exact previously failing shape is covered', async () => {
     const mockTx = {
+      project: {
+        findUnique: jest.fn().mockResolvedValue({ boqLocked: false })
+      },
       projectSchedule: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'test-schedule',
@@ -92,6 +95,9 @@ describe('Schedule Validation Safe Failures', () => {
 
   it('12. Schedule total reconciliation behavior is unchanged', async () => {
     const mockTx = {
+      project: {
+        findUnique: jest.fn().mockResolvedValue({ boqLocked: false })
+      },
       projectSchedule: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'test-schedule',

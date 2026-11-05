@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { logout } from '@/app/actions/auth';
+import { FileSpreadsheet } from 'lucide-react';
 
 export default function Sidebar({ permissions = {}, user }: { permissions?: Record<string, any>, user?: { name?: string | null, email?: string | null } | null }) {
   const pathname = usePathname();
@@ -30,7 +31,7 @@ export default function Sidebar({ permissions = {}, user }: { permissions?: Reco
   interface SidebarLink {
     name: string;
     href: string;
-    icon: string;
+    icon: ReactNode;
     moduleKey?: string;
     subItems?: { name: string; href: string }[];
   }
@@ -38,6 +39,7 @@ export default function Sidebar({ permissions = {}, user }: { permissions?: Reco
   const links: SidebarLink[] = [
     { name: 'Dashboard', href: '/', icon: '⌂', moduleKey: 'DASHBOARD' },
     { name: 'Executive', href: '/executive/home', icon: '👑', moduleKey: 'PROJECT_MANAGEMENT' },
+    { name: 'BOQ Workspace', href: '/boq', icon: <FileSpreadsheet size={20} strokeWidth={1.7} />, moduleKey: 'PROJECT_MANAGEMENT' },
     { name: 'Projects', href: '/projects', icon: '🏗️', moduleKey: 'PROJECT_MANAGEMENT' },
     { name: 'Procurement', href: '/procurement', icon: '🛒', moduleKey: 'PROCUREMENT' },
     { name: 'Inventory', href: '/inventory', icon: '📦', moduleKey: 'INVENTORY' },

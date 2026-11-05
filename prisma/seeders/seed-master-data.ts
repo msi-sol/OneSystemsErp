@@ -1,10 +1,9 @@
-import { PrismaClient } from '@prisma/client';
+import { prismaBase as prisma } from '../../src/lib/prisma-base';
 import { seedWorkers } from './seed-workers';
 import { seedSuppliers } from './seed-suppliers';
 import { seedSubcontractors } from './seed-subcontractors';
 import { seedKnowledgeCenter } from './seed-knowledge-center';
 
-const prisma = new PrismaClient();
 
 async function main() {
   console.log('--- STARTING MASTER DATA SEED ---');

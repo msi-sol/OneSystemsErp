@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useTransition } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import ScheduleSetupWizard from './wizard/ScheduleSetupWizard';
@@ -308,7 +309,17 @@ export default function SchedulingHubClient({
 
       {/* Schedule Review Panel */}
       <div id="schedule-review" tabIndex={-1}>
-        <ScheduleReviewPanel schedule={schedule} projectId={project.id} actor={actor} boqLocked={Boolean(project.boqLocked)} />
+        {schedule.generationRulesVersion === 'BOQ_WPS_WORKSPACE_V1' ? (
+          <div className="glass-panel" style={{ padding: '20px', margin: '20px 0', border: '1px solid var(--glass-border)', borderRadius: '8px' }}>
+            <h3 style={{ color: 'var(--accent-color)', marginTop: 0 }}>Work Package review</h3>
+            <p style={{ color: 'var(--text-secondary)' }}>This plan follows Engineer review and Project Manager approval.</p>
+            <Link href={`/projects/${project.id}/work-packages`} style={{ color: 'var(--accent-color)', textDecoration: 'underline' }}>
+              Open Work Packages review →
+            </Link>
+          </div>
+        ) : (
+          <ScheduleReviewPanel schedule={schedule} projectId={project.id} actor={actor} boqLocked={Boolean(project.boqLocked)} />
+        )}
       </div>
 
       {/* Tabs */}

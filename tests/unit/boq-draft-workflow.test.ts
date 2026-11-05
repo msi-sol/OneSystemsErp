@@ -72,6 +72,7 @@ function makeHarness(options: {
   contractAmount?: number;
   boqLocked?: boolean;
   scheduleStatus?: string;
+  reviewFindings?: Array<Record<string, unknown>>;
 } = {}) {
   const state: {
     project: { id: string; contractAmount: number; boqLocked: boolean };
@@ -87,6 +88,10 @@ function makeHarness(options: {
       : [{ id: 'schedule-a', projectId: PROJECT_ID, workflowStatus: 'AI_GENERATED_DRAFT', rowVersion: 4 }],
     audits: [] as Array<Record<string, unknown>>,
     version: null as unknown as TestVersion,
+    reviewState: options.reviewFindings ? {
+      id: 'review-state-a', projectId: PROJECT_ID, versionId: VERSION_ID, rowVersion: 3,
+      dataJson: JSON.stringify({ schemaVersion: 1, projectId: PROJECT_ID, versionId: VERSION_ID, revisions: [], sectionIdentityByItemId: {}, findings: options.reviewFindings, history: [] }),
+    } : null as null | { id: string; projectId: string; versionId: string; rowVersion: number; dataJson: string },
   };
   state.version = {
     id: VERSION_ID,
@@ -107,9 +112,29 @@ function makeHarness(options: {
       update: async (args) => Object.assign(state.version, recordOf(args.data)),
     },
     awardedBOQItem: {
+      create: async (args) => {
+        const data = recordOf(args.data);
+        const item = makeLine({
+          id: `line-${state.items.length + 1}`,
+          projectId: String(data.projectId),
+          itemCode: String(data.itemCode),
+          category: typeof data.category === 'string' ? data.category : null,
+          description: String(data.description), unit: String(data.unit),
+          quantity: Number(data.quantity), combinedUnitCost: Number(data.combinedUnitCost), totalCost: Number(data.totalCost),
+        });
+        state.items.push(item);
+        return { ...item };
+      },
+      delete: async (args) => {
+        const id = String(recordOf(args.where).id);
+        const index = state.items.findIndex(item => item.id === id);
+        if (index < 0) throw new Error('missing item in test fixture');
+        return state.items.splice(index, 1)[0];
+      },
       findFirst: async (args) => {
         const where = recordOf(args.where);
-        return state.items.find((item) => item.id === where.id && item.projectId === where.projectId) ?? null;
+        const item = state.items.find((candidate) => candidate.id === where.id && candidate.projectId === where.projectId);
+        return item ? { ...item } : null;
       },
       findMany: async () => state.items.map((item) => ({ ...item })),
       update: async (args) => {
@@ -145,6 +170,16 @@ function makeHarness(options: {
         return { count: 1 };
       },
     },
+    bOQReviewState: {
+      findFirst: async () => state.reviewState ? { ...state.reviewState } : null,
+      updateMany: async (args) => {
+        if (!state.reviewState || state.reviewState.id !== recordOf(args.where).id || state.reviewState.rowVersion !== recordOf(args.where).rowVersion) return { count: 0 };
+        const data = recordOf(args.data);
+        state.reviewState.dataJson = String(data.dataJson);
+        state.reviewState.rowVersion += (recordOf(data.rowVersion).increment as number);
+        return { count: 1 };
+      },
+    },
     auditLog: { create: async (args) => { state.audits.push(recordOf(args.data)); } },
   };
 
@@ -164,8 +199,15 @@ function patchFor(harness: ReturnType<typeof makeHarness>, overrides: Record<str
     quantity: '10',
     unitCost: '2.00',
     amount: '20.00',
+    itemCode: 'BOQ-001',
+    editReason: 'Corrected after contract review.',
+    ...(harness.state.reviewState ? { expectedReviewRowVersion: harness.state.reviewState.rowVersion } : {}),
     ...overrides,
   };
+}
+
+function openFinding(code: string, field: string, evidence: Record<string, unknown> = {}) {
+  return { id: `finding-${code}`, code, field, itemId: 'line-a', rowNumber: 8, message: `${code} needs review.`, severity: 'BLOCKING', status: 'OPEN', reason: null, evidence, decidedBy: null, decidedAt: null };
 }
 
 describe('draft awarded BOQ workflow', () => {
@@ -283,6 +325,42 @@ describe('draft awarded BOQ workflow', () => {
     expect(result.boqTotal).toBe('12.34');
     expect(result.checksum).toBe(harness.state.version.checksum);
     expect(harness.state.project.contractAmount).toBe(20);
+  });
+
+  it('resolves defaulted quantity and unit findings only when those fields are explicitly changed', async () => {
+    const evidence = { assumedQuantity: '1', sourceRow: 8 };
+    const invalidated = { ...openFinding('QUANTITY_DEFAULTED', 'quantity', { assumedQuantity: '0' }), id: 'old-finding', invalidatedAt: '2026-11-04T00:00:00.000Z' };
+    const invalidatedCode = { ...openFinding('MISSING_ITEM_CODE', 'itemCode', { sourceCode: '' }), id: 'old-code-finding', invalidatedAt: '2026-11-04T00:00:00.000Z' };
+    const harness = makeHarness({ reviewFindings: [openFinding('QUANTITY_DEFAULTED', 'quantity', evidence), openFinding('UNIT_DEFAULTED', 'unit', { assumedUnit: 'lot' }), invalidated, invalidatedCode] });
+    await updateDraftBOQLine(PROJECT_ID, ACTOR_ID, patchFor(harness, { description: 'Clearer work description.' }), harness.client);
+    let findings = JSON.parse(harness.state.reviewState!.dataJson).findings as Array<Record<string, unknown>>;
+    expect(findings.map(finding => finding.status)).toEqual(['OPEN', 'OPEN', 'OPEN', 'OPEN']);
+
+    const currentChecksum = harness.state.version.checksum;
+    await updateDraftBOQLine(PROJECT_ID, ACTOR_ID, patchFor(harness, { expectedChecksum: currentChecksum, quantity: '12', unit: 'm' }), harness.client);
+    findings = JSON.parse(harness.state.reviewState!.dataJson).findings as Array<Record<string, unknown>>;
+    expect(JSON.parse(harness.state.reviewState!.dataJson).revisions.at(-1).changedFields).toEqual(expect.arrayContaining(['quantity', 'unit']));
+    expect(findings[0]).toMatchObject({ status: 'CORRECTED', reason: 'Corrected after contract review.', decidedBy: ACTOR_ID, evidence });
+    expect(findings[0]?.decidedAt).toEqual(expect.any(String));
+    expect(findings[1]).toMatchObject({ status: 'CORRECTED', reason: 'Corrected after contract review.', decidedBy: ACTOR_ID, evidence: { assumedUnit: 'lot' } });
+    expect(findings[2]).toMatchObject({ status: 'OPEN', invalidatedAt: '2026-11-04T00:00:00.000Z' });
+    expect(findings[3]).toMatchObject({ status: 'OPEN', invalidatedAt: '2026-11-04T00:00:00.000Z' });
+    expect(JSON.parse(harness.state.reviewState!.dataJson).revisions.at(-1).changedFields).toEqual(expect.arrayContaining(['quantity', 'unit']));
+  });
+
+  it('resolves arithmetic findings only after a relevant edit brings amount within the source tolerance', async () => {
+    const evidence = { recordedAmount: '18', computedAmount: '20' };
+    const harness = makeHarness({ items: [makeLine({ totalCost: 18 })], contractAmount: 18, reviewFindings: [openFinding('AMOUNT_ARITHMETIC', 'amount', evidence)] });
+    await updateDraftBOQLine(PROJECT_ID, ACTOR_ID, patchFor(harness, { description: 'Description only.', amount: '18' }), harness.client);
+    expect(JSON.parse(harness.state.reviewState!.dataJson).findings[0].status).toBe('OPEN');
+
+    await updateDraftBOQLine(PROJECT_ID, ACTOR_ID, patchFor(harness, { expectedChecksum: harness.state.version.checksum, amount: '19' }), harness.client);
+    expect(JSON.parse(harness.state.reviewState!.dataJson).findings[0].status).toBe('OPEN');
+
+    await updateDraftBOQLine(PROJECT_ID, ACTOR_ID, patchFor(harness, { expectedChecksum: harness.state.version.checksum, amount: '20' }), harness.client);
+    const finding = JSON.parse(harness.state.reviewState!.dataJson).findings[0] as Record<string, unknown>;
+    expect(finding).toMatchObject({ status: 'CORRECTED', reason: 'Corrected after contract review.', decidedBy: ACTOR_ID, evidence });
+    expect(finding.decidedAt).toEqual(expect.any(String));
   });
 
   it('does not round a non-cent contract mismatch into an approval', async () => {

@@ -1,3 +1,5 @@
+import { consumeMaterialReservations } from '../../../../src/lib/scheduling/work-package-material-inventory';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
@@ -122,18 +124,23 @@ router.post('/:id/approve', async (req, res) => {
       if (!slip) throw new Error('Slip not found');
       if (slip.status !== 'PROCESSED') throw new Error('Slip must be processed first');
 
+      const packageLink=await tx.auditLog.findFirst({where:{transactionId:slip.id,actionType:'WPS_PROCUREMENT_RECORD_LINKED'},orderBy:{createdAt:'desc'},select:{newValue:true}});
+      const sourcePackageId=packageLink?JSON.parse(packageLink.newValue||'{}').sourcePackageId||null:null;
       for (const item of slip.items) {
         const boqItem = await tx.consolidatedBOQItem.findUnique({
           where: { id: item.consolidatedBoqItemId }
         });
 
         if (!boqItem) throw new Error('BOQ Item not found');
+        if(boqItem.projectId!==slip.projectId)throw Error('Issuance material must belong to the same project.');
 
         const available = boqItem.deliveredQty - boqItem.consumedQty;
         if (item.releasedQty > available) {
           throw new Error(`Not enough inventory for ${boqItem.description}. Available: ${available}, Requested: ${item.releasedQty}`);
         }
 
+        if(item.releasedQty<=0)throw Error('Released quantity must be positive.');
+        await consumeMaterialReservations(tx,{projectId:slip.projectId,materialId:boqItem.id,quantity:item.releasedQty,projectStock:available,sourcePackageId});
         await tx.consolidatedBOQItem.update({
           where: { id: boqItem.id },
           data: {
@@ -151,7 +158,7 @@ router.post('/:id/approve', async (req, res) => {
           releasedById: accountantId
         }
       });
-    });
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
 
     res.json({ success: true });
   } catch (error: any) {

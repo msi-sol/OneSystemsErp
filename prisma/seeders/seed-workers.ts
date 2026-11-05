@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prismaBase as prisma } from '../../src/lib/prisma-base';
 
 const FIRST_NAMES = [
   'Juan', 'Maria', 'Jose', 'Ana', 'Pedro', 'Rosa', 'Luis', 'Carmen', 'Carlos', 'Lourdes',

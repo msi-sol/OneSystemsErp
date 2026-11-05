@@ -1,7 +1,12 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { prismaBase } from './prisma-base';
 
-export const transactionContext = new AsyncLocalStorage<{ sourceProvenance?: string }>();
+const globalForPrisma = globalThis as unknown as {
+  prisma: ReturnType<typeof createPrismaClient> | undefined;
+  prismaTransactionContext: AsyncLocalStorage<{ sourceProvenance?: string }> | undefined;
+};
+export const transactionContext = globalForPrisma.prismaTransactionContext ?? new AsyncLocalStorage<{ sourceProvenance?: string }>();
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prismaTransactionContext = transactionContext;
 
 function createPrismaClient() {
   return prismaBase.$extends({
@@ -33,10 +38,6 @@ function createPrismaClient() {
     },
   });
 }
-
-const globalForPrisma = globalThis as unknown as {
-  prisma: ReturnType<typeof createPrismaClient> | undefined;
-};
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 

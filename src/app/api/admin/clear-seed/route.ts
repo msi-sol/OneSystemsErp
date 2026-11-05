@@ -1,15 +1,24 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
+import { verifySession } from '@/lib/dal/auth';
+import { getUserPermissions } from '@/lib/permissions';
 
 export async function POST() {
   try {
-    // Add simple authentication check here if needed (e.g. check for admin session)
-    
-    await prisma.worker.deleteMany({ where: { isSeedData: true } });
-    await prisma.supplier.deleteMany({ where: { isSeedData: true } });
-    await prisma.subcontractor.deleteMany({ where: { isSeedData: true } });
+    const actor = await verifySession();
+    if (!actor || actor.mustChangePassword) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const permissions = await getUserPermissions(actor.id);
+    if (!permissions.IS_ADMIN) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    await prisma.$transaction([
+      prisma.worker.deleteMany({ where: { isSeedData: true } }),
+      prisma.supplier.deleteMany({ where: { isSeedData: true } }),
+      prisma.subcontractor.deleteMany({ where: { isSeedData: true } }),
+    ]);
     
     return NextResponse.json({ message: 'Seed data cleared successfully' });
   } catch (error) {
@@ -18,7 +27,5 @@ export async function POST() {
       { error: 'Failed to clear seed data. Check server logs.' },
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

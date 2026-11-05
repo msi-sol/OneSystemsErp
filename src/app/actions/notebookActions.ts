@@ -1,9 +1,8 @@
 'use server';
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 
-const prisma = new PrismaClient();
 
 import { uploadToS3 as put } from '@/lib/s3';
 import * as fs from 'fs';

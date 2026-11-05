@@ -15,7 +15,7 @@
 .actions { margin-left: auto; display: flex; align-items: center; gap: 20px; }
 .userControls { display: flex; align-items: center; gap: 25px; }
 .identity { display: flex; align-items: center; gap: 15px; border-left: 1px solid var(--glass-border); padding-left: 20px; }
-@media (max-width: 900px) {
+@media (max-width: 1280px) {
   .topbar { height: auto; min-height: var(--header-height); flex-wrap: wrap; gap: 12px; padding-block: 12px; }
   .actions { min-width: 0; max-width: 100%; }
   .userControls { min-width: 0; max-width: 100%; flex-wrap: wrap; gap: 12px; }
@@ -26,9 +26,12 @@
 }
 @media (max-width: 540px) {
   .topbar { padding-right: 16px; }
+  .topbar > h2 { padding-left: 56px; }
   .topbar > h2, .actions, .userControls, .userControls > div:first-child { width: 100%; }
   .actions { margin-left: 0; }
   .userControls select { width: 100% !important; }
+  .userControls > div:first-child > div { width: 100%; min-width: 0; }
+  .userControls > div:first-child > div > div { min-width: 0; max-width: 100%; flex-wrap: wrap; }
   .identity { width: 100%; justify-content: space-between; }
   .identity > div { min-width: 0; overflow-wrap: anywhere; }
 }

@@ -1,4 +1,7 @@
-jest.mock('@/lib/prisma', () => ({ prisma: { uploadedWorkbookFile: { findUnique: jest.fn() } } }));
+jest.mock('@/lib/prisma', () => ({ prisma: {
+  uploadedWorkbookFile: { findUnique: jest.fn() },
+  projectBOQVersion: { findFirst: jest.fn() },
+} }));
 jest.mock('@/lib/scheduling/authUtils', () => ({ getSessionActor: jest.fn(), checkSchedulingAccess: jest.fn() }));
 jest.mock('@/lib/boq/boq-template-commit-service', () => ({ commitTemplateToBOQ: jest.fn() }));
 
@@ -11,6 +14,7 @@ beforeEach(() => {
   jest.resetAllMocks();
   (getSessionActor as jest.Mock).mockResolvedValue({ id: 'verified-actor', role: 'PROJECT_DIRECTOR' });
   (prisma.uploadedWorkbookFile.findUnique as jest.Mock).mockResolvedValue({ projectId: 'stored-project' });
+  (prisma.projectBOQVersion.findFirst as jest.Mock).mockResolvedValue(null);
   (checkSchedulingAccess as jest.Mock).mockResolvedValue({ allowed: true });
   (commitTemplateToBOQ as jest.Mock).mockResolvedValue({ success: true, count: 2 });
 });
@@ -18,6 +22,10 @@ beforeEach(() => {
 test('requires project approval permission and commits using the verified actor and stored project', async () => {
   await expect(approveTemplateUploadForCurrentActor('upload-1', 'stored-project')).resolves.toEqual({ success: true, count: 2 });
   expect(checkSchedulingAccess).toHaveBeenCalledWith('verified-actor', 'PROJECT_DIRECTOR', 'stored-project', 'canApprove');
+  expect(prisma.projectBOQVersion.findFirst).toHaveBeenCalledWith({
+    where: { projectId: 'stored-project', sourceUploadedWorkbookFileId: 'upload-1', sourceProvenance: 'BOQ_WORKSPACE' },
+    orderBy: { versionNumber: 'desc' },
+  });
   expect(commitTemplateToBOQ).toHaveBeenCalledWith('upload-1', 'stored-project', 'verified-actor');
 });
 

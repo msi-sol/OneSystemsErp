@@ -1,6 +1,5 @@
-import { PrismaClient, BusinessType, AccreditationStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { BusinessType, AccreditationStatus } from '@prisma/client';
+import { prismaBase as prisma } from '../../src/lib/prisma-base';
 
 const SUBCONTRACTOR_NAMES = [
   'Alpha Build Subcontractors', 'Omega Trade Services', 'Structural Masters', 'Precision Layouts',

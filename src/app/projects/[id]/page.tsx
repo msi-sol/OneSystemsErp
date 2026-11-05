@@ -35,6 +35,7 @@ const PROJECT_TABS = [
   { id: 'summary', label: 'Project Summary', group: 'Overview' },
   { id: 'team-access', label: 'Team Access', group: 'Overview' },
   { id: 'awarded-boq', label: 'Contract Value & BOQ', group: 'Planning' },
+  { id: 'work-packages', label: 'Work Packages', group: 'Planning' },
   { id: 'benchmark', label: 'Procurement Benchmark', group: 'Planning' },
   { id: 'consolidation', label: 'Master Materials List', group: 'Planning' },
   { id: 'profitability', label: 'Profitability Center (Cash Flow & Variance)', group: 'Financials' },
@@ -68,6 +69,8 @@ export default async function ProjectDetailsPage({
 }) {
   const { id } = await params;
   const { tab = 'summary' } = await searchParams;
+  if (tab === 'awarded-boq') redirect(`/projects/${id}/boq`);
+  if (tab === 'work-packages') redirect(`/projects/${id}/work-packages`);
   const actor = await getSessionActor().catch(() => null);
   if (!actor) redirect('/login');
   const access = await checkSchedulingAccess(actor.id, actor.role, id, 'canView');
@@ -255,7 +258,7 @@ export default async function ProjectDetailsPage({
           {PROJECT_TABS.map((t) => (
             <Link 
               key={t.id} 
-              href={`/projects/${project.id}?tab=${t.id}`} 
+              href={t.id === 'awarded-boq' ? `/projects/${project.id}/boq` : t.id === 'work-packages' ? `/projects/${project.id}/work-packages` : `/projects/${project.id}?tab=${t.id}`}
               style={{ 
                 padding: '8px 14px', 
                 textDecoration: 'none', 

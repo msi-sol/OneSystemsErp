@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prismaBase as prisma } from '../../src/lib/prisma-base';
 
 export async function seedKnowledgeCenter() {
   console.log('--- SEEDING KNOWLEDGE CENTER ---');

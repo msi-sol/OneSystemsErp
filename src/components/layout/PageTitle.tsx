@@ -7,7 +7,9 @@ export default function PageTitle() {
 
   let title = 'Overview';
 
-  if ((pathname || '').includes('/material-issuance')) {
+  if ((pathname || '').startsWith('/boq')) {
+    title = 'BOQ Workspace';
+  } else if ((pathname || '').includes('/material-issuance')) {
     title = 'Manage and track materials issued from inventory against the Consolidated BOQ.';
   } else if ((pathname || '').includes('/projects')) {
     title = 'Projects';

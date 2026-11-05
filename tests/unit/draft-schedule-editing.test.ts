@@ -81,7 +81,7 @@ function makeAllocationFixture(options: {
       findFirst: jest.fn().mockResolvedValue({ status: 'APPROVED', checksum: 'approved-checksum-a' }),
     },
     scheduleActivity: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-    auditLog: { create: jest.fn().mockResolvedValue({}) },
+    auditLog: { create: jest.fn().mockResolvedValue({}),count:jest.fn().mockResolvedValue(0) },
   };
   prismaMock.$transaction.mockImplementation((callback: (transaction: typeof tx) => unknown) => callback(tx));
   return { tx, allocations };
@@ -116,7 +116,7 @@ function makeActivityFixture() {
     scheduleWBS: { findFirst: jest.fn().mockResolvedValue({ id: 'wbs-a' }) },
     projectSchedule: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     scheduleProgressUpdate: { create: jest.fn().mockResolvedValue({}) },
-    auditLog: { create: jest.fn().mockResolvedValue({}) },
+    auditLog: { create: jest.fn().mockResolvedValue({}), count:jest.fn().mockResolvedValue(0) },
   };
   prismaMock.$transaction.mockImplementation((callback: (transaction: typeof tx) => unknown) => callback(tx));
   return { tx, activity };
@@ -137,7 +137,7 @@ function makeDeleteActivityFixture(options: { scheduleUpdateCount?: number } = {
       delete: jest.fn().mockResolvedValue(activity),
     },
     projectSchedule: { updateMany: jest.fn().mockResolvedValue({ count: options.scheduleUpdateCount ?? 1 }) },
-    auditLog: { create: jest.fn().mockResolvedValue({}) },
+    auditLog: { create: jest.fn().mockResolvedValue({}), count:jest.fn().mockResolvedValue(0) },
   };
   prismaMock.$transaction.mockImplementation((callback: (transaction: typeof tx) => unknown) => callback(tx));
   return { tx, activity };
@@ -153,7 +153,7 @@ function makeCreateActivityFixture(options: { scheduleUpdateCount?: number; work
     },
     scheduleWBS: { findFirst: jest.fn().mockResolvedValue({ id: 'wbs-root' }) },
     scheduleActivity: { create: jest.fn().mockResolvedValue(activity) },
-    auditLog: { create: jest.fn().mockResolvedValue({}) },
+    auditLog: { create: jest.fn().mockResolvedValue({}), count:jest.fn().mockResolvedValue(0) },
   };
   prismaMock.$transaction.mockImplementation((callback: (transaction: typeof tx) => unknown) => callback(tx));
   return { tx, activity };
@@ -355,5 +355,22 @@ describe('draft schedule editing service', () => {
     const writes = tx.scheduleBOQAllocation.updateMany.mock.calls.map(([input]) => input.data);
     expect(writes.map((write: { allocatedAmount: { toString(): string } }) => write.allocatedAmount.toString())).toEqual(['0.01', '0', '0.01', '0']);
     expect(writes.every((write: { allocatedAmount: { isNegative(): boolean } }) => !write.allocatedAmount.isNegative())).toBe(true);
+  });
+});
+
+
+describe('native work-package deletion preserves lineage', () => {
+  it.each(['progress', 'sequence'])('blocks deletion with existing %s references', async kind => {
+    const {tx, activity}=makeDeleteActivityFixture();
+    tx.scheduleActivity.findUnique.mockResolvedValue({...activity,schedule:{...schedule,generationRulesVersion:'BOQ_WPS_WORKSPACE_V1',description:null}});
+    Object.assign(tx, {
+      scheduleProgressUpdate:{count:jest.fn().mockResolvedValue(kind==='progress'?1:0)},
+      scheduleDelayRecord:{count:jest.fn().mockResolvedValue(0)},
+      schedulePOWMapping:{count:jest.fn().mockResolvedValue(0)},
+      scheduleDependency:{count:jest.fn().mockResolvedValue(kind==='sequence'?1:0)},
+    });
+    await expect(deleteDraftScheduleActivity({projectId:'project-a',activityId:'activity-a',actor,body:{expectedRowVersion:8}})).rejects.toMatchObject({status:409,message:kind==='progress'?'PACKAGE_HAS_EXECUTION_HISTORY':'REMOVE_PACKAGE_PLANNING_REFERENCES_FIRST'});
+    expect(tx.scheduleActivity.delete).not.toHaveBeenCalled();
+    expect(tx.projectSchedule.updateMany).not.toHaveBeenCalled();
   });
 });

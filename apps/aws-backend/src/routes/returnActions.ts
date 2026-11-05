@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import {processWpsMaterialReturn}from'../lib/wps-material-return';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -48,6 +49,8 @@ router.post('/processMaterialReturn', async (req, res) => {
 
     if (!materialReturn) throw new Error('Return slip not found');
     if (materialReturn.status === 'COMPLETED') throw new Error('Return slip already completed');
+    const packageLink=await prisma.auditLog.findFirst({where:{transactionId:materialReturn.issuanceId,actionType:'WPS_PROCUREMENT_RECORD_LINKED'},select:{id:true}});
+    if(packageLink){const updatedReturn=await processWpsMaterialReturn(returnId,warehousemanId);res.json({success:true,data:updatedReturn});return;}
 
     // For each item with GOOD condition, decrease the consumedQty
     for (const item of materialReturn.items) {

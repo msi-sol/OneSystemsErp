@@ -1,5 +1,6 @@
 import { prismaBase } from '@/lib/prisma-base';
 import { Prisma, ScheduleWorkflowAction } from '@prisma/client';
+import { assertLegacySchedulingWorkflow } from '@/lib/scheduling/scheduleWorkflow';
 
 export async function executeStartTechnicalReviewMutation({
   projectId,
@@ -39,6 +40,8 @@ export async function executeStartTechnicalReviewMutation({
         existing.expectedRowVersion === expectedRowVersion &&
         existing.resultingRowVersion === expectedRowVersion + 1
       ) {
+        const priorSchedule = await tx.projectSchedule.findUnique({ where: { id: scheduleId, projectId } });
+        if (priorSchedule) assertLegacySchedulingWorkflow(priorSchedule);
         return { status: 'IDEMPOTENT_SUCCESS', transition: existing };
       }
       throw new Error('IDEMPOTENCY_CONFLICT');
@@ -52,6 +55,7 @@ export async function executeStartTechnicalReviewMutation({
     if (!currentSchedule) {
       throw new Error('Schedule not found');
     }
+    assertLegacySchedulingWorkflow(currentSchedule);
 
     if (currentSchedule.workflowStatus !== 'READY_FOR_REVIEW') {
       throw new Error(`Invalid status transition from ${currentSchedule.workflowStatus}`);
@@ -139,6 +143,7 @@ export async function executeAddRequiredReviewCommentsMutation({
     if (!currentSchedule) {
       throw new Error('Schedule not found');
     }
+    assertLegacySchedulingWorkflow(currentSchedule);
 
     if (currentSchedule.workflowStatus !== 'UNDER_TECHNICAL_REVIEW') {
       throw new Error(`Invalid status for adding required comments: ${currentSchedule.workflowStatus}`);
@@ -246,6 +251,7 @@ export async function executeAddFinanceReviewCommentMutation({
     if (!currentSchedule) {
       throw new Error('Schedule not found');
     }
+    assertLegacySchedulingWorkflow(currentSchedule);
 
     if (currentSchedule.workflowStatus !== 'UNDER_TECHNICAL_REVIEW') {
       throw new Error(`Invalid status for adding finance comment: ${currentSchedule.workflowStatus}`);
@@ -324,6 +330,7 @@ export async function executeTechnicalApprovalMutation({
     });
 
     if (!currentSchedule) throw new Error('Schedule not found');
+    assertLegacySchedulingWorkflow(currentSchedule);
     if (currentSchedule.workflowStatus !== 'UNDER_TECHNICAL_REVIEW') {
       throw new Error(`Invalid status: ${currentSchedule.workflowStatus}`);
     }
@@ -393,6 +400,7 @@ export async function executeFinanceApprovalMutation({
     });
 
     if (!currentSchedule) throw new Error('Schedule not found');
+    assertLegacySchedulingWorkflow(currentSchedule);
     if (currentSchedule.workflowStatus !== 'TECHNICALLY_APPROVED') {
       throw new Error(`Invalid status: ${currentSchedule.workflowStatus}`);
     }
@@ -472,6 +480,7 @@ export async function executeFinalBaselineRecommendationMutation({
     });
 
     if (!currentSchedule) throw new Error('Schedule not found');
+    assertLegacySchedulingWorkflow(currentSchedule);
     if (currentSchedule.workflowStatus !== 'TECHNICALLY_APPROVED') {
       throw new Error(`Invalid status: ${currentSchedule.workflowStatus}`);
     }
@@ -548,6 +557,7 @@ export async function executeBaselineActivationMutation({
          throw new Error('IDEMPOTENCY_KEY_CONFLICT');
       }
       const existingSchedule = await tx.projectSchedule.findUnique({ where: { id: scheduleId } });
+      if (existingSchedule) assertLegacySchedulingWorkflow(existingSchedule);
       if (existingSchedule?.workflowStatus !== 'ACTIVE_BASELINE' || !existingSchedule.baselineCode) {
          throw new Error('IDEMPOTENCY_KEY_CONFLICT');
       }
@@ -565,6 +575,7 @@ export async function executeBaselineActivationMutation({
     });
 
     if (!schedule) throw new Error('Schedule not found');
+    assertLegacySchedulingWorkflow(schedule);
     if (schedule.workflowStatus === 'ACTIVE_BASELINE') {
       throw new Error('SCHEDULE_ALREADY_ACTIVE');
     }

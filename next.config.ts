@@ -8,10 +8,10 @@ const withSerwist = withSerwistInit({
 });
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ['127.0.0.1'],
   output: 'standalone',
-  typescript: {
-    // TODO: Remove this after fixing all migration-generated TypeScript errors
-    ignoreBuildErrors: true,
+  outputFileTracingExcludes: {
+    '/*': ['./.runtime/**/*', './.env*', './outputs/**/*', './.git/**/*'],
   },
   turbopack: {},
   serverExternalPackages: ['pdf-parse', 'pdfjs-dist'],

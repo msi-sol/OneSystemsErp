@@ -49,12 +49,12 @@ export default async function ProjectsPage() {
   });
 
   const canAssignManager = permissions?.PROJECT_MANAGEMENT?.canUpdate || false;
-  let users: any[] = [];
+  let users: { id: string; name: string; role: string }[] = [];
   if (canAssignManager || permissions?.PROJECT_MANAGEMENT?.canCreate) {
-    users = await prisma.user.findMany({ 
+    users = (await prisma.user.findMany({
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' }
-    });
+    })).map(user => ({ ...user, name: user.name ?? user.id }));
   }
 
   return (
@@ -64,9 +64,9 @@ export default async function ProjectsPage() {
           <h1>Projects</h1>
           <p>Manage and monitor all active construction projects.</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
           <Link
-            href="/boq-template"
+            href="/boq"
             style={{ 
               padding: '10px 18px', 
               borderRadius: '8px', 
@@ -80,10 +80,11 @@ export default async function ProjectsPage() {
               whiteSpace: 'nowrap'
             }}
           >
-            📄 BOQ Template Center
+            BOQ Workspace
           </Link>
           <PermissionGuard permissions={permissions} moduleName="PROJECT_MANAGEMENT" action="canCreate">
-            <NewProjectButton users={users} />
+            <Link href="/boq?mode=new" style={{padding: '10px 18px', borderRadius: 8, background: 'var(--accent-color)', color: 'var(--bg-primary)', fontWeight: 700}}>New project from BOQ</Link>
+            <details><summary>Other project formats</summary><NewProjectButton users={users} /></details>
           </PermissionGuard>
         </div>
       </header>
@@ -106,7 +107,7 @@ export default async function ProjectsPage() {
                 <td colSpan={6} className={styles.emptyState}>No projects found.</td>
               </tr>
             ) : projects.map(project => {
-              const formatDate = (d: any) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA';
+              const formatDate = (d: Date | string | null) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA';
               const consolidatedCost = project.consolidatedBoqItems?.reduce((sum, i) => sum + (i.totalCost || 0), 0) || 0;
               return (
               <tr key={project.id}>
@@ -135,11 +136,13 @@ export default async function ProjectsPage() {
                     canEdit={canAssignManager} 
                   />
                 </td>
-                <td style={{ display: 'flex', gap: '15px', alignItems: 'center', height: '100%' }}>
-                  <Link href={`/projects/${project.id}`} className={styles.actionLink}>View Details</Link>
-                  <PermissionGuard permissions={permissions} moduleName="PROJECT_MANAGEMENT" action="canDelete">
-                    <DeleteProjectButton projectId={project.id} />
-                  </PermissionGuard>
+                <td>
+                  <div className={styles.rowActions}>
+                    <Link href={`/projects/${project.id}`} className={styles.actionLink}>View Details</Link>
+                    <PermissionGuard permissions={permissions} moduleName="PROJECT_MANAGEMENT" action="canDelete">
+                      <DeleteProjectButton projectId={project.id} />
+                    </PermissionGuard>
+                  </div>
                 </td>
               </tr>
             )})}

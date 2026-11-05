@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prismaBase as prisma } from '../../src/lib/prisma-base';
 
 const SUPPLIER_NAMES = [
   'Atlas Construction Supplies', 'Metro Hardware', 'BuildRight Materials', 'Pioneer Concrete', 

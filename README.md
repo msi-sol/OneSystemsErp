@@ -1,8 +1,56 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## BOQ Workspace
+
+Open **BOQ Workspace** in the sidebar or from Projects (`/boq`). Analyze an
+XLSX workbook, select its sheet and column mapping, then confirm the source.
+The workspace replaces the blank-template download panel and groups accessible
+projects into **BOQ Action Required** and **Approved BOQs**.
+
+Each project has separate **BOQ** and **Work Packages** modules. BOQ draft
+editing leads to written Engineer review and PM approval/locking. Work Packages
+provides package dates and completion weights, split BOQ scope, sequence links,
+locations, constraints, resource budgets, and Engineer review → PM baseline
+approval. Revisions retain the previous active baseline until approval. Corrected
+BOQ sources/readings retain evidence and explicit carry decisions. Approved work
+packages include look-ahead, weekly commitments, daily measured work, and real
+material requirements with warehouse stock, reservations, transfers and
+procurement/issuance integration.
+
+Analysis creates no records. Confirmation preserves the original and creates a
+canonical draft BOQ. Workflow, compatibility and storage requirements are owned
+by the [scheduling architecture](docs/architecture/universal-project-intake-and-scheduling.md#11-boq-workspace-intake).
+
+For the practice draft and the complete manual flow, follow the
+[local walkthrough](docs/architecture/universal-project-intake-and-scheduling.md#manual-local-walkthrough).
+
 ## Getting Started
 
-First, run the development server:
+Both applications use **MySQL through Prisma**. The single schema is
+`prisma/schema.prisma`; the AWS backend shares its generated client. The files
+under `prisma/postgresql-migrations/` are historical records, not active migrations.
+
+Install dependencies with `npm ci`. Copy `.env.example` to `.env` and set
+`DATABASE_URL` and `DIRECT_URL` to the same local MySQL database. Then run:
+
+```bash
+npm run db:validate
+npm run db:generate
+npm run db:status
+```
+
+On Windows, stop running app processes before regenerating the client if Prisma
+reports an `EPERM` error while replacing its native engine file.
+
+For a new, empty local database, `npm run db:deploy` applies the committed MySQL
+migrations. Existing production deployments use the restricted migration runner
+described in [the deployment guide](deploy/cicd/README.md); keep the baseline and
+applied migration files unchanged. Schema changes require a new forward migration.
+
+Run `npm run typecheck`, `npm run test:unit`, and
+`npm --prefix apps/aws-backend run typecheck` to check both applications.
+
+Start the development server:
 
 ```bash
 npm run dev

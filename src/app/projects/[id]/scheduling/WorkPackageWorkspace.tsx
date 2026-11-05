@@ -18,6 +18,9 @@ export interface WorkPackageWorkspaceProps {
   canEditDraft?: boolean;
   rowVersion?: number;
   onRefresh?: () => void;
+  moduleMode?: boolean;
+  onOpenPackage?: (id: string) => void;
+  completionWeights?: Record<string, number>;
 }
 
 // Group the decimal string without converting financial values to binary floats.
@@ -49,10 +52,10 @@ const workflowLabels: Record<string, string> = {
   ARCHIVED_BASELINE: 'Archived baseline',
 };
 
-export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, canEditDraft = false, rowVersion = 0, onRefresh }: WorkPackageWorkspaceProps) {
+export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, canEditDraft = false, rowVersion = 0, onRefresh, moduleMode = false, onOpenPackage, completionWeights }: WorkPackageWorkspaceProps) {
   const [query, setQuery] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
-  const canEditScope = canEditDraft && !summary.isImmutable && boqLocked
+  const canEditScope = !moduleMode && canEditDraft && !summary.isImmutable && boqLocked
     && ['AI_GENERATED_DRAFT', 'INVALID_GENERATED_DRAFT', 'TECHNICAL_REVISIONS_REQUIRED'].includes(workflowStatus);
   const search = query.trim().toLocaleLowerCase();
   const matches = (values: (string | null)[]) => values.some(value => value?.toLocaleLowerCase().includes(search));
@@ -80,7 +83,7 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
           <h2 id="work-package-heading">Work packages</h2>
           <p>Turn the approved BOQ into a plan the project team can follow.</p>
         </div>
-        <a className={styles.link} href={`/projects/${encodeURIComponent(projectId)}?tab=awarded-boq`}>
+        <a className={styles.link} href={moduleMode ? `/projects/${encodeURIComponent(projectId)}/boq` : `/projects/${encodeURIComponent(projectId)}?tab=awarded-boq`}>
           <BookOpen size={16} aria-hidden="true" /> View contract BOQ <ArrowRight size={16} aria-hidden="true" />
         </a>
       </div>
@@ -98,7 +101,7 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
             ? 'This baseline is locked. Planning changes follow the existing revision and approval workflow.'
             : 'Review the allocated BOQ scope and dates, then use the schedule review controls to request approval.'}</p>
         </div>
-        <a className={styles.link} href="#schedule-review">Review workflow <ArrowRight size={16} aria-hidden="true" /></a>
+        <a className={styles.link} href={moduleMode ? '#plan-review' : '#schedule-review'}>Review workflow <ArrowRight size={16} aria-hidden="true" /></a>
       </div>
 
       <dl className={styles.facts}>
@@ -121,7 +124,7 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
       <div className={styles.toolbar}>
         <label className={styles.search}><Search size={17} aria-hidden="true" /><span className={styles.srOnly}>Search work packages and BOQ items</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search packages or BOQ items" /></label>
         <label className={styles.check}><input type="checkbox" checked={issuesOnly} onChange={event => setIssuesOnly(event.target.checked)} /> Needs attention only</label>
-        <button className={styles.action} type="button" onClick={onPlan}>{summary.isImmutable ? 'View WBS & activities' : 'Plan in WBS & activities'} <ArrowRight size={16} aria-hidden="true" /></button>
+        <button className={styles.action} type="button" onClick={onPlan}>{moduleMode ? 'Open scope planner' : summary.isImmutable ? 'View WBS & activities' : 'Plan in WBS & activities'} <ArrowRight size={16} aria-hidden="true" /></button>
       </div>
 
       <div className={styles.scheduleHeading}>
@@ -141,15 +144,17 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
               <div className={styles.packageHeading}><div><span className={styles.code}>{item.code}</span><h4>{item.name}</h4><p>{item.groupName || 'No WBS group assigned'}</p></div>{summary.isImmutable && <span className={styles.locked}><LockKeyhole size={14} aria-hidden="true" /> Locked</span>}</div>
               <div className={styles.timeline} aria-hidden="true">{geometry && <span style={geometry} />}</div>
               <div className={styles.packageFacts}>
+                {completionWeights && <span>Completion weight: <strong>{Number(((completionWeights[item.id] || 0) * 100).toFixed(4))}%</strong></span>}
                 <span>{item.startDate && item.finishDate ? `${dateText(item.startDate)} – ${dateText(item.finishDate)}` : 'Dates need review'}</span>
                 <span><strong>{item.weightPercent === null ? 'Not available' : `${numberText(item.weightPercent)}%`}</strong> BOQ value share</span>
                 <span>{money(item.amount)}</span>
-                <span>Recorded progress: <strong>{item.recordedProgressPercent === null ? 'Not recorded' : `${item.recordedProgressPercent}%`}</strong></span>
+                <span>{moduleMode?'Measured progress':'Recorded progress'}: <strong>{item.recordedProgressPercent === null ? (summary.isImmutable?'Not available for this baseline':'See active baseline') : `${item.recordedProgressPercent}%`}</strong></span>
               </div>
               <details className={styles.scope}>
                 <summary>Review BOQ scope <span>{item.scope.length} linked {item.scope.length === 1 ? 'item' : 'items'}</span></summary>
                 {item.scope.length === 0 ? <p className={styles.empty}>No BOQ quantities are linked to this package. Review its scope in the existing planning workflow.</p> : <div className={styles.tableScroll} tabIndex={0} role="region" aria-label={`${item.code} BOQ scope`}><table><caption className={styles.srOnly}>BOQ quantities allocated to {item.name}</caption><thead><tr><th scope="col">BOQ item</th><th scope="col">Unit</th><th scope="col">BOQ quantity</th><th scope="col">Package quantity</th><th scope="col">Allocation value</th></tr></thead><tbody>{item.scope.map(line => <tr key={line.id}><th scope="row"><strong>{line.itemCode}</strong><span>{line.description}</span></th><td>{line.unit}</td><td>{numberText(line.approvedQuantity)}</td><td>{canEditScope && onRefresh && !line.legacyQuantity ? <DraftAllocationEditor projectId={projectId} allocationId={line.id} itemCode={line.itemCode} quantity={line.allocatedQuantity} rowVersion={rowVersion} onSaved={onRefresh} /> : numberText(line.allocatedQuantity)}{line.legacyQuantity && <small className={styles.warning}>Legacy mapping · verify quantity</small>}</td><td>{money(line.amount)}</td></tr>)}</tbody></table></div>}
               </details>
+              {onOpenPackage && <button type="button" className={styles.action} onClick={() => onOpenPackage(item.id)}>Open package <ArrowRight size={15} /></button>}
             </li>;
           })}
         </ul>

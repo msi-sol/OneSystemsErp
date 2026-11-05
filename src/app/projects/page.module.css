@@ -39,7 +39,7 @@
   background-color: var(--glass-panel);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
   backdrop-filter: blur(10px);
 }
 
@@ -104,6 +104,17 @@
 .status-active { background-color: rgba(34, 197, 94, 0.2); color: #4ade80; }
 .status-completed { background-color: rgba(59, 130, 246, 0.2); color: #60a5fa; }
 .status-on_hold { background-color: rgba(249, 115, 22, 0.2); color: #fb923c; }
+
+.rowActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.5rem;
+  white-space: nowrap;
+}
+
+.table td:last-child {
+  white-space: nowrap;
+}
 
 .actionLink {
   color: var(--accent-color);

@@ -27,13 +27,28 @@ try {
     assert.equal(login?.id, user.id);
     assert.equal(await bcrypt.compare(password, login.passwordHash), true);
 
+    const serializedQuestions = JSON.stringify(Array.from({ length: 30 }, (_, i) => `Question ${i}: ${'details '.repeat(20)}`));
+    const knowledge = await tx.aiKnowledgeMap.create({ data: {
+      sourceType: 'database_schema', sourceName: marker, normalizedName: marker,
+      businessMeaning: 'A long model explanation. '.repeat(100),
+      generatedAliases: serializedQuestions, generatedSynonyms: serializedQuestions,
+      sampleQuestions: serializedQuestions,
+    } });
+    const savedKnowledge = await tx.aiKnowledgeMap.findUniqueOrThrow({ where: { id: knowledge.id } });
+    assert.equal(savedKnowledge.sampleQuestions, serializedQuestions);
+    assert.equal(savedKnowledge.generatedAliases, serializedQuestions);
+    assert.equal(savedKnowledge.generatedSynonyms, serializedQuestions);
+    assert.equal(savedKnowledge.businessMeaning, knowledge.businessMeaning);
+
     const description = 'x'.repeat(100_000);
     const project = await tx.project.create({ data: { name: marker, description } });
     assert.equal((await tx.project.findUniqueOrThrow({ where: { id: project.id } })).description, description);
     const active = await tx.projectSchedule.create({ data: {
       projectId: project.id, name: 'Active baseline', workflowStatus: 'ACTIVE_BASELINE',
       baselineCode: 'BL-001', awardedContractAmount: '123456789.123456789',
+      holidays: JSON.stringify(Array.from({ length: 40 }, () => '2026-12-25')),
     } });
+    assert.equal(JSON.parse(active.holidays).length, 40);
     assert.equal(active.awardedContractAmount.toString(), '123456789.123456789');
     await assert.rejects(tx.projectSchedule.create({ data: {
       projectId: project.id, name: 'Duplicate active', workflowStatus: 'ACTIVE_BASELINE',
@@ -68,7 +83,8 @@ try {
   }, { timeout: 60_000 }), (error) => error === rollback);
   assert.equal(await db.user.count({ where: { email: { contains: marker } } }), 0);
   assert.equal(await db.project.count({ where: { name: { contains: marker } } }), 0);
-  console.log('PASS: login lookup/hash, long text, decimal/JSON/UTC, three uniqueness guards, allowed inactive/NULL rows, and rollback.');
+  assert.equal(await db.aiKnowledgeMap.count({ where: { sourceName: marker } }), 0);
+  console.log('PASS: login lookup/hash, long text/serialized arrays, decimal/JSON/UTC, three uniqueness guards, allowed inactive/NULL rows, and rollback.');
 } finally {
   await db.$disconnect();
 }

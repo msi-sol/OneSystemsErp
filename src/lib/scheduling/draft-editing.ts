@@ -1,6 +1,8 @@
 import { Prisma, ProjectScheduleWorkflowStatus } from '@prisma/client';
 import { prisma, transactionContext } from '@/lib/prisma';
 import { assertScheduleEditable } from '@/lib/scheduling/scheduleWorkflow';
+import { readWorkPackagePlanDetails } from './work-package-details-types';
+import { assertWorkPackageExecutedScope } from './work-package-execution';
 
 export class DraftEditingError extends Error {
   constructor(message: string, readonly status: number) {
@@ -15,7 +17,7 @@ const activityFields = new Set([
   'name', 'activityCode', 'code', 'description', 'wbsId', 'plannedDuration',
   'plannedStartDate', 'plannedFinishDate', 'unit', 'plannedQuantity', 'status',
   'priority', 'actualStartDate', 'actualFinishDate', 'actualProgressPercent',
-  'expectedRowVersion',
+  'expectedRowVersion', 'plannedWeight',
 ]);
 const activityStatuses = new Set(['NOT_STARTED', 'IN_PROGRESS', 'COMPLETED', 'DELAYED']);
 const priorities = new Set(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
@@ -121,7 +123,7 @@ async function bumpScheduleVersion(
 function activityAuditShape(activity: Record<string, unknown>): Record<string, unknown> {
   const fields = [
     'name', 'activityCode', 'description', 'wbsId', 'plannedStartDate', 'plannedFinishDate',
-    'plannedDuration', 'plannedQuantity', 'unit', 'status', 'priority', 'actualStartDate',
+    'plannedDuration', 'plannedQuantity', 'plannedWeight', 'unit', 'status', 'priority', 'actualStartDate',
     'actualFinishDate', 'actualProgressPercent',
   ];
   return Object.fromEntries(fields.map((field) => [field, activity[field] instanceof Date ? (activity[field] as Date).toISOString() : activity[field]]));
@@ -263,6 +265,10 @@ export async function editDraftScheduleActivity(args: {
       if (typeof body.plannedQuantity !== 'number' || !Number.isFinite(body.plannedQuantity) || body.plannedQuantity < 0) invalid('INVALID_PLANNED_QUANTITY');
       updateData.plannedQuantity = body.plannedQuantity;
     }
+    if (body.plannedWeight !== undefined) {
+      if (typeof body.plannedWeight !== 'number' || !Number.isFinite(body.plannedWeight) || body.plannedWeight < 0 || body.plannedWeight > 1) invalid('INVALID_COMPLETION_WEIGHT');
+      updateData.plannedWeight = body.plannedWeight;
+    }
     if (body.unit !== undefined) {
       if (body.unit !== null && typeof body.unit !== 'string') invalid('INVALID_UNIT');
       if (typeof body.unit === 'string') validateStringLength(body.unit.trim(), 191, 'UNIT_TOO_LONG');
@@ -292,7 +298,20 @@ export async function editDraftScheduleActivity(args: {
     if (Object.keys(updateData).length === 0) invalid('NO_EDITABLE_FIELDS');
 
     const before = activityAuditShape(activity as unknown as Record<string, unknown>);
-    await bumpScheduleVersion(tx, activity.schedule, expectedRowVersion);
+    const schedulePatch:Prisma.ProjectScheduleUpdateManyMutationInput={};
+    if(activity.schedule.generationRulesVersion==='BOQ_WPS_WORKSPACE_V1'){
+      if(body.actualProgressPercent!==undefined||body.actualStartDate!==undefined||body.actualFinishDate!==undefined)conflict('USE_MEASURED_SITE_WORK_FOR_PROGRESS');
+      if(body.plannedDuration!==undefined&&(Number(body.plannedDuration)<1||Number(body.plannedDuration)>3650))invalid('INVALID_PLANNED_DURATION');
+      if(body.plannedWeight!==undefined&&Number(body.plannedWeight)<=0)invalid('INVALID_COMPLETION_WEIGHT');
+      if(codeValue!==undefined&&(typeof codeValue!=='string'||!codeValue.trim()||codeValue.trim().length>40))invalid('INVALID_PACKAGE_CODE');
+      if(body.name!==undefined&&(typeof body.name!=='string'||body.name.trim().length<3||body.name.trim().length>180))invalid('INVALID_PACKAGE_NAME');
+      if(updateData.activityCode&&await tx.scheduleActivity.findFirst({where:{scheduleId:activity.scheduleId,activityCode:updateData.activityCode as string,id:{not:activity.id}}}))conflict('PACKAGE_CODE_ALREADY_EXISTS');
+      if(activity.schedule.previousBaselineId&&(body.plannedStartDate!==undefined||body.plannedFinishDate!==undefined||body.plannedDuration!==undefined)){
+        const details=readWorkPackagePlanDetails(activity.schedule.description);
+        details.resourcesReviewNeeded={...details.resourcesReviewNeeded,[activity.id]:true};schedulePatch.description=JSON.stringify(details);
+      }
+    }
+    await bumpScheduleVersion(tx, activity.schedule, expectedRowVersion,schedulePatch);
     const updatedActivity = await tx.scheduleActivity.update({
       where: { id: activity.id },
       data: updateData,
@@ -353,6 +372,21 @@ export async function deleteDraftScheduleActivity(args: {
     const expectedRowVersion = requireExpectedVersion(body.expectedRowVersion, activity.schedule.rowVersion);
 
     let allocationTotal = new Prisma.Decimal(0);
+    if (activity.schedule.generationRulesVersion === 'BOQ_WPS_WORKSPACE_V1') {
+      const details = readWorkPackagePlanDetails(activity.schedule.description);
+      const sourcePackageId=details.packageIdentities?.[activity.id]||activity.id;
+      const procurement=await tx.auditLog.count({where:{actionType:'WPS_PROCUREMENT_RECORD_LINKED',newValue:{contains:`"sourcePackageId":"${sourcePackageId}"`}}});
+      if(procurement)conflict('PACKAGE_HAS_PROCUREMENT_HISTORY');
+      const [progress, delays, mappings, links] = await Promise.all([
+        tx.scheduleProgressUpdate.count({ where: { activityId: activity.id } }),
+        tx.scheduleDelayRecord.count({ where: { activityId: activity.id } }),
+        tx.schedulePOWMapping.count({ where: { activityId: activity.id } }),
+        tx.scheduleDependency.count({ where: { OR: [{ predecessorId: activity.id }, { successorId: activity.id }] } }),
+      ]);
+      if (progress || delays || mappings || activity.actualQuantity > 0 || activity.actualProgressPercent > 0 || activity.actualStartDate) conflict('PACKAGE_HAS_EXECUTION_HISTORY');
+      if (details.breakdownUploads?.some(row => row.activityId === activity.id)) conflict('PACKAGE_HAS_PRESERVED_BREAKDOWN_EVIDENCE');
+      if (links || details.constraints.some(row => row.activityId === activity.id) || details.resources.some(row => row.activityId === activity.id)) conflict('REMOVE_PACKAGE_PLANNING_REFERENCES_FIRST');
+    }
     for (const allocation of activity.boqAllocations) {
       allocationTotal = allocationTotal.plus(asDecimal(allocation.allocatedAmount, `ALLOCATION_AMOUNT_UNKNOWN:${allocation.id}`));
     }
@@ -366,6 +400,10 @@ export async function deleteDraftScheduleActivity(args: {
     const before = activityAuditShape(activity as unknown as Record<string, unknown>);
     await bumpScheduleVersion(tx, activity.schedule, expectedRowVersion, { scheduledAmount, differenceAmount });
     await tx.scheduleActivity.delete({ where: { id: activity.id } });
+    if(activity.schedule.generationRulesVersion==='BOQ_WPS_WORKSPACE_V1'){
+      const current=await tx.projectSchedule.findFirst({where:{id:activity.scheduleId,projectId:args.projectId},include:{activities:{include:{boqAllocations:true}}}});
+      if(current)await assertWorkPackageExecutedScope(tx,args.projectId,current);
+    }
     await tx.auditLog.create({
       data: {
         userId: args.actor.id,
@@ -420,6 +458,7 @@ export async function editDraftScheduleAllocation(args: {
       throw new DraftEditingError('ALLOCATION_NOT_FOUND', 404);
     }
     const schedule = allocation.activity.schedule;
+    if(schedule.generationRulesVersion==='BOQ_WPS_WORKSPACE_V1')conflict('Use the Work Packages scope planner for located allocations.');
     assertEditable(schedule);
     const expectedRowVersion = requireExpectedVersion(body.expectedRowVersion, schedule.rowVersion);
 

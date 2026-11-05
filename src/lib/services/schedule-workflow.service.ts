@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { transactionContext, prisma } from '@/lib/prisma';
 import { executeStartTechnicalReviewMutation, executeAddRequiredReviewCommentsMutation, executeAddFinanceReviewCommentMutation, executeBaselineActivationMutation } from '@/lib/services/schedule-gateway';
+import { assertLegacySchedulingWorkflow } from '@/lib/scheduling/scheduleWorkflow';
 import crypto from 'crypto';
 
 export type OperationalSession = {
@@ -101,6 +102,8 @@ export async function submitDraftForReview(
     if (!currentSchedule) {
       throw new Error('Schedule not found');
     }
+
+    assertLegacySchedulingWorkflow(currentSchedule);
 
     if (currentSchedule.workflowStatus !== 'AI_GENERATED_DRAFT') {
       throw new Error(`Invalid status transition from ${currentSchedule.workflowStatus}`);

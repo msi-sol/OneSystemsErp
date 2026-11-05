@@ -9,6 +9,7 @@ import styles from './draft-boq.module.css';
 export interface DraftBoqRow {
   id: string;
   itemCode: string;
+  category?: string | null;
   description: string;
   unit: string;
   quantity: number;
@@ -18,20 +19,24 @@ export interface DraftBoqRow {
 
 interface Props {
   projectId: string;
-  version: { id: string; checksum: string };
+  version: { id: string; checksum: string; reviewRowVersion?: number };
   rows: DraftBoqRow[];
   contractAmount: number;
   canEdit: boolean;
   canApprove: boolean;
+  showApproval?: boolean;
 }
 
 const currency = (value: Decimal.Value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(new Decimal(value).toNumber());
 
-export default function DraftBoqEditor({ projectId, version, rows, contractAmount, canEdit, canApprove }: Props) {
+export default function DraftBoqEditor({ projectId, version, rows, contractAmount, canEdit, canApprove, showApproval = true }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [values, setValues] = useState({ description: '', unit: '', quantity: '', unitCost: '', amount: '' });
+  const [values, setValues] = useState({ itemCode: '', section: 'General', description: '', unit: '', quantity: '', unitCost: '', amount: '', editReason: '' });
+  const [newLine, setNewLine] = useState({ itemCode: '', category: 'General', description: '', unit: '', quantity: '', unitCost: '', amount: '', editReason: '' });
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [removeReason, setRemoveReason] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [confirmApproval, setConfirmApproval] = useState(false);
@@ -40,13 +45,13 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
 
   function edit(row: DraftBoqRow) {
     setEditingId(row.id);
-    setValues({ description: row.description, unit: row.unit, quantity: String(row.quantity), unitCost: String(row.combinedUnitCost), amount: String(row.totalCost) });
+    setValues({ itemCode: row.itemCode, section: row.category || 'General', description: row.description, unit: row.unit, quantity: String(row.quantity), unitCost: String(row.combinedUnitCost), amount: String(row.totalCost), editReason: '' });
     setError('');
     setMessage('');
     setConfirmApproval(false);
   }
 
-  function request(method: 'PATCH' | 'POST') {
+  function request(method: 'PATCH' | 'POST', action?: 'add' | 'remove', extra: Record<string, unknown> = {}) {
     setError('');
     setMessage('');
     startTransition(async () => {
@@ -54,8 +59,8 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
         const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/boq-draft`, {
           method,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ versionId: version.id, expectedChecksum: version.checksum,
-            ...(method === 'PATCH' ? { itemId: editingId, ...values } : {}),
+          body: JSON.stringify({ versionId: version.id, expectedChecksum: version.checksum, expectedReviewRowVersion: version.reviewRowVersion,
+            ...(method === 'PATCH' ? action === 'add' ? { action, ...newLine } : action === 'remove' ? { action, ...extra } : { itemId: editingId, ...values } : {}),
           }),
         });
         const data = await response.json();
@@ -68,6 +73,11 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
         setError(caught instanceof Error ? caught.message : 'The BOQ could not be saved.');
       }
     });
+  }
+
+  function addLine(event: FormEvent) {
+    event.preventDefault();
+    request('PATCH', 'add');
   }
 
   function save(event: FormEvent) {
@@ -87,25 +97,27 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
     {message && <p role="status" className={styles.success}>{message}</p>}
     <form onSubmit={save}>
       <div className={styles.scroll} role="region" aria-label="Editable draft BOQ items" tabIndex={0}>
-        <table><caption className={styles.srOnly}>Draft BOQ items and their stated quantities and amounts</caption><thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col">Unit</th><th scope="col">Quantity</th><th scope="col">Unit rate</th><th scope="col">Amount</th><th scope="col">Action</th></tr></thead>
+        <table><caption className={styles.srOnly}>Draft BOQ items and their stated quantities and amounts</caption><thead><tr><th scope="col">Item</th><th scope="col">Section</th><th scope="col">Description</th><th scope="col">Unit</th><th scope="col">Quantity</th><th scope="col">Unit rate</th><th scope="col">Amount</th><th scope="col">Action</th></tr></thead>
           <tbody>{rows.map(row => <tr key={row.id}>
-            <th scope="row">{row.itemCode}</th>
+            <th scope="row">{editingId === row.id ? <><label className={styles.srOnly} htmlFor="draft-boq-item-code">Item code</label><input id="draft-boq-item-code" required disabled={pending} value={values.itemCode} onChange={e => setValues({ ...values, itemCode: e.target.value })} maxLength={191}/></> : row.itemCode}</th>
             {editingId === row.id ? <>
+              <td><label className={styles.srOnly} htmlFor="draft-boq-section">BOQ section</label><input id="draft-boq-section" required disabled={pending} maxLength={191} value={values.section} onChange={e => setValues({ ...values, section: e.target.value })} /></td>
               <td><label className={styles.srOnly} htmlFor="draft-boq-description">BOQ description</label><textarea id="draft-boq-description" required rows={3} disabled={pending} value={values.description} onChange={e => setValues({ ...values, description: e.target.value })} /></td>
               <td><label className={styles.srOnly} htmlFor="draft-boq-unit">BOQ unit</label><input id="draft-boq-unit" required disabled={pending} value={values.unit} onChange={e => setValues({ ...values, unit: e.target.value })} /></td>
               <td><label className={styles.srOnly} htmlFor="draft-boq-quantity">BOQ quantity</label><input id="draft-boq-quantity" type="number" min="0" step="any" required disabled={pending} value={values.quantity} onChange={e => setValues({ ...values, quantity: e.target.value })} /></td>
               <td><label className={styles.srOnly} htmlFor="draft-boq-rate">BOQ unit rate</label><input id="draft-boq-rate" type="number" min="0" step="0.01" required disabled={pending} value={values.unitCost} onChange={e => setValues({ ...values, unitCost: e.target.value })} /></td>
               <td><label className={styles.srOnly} htmlFor="draft-boq-amount">BOQ amount</label><input id="draft-boq-amount" type="number" min="0" step="0.01" required disabled={pending} value={values.amount} onChange={e => setValues({ ...values, amount: e.target.value })} /></td>
-              <td className={styles.actions}><button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save BOQ item'}</button><button type="button" disabled={pending} onClick={() => setEditingId(null)}>Cancel</button></td>
+              <td className={styles.actions}><label className={styles.srOnly} htmlFor="draft-boq-edit-reason">Correction reason</label><input id="draft-boq-edit-reason" required minLength={5} maxLength={300} placeholder="Reason for correction" value={values.editReason} onChange={e => setValues({ ...values, editReason: e.target.value })}/><button type="submit" disabled={pending || values.editReason.trim().length < 5}>{pending ? 'Saving…' : 'Save BOQ item'}</button><button type="button" disabled={pending} onClick={() => setEditingId(null)}>Cancel</button></td>
             </> : <>
-              <td>{row.description}</td><td>{row.unit}</td><td>{row.quantity.toLocaleString('en-PH', { maximumFractionDigits: 12 })}</td><td>{currency(row.combinedUnitCost)}</td><td>{currency(row.totalCost)}</td>
-              <td>{canEdit ? <button type="button" disabled={pending || editingId !== null} onClick={event => { event.preventDefault(); edit(row); }} aria-label={`Edit BOQ ${row.itemCode}`}>Edit</button> : 'View only'}</td>
+              <td>{row.category || 'General'}</td><td>{row.description}</td><td>{row.unit}</td><td>{row.quantity.toLocaleString('en-PH', { maximumFractionDigits: 12 })}</td><td>{currency(row.combinedUnitCost)}</td><td>{currency(row.totalCost)}</td>
+              <td>{canEdit ? <div className={styles.actions}><button type="button" disabled={pending || editingId !== null} onClick={event => { event.preventDefault(); edit(row); }} aria-label={`Edit BOQ ${row.itemCode}`}>Edit</button><button type="button" disabled={pending || editingId !== null} onClick={() => { setRemovingId(row.id); setRemoveReason(''); }}>Remove</button></div> : 'View only'}{removingId === row.id && <div><label htmlFor={`remove-reason-${row.id}`}>Removal reason</label><input id={`remove-reason-${row.id}`} minLength={5} maxLength={300} value={removeReason} onChange={event => setRemoveReason(event.target.value)}/><button type="button" disabled={pending || removeReason.trim().length < 5} onClick={() => { request('PATCH', 'remove', { itemId: row.id, editReason: removeReason }); setRemovingId(null); }}>Confirm remove</button><button type="button" disabled={pending} onClick={() => setRemovingId(null)}>Cancel</button></div>}</td>
             </>}
           </tr>)}</tbody>
         </table>
       </div>
     </form>
-    <div className={styles.approval}>
+    {canEdit && <details className={styles.addLine}><summary>Add a missed BOQ line</summary><form onSubmit={addLine}><div className={styles.actions}><input aria-label="New item code" required maxLength={191} placeholder="Item code" value={newLine.itemCode} onChange={event => setNewLine({ ...newLine, itemCode: event.target.value })}/><input aria-label="BOQ section" maxLength={191} placeholder="Section" value={newLine.category} onChange={event => setNewLine({ ...newLine, category: event.target.value })}/><input aria-label="Description" required maxLength={10000} placeholder="Description" value={newLine.description} onChange={event => setNewLine({ ...newLine, description: event.target.value })}/><input aria-label="Unit" required placeholder="Unit" value={newLine.unit} onChange={event => setNewLine({ ...newLine, unit: event.target.value })}/><input aria-label="Quantity" type="number" min="0" step="any" required placeholder="Quantity" value={newLine.quantity} onChange={event => setNewLine({ ...newLine, quantity: event.target.value })}/><input aria-label="Unit rate" type="number" min="0" step="0.01" required placeholder="Unit rate" value={newLine.unitCost} onChange={event => setNewLine({ ...newLine, unitCost: event.target.value })}/><input aria-label="Amount" type="number" min="0" step="0.01" required placeholder="Amount" value={newLine.amount} onChange={event => setNewLine({ ...newLine, amount: event.target.value })}/><input aria-label="Reason for adding line" required minLength={5} maxLength={300} placeholder="Reason" value={newLine.editReason} onChange={event => setNewLine({ ...newLine, editReason: event.target.value })}/><button type="submit" disabled={pending || !newLine.editReason.trim()}>Add BOQ line</button></div></form></details>}
+    {showApproval && <div className={styles.approval}>
       <p>{!difference.isZero() ? 'Resolve the difference before approving this BOQ.' : 'The draft total matches the contract value. Approval locks these BOQ items for work-package planning.'}</p>
       {canApprove ? <div>
         {confirmApproval && <p role="alert">Approval locks these items. Confirm when your BOQ review is complete.</p>}
@@ -117,6 +129,6 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
           {confirmApproval && <button type="button" disabled={pending} onClick={() => setConfirmApproval(false)}>Cancel approval</button>}
         </div>
       </div> : <p>An authorized approver must approve and lock this BOQ.</p>}
-    </div>
+    </div>}
   </section>;
 }

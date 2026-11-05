@@ -1,395 +1,230 @@
-"use client";
+'use client';
 
-import React, { useEffect, useRef, useState } from "react";
-import { generateBOQTemplate } from "@/app/actions/boqTemplateService";
-import { uploadAndParseBOQ, checkBoqUploadStatus, approveBOQUpload, reviewBOQUpload } from "@/app/actions/boqUploadParser";
-import { validateBOQUploadFile } from "@/lib/boq/upload-input";
-import { Download, Upload, FileSpreadsheet, CheckCircle, AlertTriangle, XCircle, Loader2 } from "lucide-react";
-import { toast } from "sonner";
-import Link from "next/link";
-import styles from "./boqTemplate.module.css";
+import { useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import Decimal from 'decimal.js';
+import { ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, Loader2, Search, UploadCloud, X } from 'lucide-react';
+import { approveBOQUpload, reviewBOQUpload } from '@/app/actions/boqUploadParser';
+import { WORKSPACE_BREAKDOWN_FIELDS, type WorkspaceAnalysis, type WorkspaceBreakdownMapping, type WorkspaceMapping, type WorkspaceIssue } from '@/lib/boq/workspace-types';
+import styles from './boqTemplate.module.css';
 
-type BOQUploadError = {
-  row: number | string;
-  field: string;
-  issue: string;
-  suggested: string;
-};
+export interface WorkspaceProject {
+  id: string; name: string; contractAmount: number; boqLocked: boolean; hasBOQ: boolean;
+  boqStatus: string; fileName: string | null; uploadId: string | null; uploadStatus: string | null;
+  canEdit: boolean; canApprove: boolean;
+}
+export interface WorkspaceUpload {
+  uploadId: string; projectId: string; status: string; fileName: string; fileUrl?: string;
+  grandTotal: number; validRowsCount: number; warningRowsCount: number; errorRowsCount: number;
+  canSubmit: boolean; canApprove: boolean; sheetName?: string;
+  issues?: WorkspaceIssue[];
+}
+interface Props {
+  projects: WorkspaceProject[]; actorName: string; actorRole: string;
+  canCreate: boolean; canAnalyze: boolean; canApprove: boolean; initialUpload: WorkspaceUpload | null;
+  initialProjectId?: string; initialMode?: 'new' | 'existing';
+}
+const money = (value: string | number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(value));
+function columnLetter(index: number): string {
+  let value = index;
+  let letter = '';
+  while (value > 0) { value -= 1; letter = String.fromCharCode(65 + value % 26) + letter; value = Math.floor(value / 26); }
+  return letter;
+}
+const columnDisplayName = (column: WorkspaceAnalysis['columns'][number]) => `${columnLetter(column.index)} — ${column.label}`;
+const mappingFields: { key: Exclude<keyof WorkspaceMapping, 'headerRow'>; label: string; required?: boolean }[] = [
+  { key: 'itemCode', label: 'Item code' }, { key: 'description', label: 'Description', required: true },
+  { key: 'unit', label: 'Unit', required: true }, { key: 'quantity', label: 'Quantity', required: true },
+  { key: 'unitCost', label: 'Unit rate' }, { key: 'amount', label: 'Amount', required: true },
+];
+const labels: Record<string, string> = { DRAFT_UPLOADED: 'Draft import', PENDING: 'Draft import', SUBMITTED_FOR_REVIEW: 'Submitted for review', RETURNED_FOR_CORRECTION: 'Returned for correction', VALIDATION_FAILED: 'Needs correction', COMMITTED: 'Approved', APPROVED: 'Approved' };
 
-type BOQUploadReport = {
-  fileUrl?: string;
-  fileName: string;
-  validRowsCount: number;
-  errorRowsCount: number;
-  warningRowsCount: number;
-  grandTotal: number;
-  errors: BOQUploadError[];
-};
+export default function BOQTemplateClient({ projects, actorName, actorRole, canCreate, canAnalyze, canApprove, initialUpload, initialProjectId, initialMode }: Props) {
+  const router = useRouter();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const destinationInput = useRef<HTMLSelectElement>(null);
+  const contractAmountEdited = useRef(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [analysis, setAnalysis] = useState<WorkspaceAnalysis | null>(null);
+  const [mapping, setMapping] = useState<WorkspaceMapping | null>(null);
+  const [breakdownMapping, setBreakdownMapping] = useState<WorkspaceBreakdownMapping | null>(null);
+  const [sheetName, setSheetName] = useState('');
+  const [projectId, setProjectId] = useState(initialProjectId ?? '');
+  const [projectName, setProjectName] = useState('');
+  const [projectContractAmount, setProjectContractAmount] = useState('');
+  const [destination, setDestination] = useState<'quick' | 'existing' | 'new'>(initialMode === 'new' ? 'new' : initialProjectId || initialMode === 'existing' ? 'existing' : 'quick');
+  const [dragging, setDragging] = useState(false);
+  const [busy, setBusy] = useState<'analyze' | 'confirm' | 'review' | 'approve' | null>(null);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [search, setSearch] = useState('');
+  const [upload, setUpload] = useState(initialUpload);
+  const [approvalConfirmation, setApprovalConfirmation] = useState(false);
+  const selectedProject = projects.find(project => project.id === projectId);
+  const validMapping = mapping && mapping.headerRow > 0 && mapping.description !== null && mapping.unit !== null && mapping.quantity !== null && mapping.amount !== null;
+  const mappingChanged = JSON.stringify(mapping) !== JSON.stringify(analysis?.mapping)
+    || JSON.stringify(breakdownMapping) !== JSON.stringify(analysis?.breakdownMapping);
+  const approvedUpload = upload?.status === 'APPROVED' || upload?.status === 'COMMITTED';
+  const enteredContract = selectedProject ? String(selectedProject.contractAmount) : projectContractAmount;
+  let contractDifference: string | null = null;
+  if (analysis?.itemCount && /^\d+(?:\.\d{1,2})?$/.test(enteredContract.trim())) {
+    const amount = new Decimal(enteredContract);
+    if (amount.isFinite() && amount.gt(0)) contractDifference = amount.minus(analysis.total).abs().toFixed(2);
+  }
+  const contractMismatch = contractDifference !== null && contractDifference !== '0.00';
 
-type BOQUploadResult = {
-  success: true;
-  uploadId: string;
-  status: string;
-  report: BOQUploadReport;
-};
-
-export default function BOQTemplateClient({ projects }: { projects: { id: string, name: string }[] }) {
-  const [projectId, setProjectId] = useState<string>("");
-
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
-  const [isReviewing, setIsReviewing] = useState(false);
-  
-  const [uploadResult, setUploadResult] = useState<BOQUploadResult | null>(null);
-  const mountedRef = useRef(true);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-    };
-  }, []);
-
-  const handleDownload = async () => {
-    setIsDownloading(true);
+  function chooseFile(selected?: File) {
+    if (!selected || busy) return;
+    setError(''); setMessage('');
+    if (!/\.xlsx$/i.test(selected.name)) { setError('Choose an .xlsx workbook.'); return; }
+    if (selected.size === 0 || selected.size > 10 * 1024 * 1024) { setError('Choose a workbook larger than 0 bytes and no bigger than 10 MB.'); return; }
+    setFile(selected); setAnalysis(null); setMapping(null); setBreakdownMapping(null); setSheetName(''); setUpload(null); setApprovalConfirmation(false);
+    setProjectContractAmount(''); contractAmountEdited.current = false;
+  }
+  function onDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault(); setDragging(false);
+    if (event.dataTransfer.files.length > 1) { setError('Choose one BOQ workbook at a time.'); return; }
+    chooseFile(event.dataTransfer.files[0]);
+  }
+  async function analyze(nextSheet?: string, nextMapping?: WorkspaceMapping | null, nextBreakdownMapping?: WorkspaceBreakdownMapping | null, preview?: { offset?: number; sectionKey?: string | null }) {
+    if (!file || busy) return;
+    setBusy('analyze'); setError(''); setMessage('');
     try {
-      const res = await generateBOQTemplate(projectId || undefined);
-      if (!res.success) {
-        toast.error(res.error || "Download failed");
-        return;
+      const body = new FormData(); body.set('file', file);
+      if (projectId) body.set('projectId', projectId);
+      if (nextSheet) body.set('sheetName', nextSheet);
+      if (nextMapping) body.set('mapping', JSON.stringify(nextMapping));
+      if (nextBreakdownMapping) body.set('breakdownMapping', JSON.stringify(nextBreakdownMapping));
+      body.set('offset', String(preview?.offset ?? 0));
+      if (preview?.sectionKey) body.set('sectionKey', preview.sectionKey);
+      const response = await fetch('/api/boq-workspace/analyze', { method: 'POST', body });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not analyze this workbook.');
+      const result: WorkspaceAnalysis = data.analysis;
+      setAnalysis(result); setMapping(result.mapping); setBreakdownMapping(result.breakdownMapping); setSheetName(result.selectedSheet || '');
+      if (!projectName) setProjectName(result.suggestedProjectName);
+      if (!contractAmountEdited.current && result.itemCount > 0 && result.errors.length === 0 && Number.isFinite(Number(result.total)) && Number(result.total) > 0) {
+        setProjectContractAmount(result.total);
       }
-      const byteCharacters = atob(res.data!);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = res.fileName!;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      toast.success("Template downloaded successfully");
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const validationError = validateBOQUploadFile({ name: file.name, size: file.size });
-    if (validationError) {
-      toast.error(validationError);
-      e.target.value = "";
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadResult(null);
-
+      setMessage('Workbook analyzed. Review the sheet, columns and item preview before saving.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not analyze this workbook.'); }
+    finally { setBusy(null); }
+  }
+  async function confirmSource() {
+    if (!file || !analysis || !mapping || busy) return;
+    setBusy('confirm'); setError(''); setMessage('');
     try {
-      const formData = new FormData();
-      formData.set("projectId", projectId);
-      formData.set("file", file);
-      const res = await uploadAndParseBOQ(formData);
-      if (!mountedRef.current) return;
-
-      if (!res.success || !res.jobId) {
-        toast.error(res.error || "Upload could not be started. Please try again.");
-        setIsUploading(false);
-        e.target.value = "";
-        return;
-      }
-
-      const jobId = res.jobId;
-      const pollStartedAt = Date.now();
-      const poll = async () => {
-        if (!mountedRef.current) return;
-
-        if (Date.now() - pollStartedAt >= 5 * 60 * 1000) {
-          toast.error("BOQ processing is taking longer than expected. Check the upload status or try again later.");
-          setIsUploading(false);
-          e.target.value = "";
-          return;
-        }
-
-        try {
-          const statusRes = await checkBoqUploadStatus(jobId);
-          if (!mountedRef.current) return;
-
-          if (!statusRes.success) {
-            toast.error(statusRes.error || "Could not check upload status. Please try again.");
-            setIsUploading(false);
-            e.target.value = "";
-            return;
-          }
-
-          if (statusRes.status === "COMPLETED") {
-            const finalResult = statusRes.result;
-            if (!finalResult?.success) {
-              toast.error(finalResult?.error || "BOQ processing failed. Please check the file and try again.");
-            } else {
-              setUploadResult(finalResult);
-            }
-            if (finalResult?.status === "VALIDATION_FAILED") {
-              toast.error("Validation failed. Please review the errors.");
-            } else if (finalResult?.success) {
-              toast.success("File uploaded and validated successfully!");
-            }
-            setTimeout(() => {
-              if (mountedRef.current) window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-            }, 100);
-            setIsUploading(false);
-            e.target.value = "";
-            return;
-          }
-
-          if (statusRes.status === "FAILED") {
-            toast.error(statusRes.error || "BOQ processing failed. Please check the file and try again.");
-            setIsUploading(false);
-            e.target.value = "";
-            return;
-          }
-
-          pollTimerRef.current = setTimeout(poll, 3000);
-        } catch {
-          if (!mountedRef.current) return;
-          toast.error("Could not check upload status. Please try again.");
-          setIsUploading(false);
-          e.target.value = "";
-        }
-      };
-      pollTimerRef.current = setTimeout(poll, 3000);
-    } catch {
-      toast.error("Upload could not be completed. Please try again.");
-      setIsUploading(false);
-      e.target.value = "";
-    }
-  };
-
-  const handleApprove = async () => {
-    if (!uploadResult?.uploadId) return;
-    setIsApproving(true);
+      const body = new FormData(); body.set('file', file); body.set('fileHash', analysis.fileHash);
+      body.set('sheetName', sheetName); body.set('mapping', JSON.stringify(mapping)); body.set('projectId', projectId); body.set('projectName', projectName);
+      body.set('breakdownMapping', JSON.stringify(breakdownMapping ?? {}));
+      body.set('projectContractAmount', projectContractAmount);
+      const response = await fetch('/api/boq-workspace/confirm', { method: 'POST', body });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not save this BOQ import.');
+      setUpload({ uploadId: data.uploadId, projectId: data.projectId, status: data.status,
+        fileName: file.name, fileUrl: data.report.fileUrl, grandTotal: Number(data.report.grandTotal),
+        validRowsCount: data.report.validRowsCount, warningRowsCount: data.report.warningRowsCount, errorRowsCount: data.report.errorRowsCount,
+        canSubmit: true, canApprove: selectedProject?.canApprove ?? canApprove, sheetName, issues: analysis.warnings });
+      setAnalysis(null); setMapping(null); setBreakdownMapping(null); setFile(null);
+      if (fileInput.current) fileInput.current.value = '';
+      setMessage('BOQ sheet confirmed and saved as an import draft. Review and approve it below.');
+      router.push(`/projects/${data.projectId}/boq`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save this BOQ import.'); }
+    finally { setBusy(null); }
+  }
+  async function review(action: 'SUBMIT_FOR_REVIEW' | 'RETURN_FOR_CORRECTION') {
+    if (!upload || busy) return;
+    setBusy('review'); setError('');
     try {
-      const res = await approveBOQUpload(uploadResult.uploadId);
-      if (res.success) {
-        toast.success("BOQ successfully approved and activated!");
-        setUploadResult({ ...uploadResult, status: "APPROVED" });
-      } else {
-        toast.error(res.error || "Failed to approve");
-      }
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setIsApproving(false);
-    }
-  };
-
-  const handleReview = async (action: 'SUBMIT_FOR_REVIEW' | 'RETURN_FOR_CORRECTION') => {
-    if (!uploadResult) return;
-    setIsReviewing(true);
+      const result = await reviewBOQUpload(upload.uploadId, action);
+      if (!result.success) throw new Error('error' in result ? result.error : 'The import could not be approved.');
+      setUpload({ ...upload, status: result.status }); setApprovalConfirmation(false);
+      setMessage(action === 'SUBMIT_FOR_REVIEW' ? 'Submitted for review.' : 'Returned for correction. Choose a corrected workbook to continue.'); router.refresh();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not update the review.'); }
+    finally { setBusy(null); }
+  }
+  async function approve() {
+    if (!upload || busy) return;
+    setBusy('approve'); setError('');
     try {
-      const result = await reviewBOQUpload(uploadResult.uploadId, action);
-      if (!result.success) {
-        toast.error(result.error || 'Unable to update review status.');
-        return;
-      }
-      setUploadResult({ ...uploadResult, status: result.status });
-      toast.success(action === 'SUBMIT_FOR_REVIEW' ? 'Submitted for review.' : 'Returned for correction. Upload a corrected workbook.');
-    } catch {
-      toast.error('Unable to update review status. Please try again.');
-    } finally {
-      setIsReviewing(false);
-    }
-  };
+      const result = await approveBOQUpload(upload.uploadId);
+      if (!result.success) throw new Error('error' in result ? result.error : 'The import could not be approved.');
+      setUpload({ ...upload, status: 'APPROVED' }); setApprovalConfirmation(false);
+      setMessage('BOQ approved and locked. Open the project BOQ or continue to work packages.'); router.refresh();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not approve the BOQ.'); }
+    finally { setBusy(null); }
+  }
+  function selectDestination(value: 'existing' | 'new') {
+    setDestination(value); setError('');
+    if (value === 'new') setProjectId('');
+    else destinationInput.current?.focus();
+  }
+  const query = search.trim().toLocaleLowerCase();
+  const visibleProjects = projects.filter(project => !query || [project.name, project.id, project.fileName].some(value => value?.toLocaleLowerCase().includes(query)));
+  const groups = [
+    { title: 'BOQ Action Required', approved: false }, { title: 'Approved BOQs', approved: true },
+  ];
 
-  return (
-    <div className={styles.container}>
-      <header className={styles.header}>
-        <div>
-          <Link href="/projects" className={styles.backLink}>&larr; Back to Projects</Link>
-          <h1 className={styles.title}>BOQ Template Center</h1>
-          <p className={styles.subtitle}>Download the official blank BOQ Excel template, encode data offline, and upload the completed template back to the ERP.</p>
+  return <div className={styles.container}>
+    <header className={styles.header}><h1>BOQ Workspace</h1><p>Upload a workbook, confirm its BOQ source, then review and approve it with your project team.</p></header>
+    {error && <div role="alert" className={styles.error}><strong>Unable to continue</strong><span>{error}</span></div>}
+    {message && <p role="status" className={styles.message}>{message}</p>}
+    <section className={styles.intake} aria-label="BOQ workbook intake" aria-busy={busy === 'analyze' || busy === 'confirm'}>
+      <div className={styles.intakeBody}>
+        <div className={`${styles.dropzone} ${dragging ? styles.dragging : ''}`} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
+          <div className={styles.uploadIcon}><UploadCloud size={28} strokeWidth={1.6} /></div>
+          <h2>{file ? file.name : 'Drop the BOQ workbook here'}</h2>
+          <p>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to analyze` : 'XLSX up to 10 MB'}</p>
+          <label className={styles.fileButton}><FileSpreadsheet size={18} /> {file ? 'Choose another file' : 'Choose file'}
+            <input ref={fileInput} aria-label="Choose BOQ workbook" className={styles.fileInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event: ChangeEvent<HTMLInputElement>) => chooseFile(event.target.files?.[0])} disabled={!!busy || !canAnalyze} />
+          </label>
+          {file && !busy && <button className={styles.clearFile} onClick={() => { setFile(null); setAnalysis(null); setMapping(null); setSheetName(''); setProjectContractAmount(''); contractAmountEdited.current = false; if (fileInput.current) fileInput.current.value = ''; }} aria-label="Remove selected workbook"><X size={16} /></button>}
         </div>
-      </header>
-
-      <div className={styles.card}>
-        <div className={styles.projectSelector}>
-          <label className={styles.label}>Target Project (Optional: Leave blank to auto-create a new project)</label>
-          <select 
-            value={projectId} 
-            onChange={(e) => setProjectId(e.target.value)}
-            className={styles.select}
-          >
-            <option value="">-- Create a New Project automatically from uploaded file --</option>
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+        <div className={styles.analysisBar}>
+          <ol aria-label="Workbook intake progress" className={styles.progress}>
+            <li className={file || analysis || upload ? styles.current : ''}>{file || analysis || upload ? <Check size={15} /> : null}File selected</li>
+            <li className={analysis || upload ? styles.current : ''}>{analysis || upload ? <Check size={15} /> : null}Checking and reading the workbook</li>
+            <li className={upload ? styles.current : ''}>{upload ? <Check size={15} /> : null}Confirm BOQ sheet</li>
+          </ol>
+          <button className={styles.primary} disabled={!file || !!busy || !canAnalyze || (destination === 'existing' && !projectId)} onClick={() => analyze()}>{busy === 'analyze' && <Loader2 size={17} className={styles.spin} />} {busy === 'analyze' ? 'Analyzing workbook…' : 'Analyze this workbook'}</button>
         </div>
+        <p className={styles.note}>Analyzing as {actorName} · {actorRole.replaceAll('_', ' ')}. Analysis creates no project or BOQ. Your original workbook is preserved unchanged when you confirm its source.</p>
+        {!canAnalyze && <p className={styles.warning}>Your account can view BOQs. An authorized project editor must upload a workbook.</p>}
+        {(destination !== 'quick' || analysis) && <div className={styles.destination}>
+          <div><label htmlFor="boq-destination">Target project</label><select ref={destinationInput} id="boq-destination" value={projectId} disabled={!!busy} onChange={event => { setProjectId(event.target.value); setDestination(event.target.value ? 'existing' : 'new'); }}>
+            <option value="" disabled={!canCreate}>Create a new project after confirmation</option>
+            {projects.map(project => <option key={project.id} value={project.id} disabled={!project.canEdit || project.boqLocked || project.hasBOQ}>{project.name}{project.boqLocked || project.hasBOQ ? ' — BOQ already exists' : ''}</option>)}
+          </select></div>
+          {!projectId && <><div><label htmlFor="boq-project-name">New project name</label><input id="boq-project-name" value={projectName} maxLength={191} onChange={event => setProjectName(event.target.value)} disabled={!!busy || !canCreate} placeholder="Project name" /></div><div><label htmlFor="boq-contract-amount">Signed contract value</label><input id="boq-contract-amount" type="number" min="0.01" step="0.01" required value={projectContractAmount} onChange={event => { contractAmountEdited.current = true; setProjectContractAmount(event.target.value); setError(current => current === 'The BOQ total must match the entered signed contract value.' ? '' : current); }} disabled={!!busy || !canCreate} placeholder="Prefilled after workbook analysis" /></div></>}
+          <p>{projectId ? 'The existing project contract value stays unchanged. The BOQ must reconcile before approval.' : 'Prefilled from the analyzed BOQ total as an unverified starting value. Check it against the signed contract and correct it if needed. Verification and approval follow in the BOQ module.'}</p>
+          {contractMismatch && <div className={styles.warning} role="alert"><strong>BOQ and contract amounts differ</strong><dl className={styles.uploadFacts}><div><dt>Recorded contract value</dt><dd>{money(enteredContract)}</dd></div><div><dt>BOQ item total</dt><dd>{money(analysis!.total)}</dd></div><div><dt>Difference to resolve</dt><dd>{money(contractDifference!)}</dd></div></dl><p>You can save this as a draft and resolve the difference in the BOQ review. Approval stays blocked until the amounts reconcile. Check the contract value or correct the BOQ items; neither amount is replaced automatically.</p>{!projectId && <button type="button" className={styles.secondary} disabled={!!busy} onClick={() => { contractAmountEdited.current = false; setProjectContractAmount(analysis!.total); setError(''); }}>Use BOQ total in this field</button>}</div>}
+        </div>}
       </div>
+      <div className={styles.moreWays}><span>More ways to start:</span><button disabled={!!busy || !canAnalyze} onClick={() => selectDestination('existing')}>Upload to an existing project</button><button disabled={!!busy || !canCreate} onClick={() => selectDestination('new')}>Start a new project first</button></div>
+    </section>
 
-      <div className={styles.panels}>
-        <div className={styles.panel}>
-          <div className={`${styles.iconWrapper} ${styles.blue}`}>
-            <FileSpreadsheet size={32} />
-          </div>
-          <h3 className={styles.panelTitle}>1. Download Template</h3>
-          <p className={styles.panelDesc}>Get the official Excel template pre-filled with project details.</p>
-          <button
-            onClick={handleDownload}
-            disabled={isDownloading}
-            className={styles.primaryBtn}
-          >
-            {isDownloading ? <Loader2 size={18} className={styles.spin} /> : <Download size={18} style={{ marginRight: '8px' }} />}
-            Download Final BOQ Template
-          </button>
-        </div>
-
-        <div className={styles.panel}>
-          <div className={`${styles.iconWrapper} ${styles.green}`}>
-            <Upload size={32} />
-          </div>
-          <h3 className={styles.panelTitle}>2. Upload Completed BOQ</h3>
-          <p className={styles.panelDesc}>Upload your encoded .xlsx file for validation and extraction.</p>
-          
-          <div className={styles.uploadArea}>
-            <label className={`${styles.uploadLabel} ${isUploading ? styles.disabled : ''}`}>
-              {isUploading ? (
-                <Loader2 size={32} className={styles.spin} color="#10b981" />
-              ) : (
-                <>
-                  <Upload size={32} color="#10b981" />
-                  <span className={styles.uploadText}>Click to browse (.xlsx only)</span>
-                </>
-              )}
-              <input type="file" className={styles.hiddenInput} accept=".xlsx" onChange={handleFileUpload} disabled={isUploading} />
-            </label>
-          </div>
-        </div>
+    {analysis && <section className={styles.review} aria-labelledby="source-heading">
+      <header className={styles.sectionHeader}><div><h2 id="source-heading">Confirm BOQ source</h2><p>Select the sheet and check how its columns map to BOQ items.</p></div><span className={styles.badge}>Not saved yet</span></header>
+      <div className={styles.mappingGrid}>
+        <div><label htmlFor="boq-source-sheet">BOQ sheet</label><select id="boq-source-sheet" value={sheetName} disabled={!!busy} onChange={event => { setSheetName(event.target.value); setMapping(null); setBreakdownMapping(null); void analyze(event.target.value); }}><option value="" disabled>Choose the BOQ sheet</option>{analysis.sheets.map(sheet => <option key={sheet.name} value={sheet.name}>{sheet.name} · {sheet.rowCount} rows{sheet.candidate ? ' · BOQ columns found' : ''}</option>)}</select></div>
+        {mapping && <div><label htmlFor="boq-header-row">Header row</label><input id="boq-header-row" type="number" min={1} max={1000} value={mapping.headerRow} disabled={!!busy} onChange={event => setMapping({ ...mapping, headerRow: Number(event.target.value) })} /></div>}
       </div>
+      {mapping && <><div className={styles.mappingGrid}>{mappingFields.map(field => <div key={field.key}><label htmlFor={`boq-column-${field.key}`}>{field.label}{field.required ? ' *' : ' (optional)'}</label><select id={`boq-column-${field.key}`} disabled={!!busy} value={mapping[field.key] ?? ''} onChange={event => setMapping({ ...mapping, [field.key]: event.target.value ? Number(event.target.value) : null })}><option value="">{field.required ? 'Choose a column' : 'Not present'}</option>{analysis.columns.map(column => <option key={column.index} value={column.index}>{columnDisplayName(column)}</option>)}</select></div>)}</div><details className={styles.issues}><summary>Optional cost breakdown mapping</summary><div className={styles.mappingGrid}>{WORKSPACE_BREAKDOWN_FIELDS.map(field => <div key={field}><label htmlFor={`boq-breakdown-${field}`}>{field.replace(/[A-Z]/g, letter => ` ${letter.toLowerCase()}`)}</label><select id={`boq-breakdown-${field}`} disabled={!!busy} value={breakdownMapping?.[field] ?? ''} onChange={event => setBreakdownMapping({ ...breakdownMapping, [field]: event.target.value ? Number(event.target.value) : null })}><option value="">Not present</option>{analysis.columns.map(column => <option key={column.index} value={column.index}>{columnDisplayName(column)}</option>)}</select></div>)}</div></details><button className={styles.secondary} disabled={!!busy || !validMapping} onClick={() => analyze(sheetName, mapping, breakdownMapping)}>Update item preview</button></>}
+      {analysis.columns.length > 0 && <details className={styles.issues} open={analysis.errors.some(issue => issue.row === 'header')}><summary>Column evidence and mapping help</summary><p>When headings repeat, choose which column the BOQ prices from. Column letters distinguish identical headings. Filled counts show cells below the selected header; priced rows have a description and a positive mapped quantity or amount. Counts help you inspect the source and do not select a column for you.</p><div className={styles.tableScroll} role="region" aria-label="Workbook column evidence" tabIndex={0}><table><caption className={styles.srOnly}>Column positions and populated-row counts</caption><thead><tr><th scope="col">Column</th><th scope="col">Workbook heading</th><th scope="col">Filled body rows</th><th scope="col">Filled priced rows</th></tr></thead><tbody>{analysis.columns.map(column => <tr key={column.index}><th scope="row">{columnLetter(column.index)}</th><td>{column.label}</td><td>{column.populatedRows ?? '—'}</td><td>{column.pricedRowCount ? `${column.pricedPopulatedRows ?? 0} of ${column.pricedRowCount}` : 'Set a description and quantity/amount mapping first'}</td></tr>)}</tbody></table></div><p>Choose the sheet, header row and columns above, then click Update item preview. An empty rival column stays unselected until you make a choice.</p></details>}
+      {(analysis.errors.length > 0 || analysis.warnings.length > 0) && <div className={styles.issues}>{analysis.errors.length > 0 && <div><h3>Resolve before confirming</h3><p>Your workbook and mapping choices are kept here. Correct the indicated sheet or column and update the preview; confirmation stays blocked while required fields are unresolved.</p><ul>{analysis.errors.slice(0, 20).map((issue, index) => <li key={index}>Row {issue.row} · {issue.field}: {issue.message}</li>)}</ul>{analysis.errors.length > 20 && <p>{analysis.errors.length - 20} more issues. Correct the workbook and analyze again.</p>}</div>}{analysis.warnings.length > 0 && <details><summary>{analysis.warnings.length} review {analysis.warnings.length === 1 ? 'note' : 'notes'}</summary><ul>{analysis.warnings.slice(0, 20).map((issue, index) => <li key={index}>Row {issue.row} · {issue.field}: {issue.message}</li>)}</ul></details>}</div>}
+      {analysis.itemCount > 0 && <><div className={styles.previewHeader}><h3>Review all BOQ items</h3><p>Full BOQ total · {analysis.itemCount} items · {money(analysis.total)}</p></div>
+        <div className={styles.mappingGrid}><div><label htmlFor="boq-preview-section">Filter by section</label><select id="boq-preview-section" value={analysis.selectedSectionKey ?? ''} disabled={!!busy} onChange={event => void analyze(sheetName, mapping, breakdownMapping, { offset: 0, sectionKey: event.target.value || null })}><option value="">All sections · {analysis.itemCount}</option>{analysis.sections.map(section => <option key={section.key} value={section.key}>{section.order}. {section.name} · row {section.startRow ?? '—'} · {section.itemCount} items</option>)}</select></div><div><label>Filtered BOQ value</label><p>{analysis.filteredItemCount} items · {money(analysis.filteredTotal)}</p></div></div>
+        <div className={styles.analysisBar}><p className={styles.note}>Showing {analysis.filteredItemCount === 0 ? 0 : analysis.previewOffset + 1}–{Math.min(analysis.previewOffset + analysis.preview.length, analysis.filteredItemCount)} of {analysis.filteredItemCount} filtered items.</p><div><button type="button" className={styles.secondary} disabled={!!busy || analysis.previewOffset === 0} onClick={() => void analyze(sheetName, mapping, breakdownMapping, { offset: Math.max(0, analysis.previewOffset - analysis.previewPageSize), sectionKey: analysis.selectedSectionKey })}><ChevronLeft size={16} />Previous</button>{' '}<button type="button" className={styles.secondary} disabled={!!busy || analysis.previewOffset + analysis.preview.length >= analysis.filteredItemCount} onClick={() => void analyze(sheetName, mapping, breakdownMapping, { offset: analysis.previewOffset + analysis.previewPageSize, sectionKey: analysis.selectedSectionKey })}>Next<ChevronRight size={16} /></button></div></div>
+        {analysis.preview.length > 0 ? <><div className={styles.tableScroll} role="region" aria-label="BOQ item preview" tabIndex={0}><table><caption className={styles.srOnly}>BOQ items {analysis.previewOffset + 1} through {analysis.previewOffset + analysis.preview.length} of {analysis.filteredItemCount}</caption><thead><tr><th>Row / item</th><th>Description</th><th>Unit</th><th>Quantity</th><th>Used unit rate</th><th>Source stated rate</th><th>Amount</th></tr></thead><tbody>{analysis.preview.map(item => <tr key={item.sourceRowNumber}><th scope="row">{item.sourceRowNumber} · {item.itemCode || `ROW-${item.sourceRowNumber} (generated)`}</th><td>{item.description}</td><td>{item.unit}{item.unitDefaulted ? ' (assumed)' : ''}</td><td>{item.quantity.toLocaleString('en-PH')}{item.quantityDefaulted ? ' (assumed)' : ''}</td><td>{money(item.unitCost)}{item.rateDerived ? ' (derived from stated amount)' : ''}</td><td>{item.sourceUnitCost === null ? 'Not stated' : money(item.sourceUnitCost)}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div><p className={styles.hint}>Blank quantities and units are disclosed as assumptions for review. The stated amount remains authoritative; any used rate derived from it is shown beside the source rate.</p></> : <p className={styles.empty}>No BOQ items are available in this section.</p>}
+      </>}
+      <footer className={styles.confirmBar}><p>Confirming saves an unapproved import draft and the unchanged workbook. The BOQ becomes authoritative only after approval.</p><button className={styles.primary} disabled={!!busy || !sheetName || !validMapping || mappingChanged || analysis.errors.length > 0 || analysis.itemCount === 0 || (!projectId && (!canCreate || !projectName.trim() || !projectContractAmount.trim()))} onClick={confirmSource}>{busy === 'confirm' && <Loader2 size={17} className={styles.spin} />} {busy === 'confirm' ? 'Saving import draft…' : 'Confirm sheet & save draft'}</button></footer>
+    </section>}
 
-      {uploadResult && (
-        <div className={styles.card}>
-          <div className={styles.preservationBox}>
-            <h3 className={styles.preservationTitle}>Original Excel File Preserved</h3>
-            <p className={styles.preservationDesc}>
-              <strong>Original uploaded Excel file is preserved and unchanged.</strong> The system has securely saved your file in its exact original format, preserving all cell protections, formulas, letterheads, and layout settings.
-            </p>
-            {uploadResult.report.fileUrl && (
-              <a 
-                href={uploadResult.report.fileUrl} 
-                download={uploadResult.report.fileName}
-                className={styles.preservationBtn}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Download size={16} style={{ marginRight: '8px' }} />
-                Download Original Excel File
-              </a>
-            )}
-          </div>
+    {upload && <section className={styles.review} aria-labelledby="upload-review-heading"><header className={styles.sectionHeader}><div><h2 id="upload-review-heading">BOQ import review</h2><p>{upload.fileName}{upload.sheetName ? ` · ${upload.sheetName}` : ''}</p></div><span className={`${styles.badge} ${approvedUpload ? styles.approved : ''}`}>{labels[upload.status] || upload.status}</span></header><dl className={styles.uploadFacts}><div><dt>Item amount total</dt><dd>{money(upload.grandTotal)}</dd></div><div><dt>Valid rows</dt><dd>{upload.validRowsCount}</dd></div><div><dt>Review notes</dt><dd>{upload.warningRowsCount}</dd></div></dl><p className={styles.note}>The original workbook is preserved. Approval reconciles its stated amounts with the project contract and locks the BOQ.</p><div className={styles.reviewLinks}>{upload.fileUrl && <a href={upload.fileUrl}>Download original workbook</a>}<Link href={`/projects/${upload.projectId}/boq`}>Open project BOQ <ArrowRight size={15} /></Link>{approvedUpload && <Link href={`/projects/${upload.projectId}/work-packages`}>Open work packages <ArrowRight size={15} /></Link>}</div>{!!upload.issues?.length && <details className={styles.issues}><summary>Validation details · {upload.issues.length}</summary><ul>{upload.issues.map((issue, index) => <li key={index}>Row {issue.row} · {issue.field}: {issue.message}</li>)}</ul></details>}{!approvedUpload && <div className={styles.reviewActions}>{upload.canApprove && upload.status !== 'RETURNED_FOR_CORRECTION' && <button className={styles.secondary} disabled={!!busy} onClick={() => review('RETURN_FOR_CORRECTION')}>Return for correction</button>}{upload.canSubmit && upload.status !== 'SUBMITTED_FOR_REVIEW' && upload.status !== 'RETURNED_FOR_CORRECTION' && <button className={styles.secondary} disabled={!!busy || upload.errorRowsCount > 0} onClick={() => review('SUBMIT_FOR_REVIEW')}>Submit for review</button>}{upload.canApprove && upload.status !== 'RETURNED_FOR_CORRECTION' && <button className={styles.primary} disabled={!!busy || upload.errorRowsCount > 0} onClick={() => { if (approvalConfirmation) void approve(); else setApprovalConfirmation(true); }}>{busy === 'approve' ? 'Approving…' : approvalConfirmation ? 'Confirm approval & import' : 'Approve and import'}</button>}</div>}{approvalConfirmation && <p role="alert" className={styles.warning}>This imports and locks the authoritative BOQ. <button className={styles.textButton} onClick={() => setApprovalConfirmation(false)}>Cancel approval</button></p>}</section>}
 
-          <div className={styles.reportHeader}>
-            <h2 className={styles.reportTitle}>Validation Report</h2>
-            {uploadResult.status === "VALIDATION_FAILED" ? (
-              <span className={`${styles.badge} ${styles.failed}`}>
-                <XCircle size={16} style={{ marginRight: '8px' }} /> Validation Failed
-              </span>
-            ) : uploadResult.status === "APPROVED" ? (
-              <span className={`${styles.badge} ${styles.approved}`}>
-                <CheckCircle size={16} style={{ marginRight: '8px' }} /> Approved
-              </span>
-            ) : uploadResult.status === 'SUBMITTED_FOR_REVIEW' || uploadResult.status === 'RETURNED_FOR_CORRECTION' ? (
-              <span className={`${styles.badge} ${styles.ready}`}>
-                {uploadResult.status === 'SUBMITTED_FOR_REVIEW' ? 'Submitted for Review' : 'Returned for Correction'}
-              </span>
-            ) : (
-              <span className={`${styles.badge} ${styles.ready}`}>
-                <CheckCircle size={16} style={{ marginRight: '8px' }} /> Ready for Import
-              </span>
-            )}
-          </div>
-
-          <div className={styles.statsGrid}>
-            <div className={styles.statCard}>
-              <div className={styles.statLabel}>Valid Rows</div>
-              <div className={`${styles.statValue} ${styles.green}`}>{uploadResult.report.validRowsCount}</div>
-            </div>
-            <div className={styles.statCard}>
-              <div className={styles.statLabel}>Errors</div>
-              <div className={`${styles.statValue} ${styles.red}`}>{uploadResult.report.errorRowsCount}</div>
-            </div>
-            <div className={styles.statCard}>
-              <div className={styles.statLabel}>Warnings</div>
-              <div className={`${styles.statValue} ${styles.yellow}`}>{uploadResult.report.warningRowsCount}</div>
-            </div>
-            <div className={styles.statCard}>
-              <div className={styles.statLabel}>Grand Total</div>
-              <div className={styles.statValue}>₱{uploadResult.report.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            </div>
-          </div>
-
-          {uploadResult.report.errors.length > 0 && (
-            <div className={styles.errorsSection}>
-              <h3 className={styles.errorsTitle}><AlertTriangle size={16} style={{ marginRight: '8px' }} /> Critical Errors</h3>
-              <div className={styles.tableWrapper}>
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th>Row</th>
-                      <th>Field</th>
-                      <th>Issue</th>
-                      <th>Suggested Correction</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {uploadResult.report.errors.map((err, idx) => (
-                      <tr key={idx}>
-                        <td>{err.row}</td>
-                        <td className={styles.highlight}>{err.field}</td>
-                        <td>{err.issue}</td>
-                        <td>{err.suggested}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <div className={styles.actions}>
-            <button className={styles.secondaryBtn} disabled={isApproving || isReviewing} onClick={() => setUploadResult(null)}>
-              Close Report
-            </button>
-            <button className={styles.warningBtn} disabled={isApproving || isReviewing || uploadResult.status === 'APPROVED' || uploadResult.status === 'RETURNED_FOR_CORRECTION'} onClick={() => handleReview('RETURN_FOR_CORRECTION')}>
-              Return for Correction
-            </button>
-            <button className={styles.submitBtn} disabled={isReviewing || isApproving || uploadResult.status === "VALIDATION_FAILED" || uploadResult.status === "APPROVED" || uploadResult.status === 'SUBMITTED_FOR_REVIEW' || uploadResult.status === 'RETURNED_FOR_CORRECTION'} onClick={() => handleReview('SUBMIT_FOR_REVIEW')}>
-              Submit for Review
-            </button>
-            <button 
-              className={styles.successBtn}
-              disabled={uploadResult.status === "VALIDATION_FAILED" || uploadResult.status === "APPROVED" || uploadResult.status === 'RETURNED_FOR_CORRECTION' || isApproving || isReviewing}
-              onClick={handleApprove}
-            >
-              {isApproving && <Loader2 size={16} className={styles.spin} />}
-              {uploadResult.status === "APPROVED" ? "BOQ Activated" : "Approve and Import"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    <section className={styles.board} aria-labelledby="workspace-projects"><div className={styles.boardHeader}><h2 id="workspace-projects">Projects</h2><span>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</span><div className={styles.search}><Search size={18} aria-hidden="true" /><input type="search" aria-label="Search BOQ projects" placeholder="Name, code, or file…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
+      {groups.map(group => { const items = visibleProjects.filter(project => (project.boqLocked && ['APPROVED', 'LOCKED'].includes(project.boqStatus)) === group.approved); return <details key={`${group.title}-${Boolean(query)}`} className={styles.projectGroup} open={query ? true : undefined}><summary><ChevronDown size={17} /><span>{group.title}</span><span className={styles.count}>· {items.length}</span></summary><div className={styles.projectList}>{items.length === 0 ? <p className={styles.empty}>{query ? 'No projects match your search in this group.' : group.approved ? 'Approved BOQs will appear here.' : 'No BOQ actions are required.'}</p> : items.map(project => <article className={styles.projectRow} key={project.id}><div><Link className={styles.projectName} href={`/projects/${project.id}/boq`}>{project.name}</Link><p>{project.fileName || 'No workbook confirmed yet'}</p><span className={styles.smallStatus}>{group.approved ? 'Approved & locked' : project.hasBOQ ? 'Draft BOQ' : project.uploadStatus ? labels[project.uploadStatus] || project.uploadStatus : 'BOQ not started'}</span></div><div className={styles.projectActions}><span>{money(project.contractAmount)}</span>{!project.hasBOQ && project.uploadId && project.uploadStatus !== 'COMMITTED' ? <Link href={`/boq?upload=${project.uploadId}`} onClick={() => setUpload(null)}>Review import <ArrowRight size={15} /></Link> : <Link href={`/projects/${project.id}/boq`}>{group.approved ? 'View BOQ' : project.hasBOQ ? (project.canEdit ? 'Edit BOQ' : 'View BOQ') : 'Open project'} <ArrowRight size={15} /></Link>}{project.boqLocked && <Link href={`/projects/${project.id}/work-packages`}>Work packages <ArrowRight size={15} /></Link>}</div></article>)}</div></details>; })}
+    </section>
+  </div>;
 }

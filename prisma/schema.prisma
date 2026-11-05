@@ -3636,7 +3636,7 @@ model ProjectSchedule {
   status             String    @default("DRAFT") // DRAFT, BASELINE, REVISED, COMPLETED
   calendarDays       Int       @default(0)
   workingDays        Int       @default(0)
-  holidays           String? // JSON string of dates
+  holidays           String? @db.LongText // JSON string of dates
   workDaysConfig     String? @db.LongText // JSON e.g. ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
   lockedBOQVersionId     String?
@@ -3765,7 +3765,7 @@ model ScheduleActivity {
 
   activityType             String?
   systemOrArea             String?
-  predecessorData          String? // JSON representation for complex dependencies
+  predecessorData          String? @db.LongText // JSON representation for complex dependencies
   allocatedAmount          Decimal @default(0)
   classificationConfidence Float?
   aiRationale              String?
@@ -3983,7 +3983,7 @@ model AiChatMessage {
   role                  String // user, assistant, system
   message               String @db.LongText
   authorizedContextUsed String? @db.LongText // JSON of chunk IDs used
-  citedSources          String? // JSON of source IDs
+  citedSources          String? @db.LongText // JSON of source IDs
   projectId             String?
   createdAt             DateTime @default(now())
 
@@ -4045,13 +4045,13 @@ model AiRagKeywordRegistry {
   relatedModule            String?
   databaseTable            String?
   databaseField            String?
-  businessMeaning          String?
-  synonyms                 String? // JSON or comma separated
-  aliases                  String? // JSON or comma separated
-  abbreviations            String? // JSON or comma separated
-  relatedTerms             String? // JSON or comma separated
-  exampleUserQuestions     String? // JSON
-  requiredRoleAccess       String? // JSON array of roles
+  businessMeaning          String? @db.LongText
+  synonyms                 String? @db.LongText // JSON or comma separated
+  aliases                  String? @db.LongText // JSON or comma separated
+  abbreviations            String? @db.LongText // JSON or comma separated
+  relatedTerms             String? @db.LongText // JSON or comma separated
+  exampleUserQuestions     String? @db.LongText // JSON
+  requiredRoleAccess       String? @db.LongText // JSON array of roles
   requiredModulePermission String? @db.LongText // JSON array
   confidentialityLevel     String  @default("PUBLIC") // PUBLIC, INTERNAL, RESTRICTED, CONFIDENTIAL
   projectScoped            Boolean @default(false)
@@ -4094,7 +4094,7 @@ model AiRagSchemaMap {
   comparable         Boolean  @default(false)
   aggregatable       Boolean  @default(false)
   confidential       Boolean  @default(false)
-  requiredAccessRole String? // JSON
+  requiredAccessRole String? @db.LongText // JSON
   requiredPermission String? @db.LongText // JSON
   projectScoped      Boolean  @default(true)
   createdAt          DateTime @default(now())
@@ -4132,19 +4132,19 @@ model AiKnowledgeMap {
   fieldName          String?
   fieldLabel         String?
   normalizedName     String
-  businessMeaning    String?
-  detectedKeywords   String? // JSON
-  generatedAliases   String? // JSON
-  generatedSynonyms  String? // JSON
-  abbreviations      String? // JSON
-  relatedTerms       String? // JSON
-  relatedModules     String? // JSON
-  relatedTables      String? // JSON
-  relatedFields      String? // JSON
+  businessMeaning    String? @db.LongText
+  detectedKeywords   String? @db.LongText // JSON
+  generatedAliases   String? @db.LongText // JSON
+  generatedSynonyms  String? @db.LongText // JSON
+  abbreviations      String? @db.LongText // JSON
+  relatedTerms       String? @db.LongText // JSON
+  relatedModules     String? @db.LongText // JSON
+  relatedTables      String? @db.LongText // JSON
+  relatedFields      String? @db.LongText // JSON
   relationshipType   String?
-  sampleQuestions    String? // JSON
+  sampleQuestions    String? @db.LongText // JSON
   accessLevel        String    @default("PUBLIC")
-  requiredRole       String? // JSON
+  requiredRole       String? @db.LongText // JSON
   requiredPermission String? @db.LongText // JSON
   projectScoped      Boolean   @default(false)
   confidential       Boolean   @default(false)
@@ -4162,13 +4162,13 @@ model AiKnowledgeMap {
 model AiComparisonMap {
   id                  String   @id @default(cuid())
   comparisonName      String
-  userQuestionPattern String? // JSON array of strings
+  userQuestionPattern String? @db.LongText // JSON array of strings
   primaryModule       String
   primaryTable        String
   primaryField        String
-  relatedModules      String? // JSON
-  relatedTables       String? // JSON
-  relatedFields       String? // JSON
+  relatedModules      String? @db.LongText // JSON
+  relatedTables       String? @db.LongText // JSON
+  relatedFields       String? @db.LongText // JSON
   comparisonLogic     String // e.g., "SUBTRACT", "VARIANCE_PERCENTAGE", "CROSS_MODULE_SUM"
   calculationFormula  String? @db.LongText
   requiredPermission  String? @db.LongText // JSON
@@ -4185,7 +4185,7 @@ model AiUiActionRegistry {
   normalizedLabel String
   componentOrPage String?
   actionType      String? // button, link, title, form_field
-  aliases         String? // JSON
+  aliases         String? @db.LongText // JSON
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -4199,7 +4199,7 @@ model AiSystemEnumRegistry {
   normalizedValue String
   enumCategory    String? // e.g., STATUS, RISK_LEVEL, APPROVAL_STATE
   businessMeaning String?
-  aliases         String? // JSON
+  aliases         String? @db.LongText // JSON
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -4310,7 +4310,7 @@ model SecurityIncident {
   countermeasure        String?
   result                String? @db.LongText
   dataExposure          String?
-  relatedEventIds       String? // JSON Array
+  relatedEventIds       String? @db.LongText // JSON Array
   timelineJson          String? @db.LongText
   evidenceJson          String? @db.LongText
   linkedSimulationRunId String?
@@ -4737,7 +4737,7 @@ model ScheduleGenerationAudit {
   reasoningSetting       String?
   requestTimestamp       DateTime?
   responseTimestamp      DateTime?
-  tokenUsage             String? // JSON { prompt, completion, total }
+  tokenUsage             String? @db.LongText // JSON { prompt, completion, total }
   resultStatus           String?
   validationResults      String? @db.LongText // JSON
   correctionAttemptCount Int       @default(0)
@@ -5041,6 +5041,50 @@ model PasswordRecoveryToken {
   @@index([userId])
   @@index([purpose, expiresAt])
   @@index([tokenHash, consumedAt, revokedAt])
+}
+
+// Versioned review evidence is separate from the existing ERP BOQ projection.
+model BOQReviewState {
+  id         String   @id @default(cuid())
+  projectId  String
+  versionId  String   @unique
+  rowVersion Int      @default(0)
+  dataJson   String   @db.LongText
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// Operational commitments and measured entries never modify frozen baselines.
+model WorkPackageExecutionState {
+  id         String   @id @default(cuid())
+  projectId  String   @unique
+  rowVersion Int      @default(0)
+  dataJson   String   @db.LongText
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model WorkPackageCapacityGrant {
+  id         String    @id @default(cuid())
+  projectId  String
+  userId     String
+  capacity   String
+  grantedBy  String
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([projectId, userId, capacity])
+}
+
+model WorkPackageMaterialInventoryState {
+  id String @id
+  rowVersion Int @default(0)
+  dataJson String @db.LongText
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PasswordRecoveryRateLimit {

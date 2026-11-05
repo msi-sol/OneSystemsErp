@@ -2,11 +2,10 @@
 import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { logAudit } from '@/lib/workflow';
 
-const prisma = new PrismaClient();
 
 export async function submitAIOverrideRequest(data: {
   validationLogId: string;
