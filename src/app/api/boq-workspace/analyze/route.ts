@@ -4,7 +4,7 @@ import { analyzeBOQWorkbook, MAX_WORKSPACE_FILE_BYTES, normalizeWorkspaceBreakdo
 import { authorizeWorkspaceAnalyze } from '@/lib/boq/workspace-service';
 import { WorkspaceError } from '@/lib/boq/workspace-types';
 
-const MAX_MULTIPART_BYTES = MAX_WORKSPACE_FILE_BYTES + 128 * 1024;
+const MAX_MULTIPART_BYTES = MAX_WORKSPACE_FILE_BYTES + 2 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
@@ -18,13 +18,14 @@ export async function POST(request: Request) {
     if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') {
       throw new WorkspaceError('Choose an .xlsx workbook to analyze.', 400);
     }
-    if (!file.name || !/\.xlsx$/i.test(file.name)) throw new WorkspaceError('Only .xlsx workbooks are supported.', 400);
+    if (!file.name || !/\.(xlsx|pdf|docx)$/i.test(file.name)) throw new WorkspaceError('Choose Excel (.xlsx), PDF, or Word (.docx). Save older .xls/.doc files in a supported format.', 400);
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_WORKSPACE_FILE_BYTES) {
       throw new WorkspaceError('The workbook must be between 1 byte and 10 MiB.', 400);
     }
     const rawProjectId = form.get('projectId');
     if (rawProjectId !== null && typeof rawProjectId !== 'string') throw new WorkspaceError('Invalid target project.', 400);
     const projectId = typeof rawProjectId === 'string' && rawProjectId.trim() ? rawProjectId.trim() : null;
+    if (projectId) throw new WorkspaceError('BOQ Workspace creates new projects only. Open the existing project BOQ for source corrections.', 400);
     await authorizeWorkspaceAnalyze(actor, projectId);
 
     const rawSheetName = form.get('sheetName');
@@ -69,6 +70,8 @@ export async function POST(request: Request) {
       breakdownMapping,
       previewOffset,
       sectionKey: typeof rawSectionKey === 'string' && rawSectionKey ? rawSectionKey : null,
+      documentToken: typeof form.get('documentToken') === 'string' ? String(form.get('documentToken')) : null,
+      documentContext: `boq:${actor.id}:${projectId || 'new'}`,
     });
     return NextResponse.json({ success: true, analysis });
   } catch (error) {

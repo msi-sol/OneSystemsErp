@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useTransition } from 'react';
+import { materialQuantity, materialTotalCost } from '@/lib/procurement/material-values';
 import LockConsolidatedBOQButton from './LockConsolidatedBOQButton';
 import GenerateMRFModal from './GenerateMRFModal';
 import AddManualMaterialModal from './AddManualMaterialModal';
@@ -132,7 +133,7 @@ export default function ConsolidatedBOQViewer({
   const totalVOAdditive = consolidatedItems.reduce((sum: number, item: any) => sum + (item.voAdditiveCost || 0), 0);
   const totalVODeductive = consolidatedItems.reduce((sum: number, item: any) => sum + (item.voDeductiveCost || 0), 0);
   const totalRevisedValue = consolidatedItems.reduce((sum: number, item: any) => {
-    return sum + (item.revisedTotalCost > 0 ? item.revisedTotalCost : item.totalCost);
+    return sum + materialTotalCost(item);
   }, 0);
 
   return (
@@ -174,7 +175,11 @@ export default function ConsolidatedBOQViewer({
           )}
           {isLocked && selectedItemIds.size > 0 && canCreateMRF && (
             <button 
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => {
+                const generated = consolidatedItems.some(item => item.mappings?.some((mapping: { mappingType: string }) => mapping.mappingType === 'BENCHMARK_REVIEW'));
+                if (generated) window.location.assign(`/material-requests/create?projectId=${encodeURIComponent(projectId)}`);
+                else setIsModalOpen(true);
+              }}
               style={{
                 backgroundColor: 'var(--accent-color)',
                 color: '#000', border: 'none', padding: '8px 16px',
@@ -220,7 +225,7 @@ export default function ConsolidatedBOQViewer({
               ➕ Add Material Manually
             </button>
           )}
-          {isSuperAdmin && (
+          {isSuperAdmin && !isLocked && (
             <button
               onClick={handleDelete}
               disabled={isRegenerating}
@@ -303,7 +308,7 @@ export default function ConsolidatedBOQViewer({
           flexWrap: 'wrap'
         }}>
           <div style={{ flex: 1, minWidth: '140px' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Original Contract</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Original material budget</div>
             <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>₱ {totalOriginalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
           </div>
           <div style={{ flex: 1, minWidth: '140px' }}>
@@ -315,7 +320,7 @@ export default function ConsolidatedBOQViewer({
             <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#ff5252' }}>₱ {totalVODeductive.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
           </div>
           <div style={{ flex: 1, minWidth: '140px', borderLeft: '2px solid rgba(255,255,255,0.15)', paddingLeft: '20px' }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--accent-color)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Revised Contract</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--accent-color)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Revised material budget</div>
             <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--accent-color)' }}>₱ {totalRevisedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
           </div>
         </div>
@@ -473,7 +478,7 @@ export default function ConsolidatedBOQViewer({
                         fontSize: '0.75rem',
                         fontWeight: 'bold'
                       }}>
-                        ✓ AI Mapped
+                        {item.mappings?.some((mapping: { mappingType: string }) => mapping.mappingType === 'BENCHMARK_REVIEW') ? '✓ Reviewed benchmark' : item.mappings?.length ? '✓ Mapped source' : 'Saved material'}
                       </span>
                     )}
                   </td>
@@ -488,8 +493,8 @@ export default function ConsolidatedBOQViewer({
                       <td style={{ textAlign: 'right', color: item.voDeductiveQty > 0 ? '#c62828' : '#999', fontWeight: item.voDeductiveQty > 0 ? 'bold' : 'normal' }}>
                         {item.voDeductiveQty > 0 ? `-${item.voDeductiveQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 'bold', color: (item.revisedQuantity !== item.quantity && item.revisedQuantity > 0) ? 'var(--accent-color)' : '#000' }}>
-                        {(item.revisedQuantity > 0 ? item.revisedQuantity : item.quantity).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      <td style={{ textAlign: 'right', fontWeight: 'bold', color: materialQuantity(item) !== item.quantity ? 'var(--accent-color)' : '#000' }}>
+                        {materialQuantity(item).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                       </td>
                     </>
                   )}
@@ -501,8 +506,8 @@ export default function ConsolidatedBOQViewer({
                     ₱ {item.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   {showRevised && hasAnyVOImpact && (
-                    <td style={{ textAlign: 'right', fontWeight: 'bold', color: (item.revisedTotalCost > 0 && item.revisedTotalCost !== item.totalCost) ? 'var(--accent-color)' : '#000' }}>
-                      ₱ {(item.revisedTotalCost > 0 ? item.revisedTotalCost : item.totalCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <td style={{ textAlign: 'right', fontWeight: 'bold', color: materialTotalCost(item) !== item.totalCost ? 'var(--accent-color)' : '#000' }}>
+                      ₱ {materialTotalCost(item).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   )}
                 </tr>

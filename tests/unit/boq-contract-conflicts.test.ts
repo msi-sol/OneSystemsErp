@@ -167,6 +167,23 @@ describe('BOQ contract mismatch workflow', () => {
     expect(result).toMatchObject({ success: true, status: 'APPROVED' });
     expect(approveAndLockDraftBOQ).toHaveBeenCalledTimes(1);
     expect(approval.tx.bOQReviewState.updateMany).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(approval.state.dataJson).finalApproval.note).toBeUndefined();
+  });
+
+  test('preserves an explicit PM note with the exact approved checksum without rewriting contract values', async () => {
+    const approval = reviewHarness({ contractAmount: 100, contractVerified: true, reviewedChecksum: 'checksum-1' });
+    await reviewBOQModule(projectId, { id: 'manager', role: 'PROJECT_MANAGER' }, {
+      action:'approve',versionId,expectedChecksum:'checksum-1',expectedRowVersion:2,approvalNote:'  Reviewed signed sample; approved for local testing.  ',
+    });
+    expect(JSON.parse(approval.state.dataJson).finalApproval).toMatchObject({actorId:'manager',checksum:'checksum-1',note:'Reviewed signed sample; approved for local testing.'});
+    expect(approval.project.contractAmount).toBe(100);
+  });
+
+  test('rejects a malformed approval note and still refuses a stale Engineer review', async () => {
+    const approval = reviewHarness({ contractAmount: 100, contractVerified: true, reviewedChecksum: 'old-checksum' });
+    await expect(reviewBOQModule(projectId,{id:'manager',role:'PROJECT_MANAGER'},{action:'approve',versionId,expectedChecksum:'checksum-1',expectedRowVersion:2,approvalNote:42})).rejects.toThrow('optional approval note');
+    await expect(reviewBOQModule(projectId,{id:'manager',role:'PROJECT_MANAGER'},{action:'approve',versionId,expectedChecksum:'checksum-1',expectedRowVersion:2,approvalNote:'A valid note does not bypass review.'})).rejects.toThrow('An engineer must review this exact BOQ');
+    expect(approval.tx.bOQReviewState.updateMany).not.toHaveBeenCalled();
   });
 
   test('reconciliation reports the preserved values and exact difference', () => {

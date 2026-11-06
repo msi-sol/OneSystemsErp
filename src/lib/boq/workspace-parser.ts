@@ -3,7 +3,8 @@ import JSZip from 'jszip';
 import { SaxesParser } from 'saxes';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { WorkspaceError, type WorkspaceAnalysis, type WorkspaceBreakdownMapping, type WorkspaceIssue, type WorkspaceItem, type WorkspaceMapping } from './workspace-types';
+import { WorkspaceError, type NonPricedSourceRow, type WorkspaceAnalysis, type WorkspaceBreakdownMapping, type WorkspaceIssue, type WorkspaceItem, type WorkspaceMapping } from './workspace-types';
+import { parseWorkspaceDocument } from './workspace-document';
 
 export const MAX_WORKSPACE_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 1200;
@@ -13,7 +14,7 @@ const MAX_SHEETS = 25;
 const MAX_ROWS_PER_SHEET = 10000;
 const MAX_COLUMNS_PER_SHEET = 100;
 const MAX_WORKBOOK_CELLS = 500000;
-const MAX_REPORTED_ISSUES = 500;
+const MAX_REPORTED_ISSUES = 2000;
 const PREVIEW_SIZE = 25;
 const SPREADSHEETML_NAMESPACE = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 
@@ -24,7 +25,7 @@ type CellRead = { value: unknown; formulaError?: string };
 const headerTerms: Record<MappingField, string[]> = {
   itemCode: ['item code', 'item no', 'item number', 'item ref', 'reference', 'code', 'item'],
   description: ['description', 'item description', 'work description', 'particulars', 'scope of work', 'work item'],
-  unit: ['unit', 'uom', 'unit of measure', 'unit measure'],
+  unit: ['unit', 'units', 'unit/s', 'uom', 'unit of measure', 'unit measure'],
   quantity: ['quantity', 'qty'],
   unitCost: ['unit cost', 'unit price', 'unit rate', 'rate', 'cost per unit'],
   amount: ['amount', 'total amount', 'line total', 'total cost', 'extended cost', 'contract amount'],
@@ -55,6 +56,35 @@ function cellText(value: unknown): string {
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
   return '';
+}
+
+/** Read labelled document metadata only; never infer a signed value from an item rate. */
+function readProjectMetadata(workbook: ExcelJS.Workbook) {
+  let projectName: string | null = null, contractAmount: string | null = null;
+  for (const sheet of workbook.worksheets.slice(0, 5)) {
+    for (let row = 1; row <= Math.min(60, sheet.rowCount); row += 1) {
+      const cells = Array.from({ length: Math.min(15, sheet.columnCount) }, (_, index) => cellText(readCell(sheet.getRow(row).getCell(index + 1), row, 'metadata', []).value));
+      for (let column = 0; column < cells.length; column += 1) {
+        const text = cells[column], inline = text.match(/^(?:project name|name of project|contract name)\s*:\s*(.+)$/i);
+        if (!projectName && inline) projectName = inline[1].trim().slice(0, 191);
+        const label = normalizeHeader(text.replace(/:$/, ''));
+        const next = cells.slice(column + 1).find(value => value.trim());
+        const bareProjectMetadata = label === 'project' && row <= 3 && cells.filter(Boolean).length === 2
+          && next && !Object.values(headerTerms).flat().map(normalizeHeader).includes(normalizeHeader(next));
+        if (!projectName && (['project name', 'name of project', 'contract name'].includes(label) || bareProjectMetadata) && next) projectName = next.slice(0, 191);
+        const contract = /^(?:signed contract value|contract amount|contract value|total contract price)\s*:\s*(.+)$/i.exec(text);
+        const candidate = contract?.[1] ?? (['signed contract value', 'contract amount', 'contract value', 'total contract price'].includes(label) ? next : null);
+        if (!contractAmount && candidate) {
+          const cleaned = candidate.replace(/(?:PHP|₱|,|\s)/gi, '');
+          if (/^\d+(?:\.\d{1,2})?$/.test(cleaned)) {
+            const value = new Prisma.Decimal(cleaned);
+            if (value.isFinite() && value.gt(0) && value.lte(Number.MAX_SAFE_INTEGER)) contractAmount = value.toFixed(2);
+          }
+        }
+      }
+    }
+  }
+  return { projectName, contractAmount };
 }
 
 function readCell(cell: ExcelJS.Cell, row: number, field: string, issues: WorkspaceIssue[]): CellRead {
@@ -127,7 +157,12 @@ function findHeader(worksheet: ExcelJS.Worksheet): HeaderDetection {
   const lastRow = Math.min(30, worksheet.rowCount || 1);
   for (let rowNumber = 1; rowNumber <= lastRow; rowNumber += 1) {
     const row = worksheet.getRow(rowNumber);
-    const headers = Array.from({ length: worksheet.columnCount }, (_, index) => cellText(row.getCell(index + 1).value));
+    // ExcelJS repeats a merged cell's value at every covered column. Only
+    // its master is a header; the covered cells do not introduce ambiguity.
+    const headers = Array.from({ length: worksheet.columnCount }, (_, index) => {
+      const cell = row.getCell(index + 1);
+      return cell.isMerged && cell.master.address !== cell.address ? '' : cellText(cell.value);
+    });
     const detection = mappingForHeaders(headers, rowNumber);
     const score = detection.recognized.size;
     if (score > bestScore) {
@@ -144,7 +179,7 @@ function validateZip(buffer: Buffer): void {
   }
 }
 
-async function inspectZip(buffer: Buffer): Promise<JSZip> {
+export async function inspectWorkspaceArchive(buffer: Buffer, kind: 'xlsx' | 'docx' = 'xlsx'): Promise<JSZip> {
   validateZip(buffer);
   let archive: JSZip;
   try {
@@ -155,7 +190,7 @@ async function inspectZip(buffer: Buffer): Promise<JSZip> {
   const entries = Object.values(archive.files).filter(entry => !entry.dir);
   if (entries.length > MAX_ZIP_ENTRIES) throw new WorkspaceError('The workbook contains too many archive entries.', 400);
   const names = new Set(entries.map(entry => entry.name));
-  if (!names.has('[Content_Types].xml') || !names.has('xl/workbook.xml')) {
+  if (!names.has('[Content_Types].xml') || !names.has(kind === 'docx' ? 'word/document.xml' : 'xl/workbook.xml')) {
     throw new WorkspaceError('The selected file is not a valid Excel workbook.', 400);
   }
   let uncompressedTotal = 0;
@@ -347,6 +382,7 @@ function readMappedCell(
   column: number | null,
   field: string,
   errors: WorkspaceIssue[],
+  warnings?: WorkspaceIssue[],
 ): unknown {
   if (column === null) return null;
   const temporary: WorkspaceIssue[] = [];
@@ -357,6 +393,24 @@ function readMappedCell(
       issue(errors, { row: rowNumber, field, message: `Formula result is invalid (${read.formulaError}).` });
     }
     return null;
+  }
+  // Approved intake rule: use the explicitly displayed fixed precision while
+  // retaining original workbook bytes and disclosing each changed value.
+  if (!['itemCode', 'description', 'unit'].includes(field) && typeof read.value === 'number' && Number.isFinite(read.value) && warnings) {
+    const format = (worksheet.getRow(rowNumber).getCell(column).numFmt || '').split(';')[0]
+      .replace(/"[^"]*"|\[[^\]]*\]|\\./g, '');
+    if (format && !/[ymdhs%e]/i.test(format)) {
+      const fixed = format.match(/0(?:[0#,?]*)\.([0]+)/);
+      const places = fixed ? fixed[1].length : /0/.test(format) && !format.includes('.') ? 0 : null;
+      if (places !== null && places <= 10) {
+        const original = new Prisma.Decimal(String(read.value));
+        const displayed = original.toDecimalPlaces(places, Prisma.Decimal.ROUND_HALF_UP);
+        if (!original.equals(displayed)) {
+          issue(warnings, { row: rowNumber, field, message: `Excel displayed precision (${places} decimal places) used: ${original.toString()} → ${displayed.toFixed(places)}. Original workbook retained.` });
+          return displayed.toNumber();
+        }
+      }
+    }
   }
   return read.value;
 }
@@ -481,6 +535,7 @@ function validateBreakdownMapping(mapping: WorkspaceBreakdownMapping, columnCoun
 }
 
 export async function parseWorkspaceWorkbook(options: {
+  nonPricedRows?: NonPricedSourceRow[];
   buffer: Buffer;
   fileName: string;
   selectedSheet?: string | null;
@@ -488,12 +543,19 @@ export async function parseWorkspaceWorkbook(options: {
   breakdownMapping?: WorkspaceBreakdownMapping | null;
   previewOffset?: number;
   sectionKey?: string | null;
+  documentToken?: string | null;
+  documentContext?: string;
+  trustedDocumentExtraction?: unknown;
 }): Promise<{ analysis: WorkspaceAnalysis; items: WorkspaceItem[] }> {
   const { buffer, fileName } = options;
+  if (options.nonPricedRows !== undefined && (!Array.isArray(options.nonPricedRows) || options.nonPricedRows.length > 100 || options.nonPricedRows.some(row => !row || !Number.isSafeInteger(row.rowNumber) || row.rowNumber < 1 || typeof row.reason !== 'string' || row.reason.trim().length < 5 || row.reason.length > 300) || new Set(options.nonPricedRows.map(row => row.rowNumber)).size !== options.nonPricedRows.length)) {
+    throw new WorkspaceError('Each non-priced source row needs a unique row number and a reason of 5–300 characters.', 400);
+  }
+  if (/\.(pdf|docx)$/i.test(fileName)) return parseWorkspaceDocument(options, parseWorkspaceWorkbook);
   if (!/\.xlsx$/i.test(fileName)) throw new WorkspaceError('Only .xlsx workbooks are supported.', 400);
   if (!buffer.byteLength) throw new WorkspaceError('The workbook is empty.', 400);
   if (buffer.byteLength > MAX_WORKSPACE_FILE_BYTES) throw new WorkspaceError('The workbook must be 10 MiB or smaller.', 400);
-  const archive = await inspectZip(buffer);
+  const archive = await inspectWorkspaceArchive(buffer);
   const analysisBuffer = await analysisCopy(buffer, archive);
 
   const workbook = new ExcelJS.Workbook();
@@ -541,6 +603,7 @@ export async function parseWorkspaceWorkbook(options: {
 
   const worksheet = selected?.worksheet;
   const mapping = options.mapping ?? selected?.detection.mapping ?? null;
+  if (worksheet && options.nonPricedRows?.some(row => !mapping || row.rowNumber <= mapping.headerRow || row.rowNumber > worksheet.rowCount)) throw new WorkspaceError('A non-priced source decision must refer to a body row in the selected sheet.', 400);
   if (worksheet && mapping) validateMapping(mapping, worksheet.columnCount, worksheet.rowCount, parseErrors);
   const safeHeaderRow = mapping && Number.isSafeInteger(mapping.headerRow) && mapping.headerRow >= 1 && mapping.headerRow <= (worksheet?.rowCount || 1)
     ? mapping.headerRow
@@ -614,22 +677,57 @@ export async function parseWorkspaceWorkbook(options: {
         continue;
       }
       const rowErrors: WorkspaceIssue[] = [];
-      const itemCodeValue = readMappedCell(worksheet, rowNumber, mapping.itemCode, 'itemCode', rowErrors);
-      const descriptionValue = readMappedCell(worksheet, rowNumber, mapping.description, 'description', rowErrors);
-      const unitValue = readMappedCell(worksheet, rowNumber, mapping.unit, 'unit', rowErrors);
-      const quantityValue = readMappedCell(worksheet, rowNumber, mapping.quantity, 'quantity', rowErrors);
-      const unitCostValue = readMappedCell(worksheet, rowNumber, mapping.unitCost, 'unitCost', rowErrors);
-      const amountValue = readMappedCell(worksheet, rowNumber, mapping.amount, 'amount', rowErrors);
+      const itemCodeValue = readMappedCell(worksheet, rowNumber, mapping.itemCode, 'itemCode', rowErrors, warnings);
+      const descriptionValue = readMappedCell(worksheet, rowNumber, mapping.description, 'description', rowErrors, warnings);
+      const unitValue = readMappedCell(worksheet, rowNumber, mapping.unit, 'unit', rowErrors, warnings);
+      const quantityValue = readMappedCell(worksheet, rowNumber, mapping.quantity, 'quantity', rowErrors, warnings);
+      const unitCostValue = readMappedCell(worksheet, rowNumber, mapping.unitCost, 'unitCost', rowErrors, warnings);
+      const amountValue = readMappedCell(worksheet, rowNumber, mapping.amount, 'amount', rowErrors, warnings);
       const description = cellText(descriptionValue);
       const itemCode = cellText(itemCodeValue);
+      const blank = (value: unknown) => value === null || value === undefined || cellText(value) === '';
+      const nonPricedDecision = options.nonPricedRows?.find(row => row.rowNumber === rowNumber);
+      if (nonPricedDecision) {
+        if (!description || ![unitValue, unitCostValue, amountValue].every(blank)) {
+          issue(parseErrors, {row:rowNumber,field:'amount',message:'A priced or malformed source row cannot be excluded as non-priced scope.'});
+          continue;
+        }
+        if (!blank(quantityValue) && !parseNumber(quantityValue, 'quantity', rowNumber, rowErrors, false)) {
+          for (const entry of rowErrors) issue(parseErrors, entry);
+          continue;
+        }
+        issue(warnings, {row:rowNumber,field:'description',message:`User-confirmed non-priced scope: ${description}. Quantity ${cellText(quantityValue) || 'not stated'}. Reason: ${nonPricedDecision.reason.trim()}. Original retained; no price inferred.`});
+        continue;
+      }
+      if ([descriptionValue, unitValue, quantityValue].every(value => /^\(\d+\)$/.test(cellText(value)))) {
+        issue(warnings, { row: rowNumber, field: 'headerRow', message: 'Printed column-number/formula annotation row retained in the source, excluded from priced BOQ items.' });
+        continue;
+      }
+      if (/^(?:by\s+client|included|excluded|n\/?a|existing\.\s*tap only)$/i.test(cellText(amountValue)) && blank(unitCostValue)) {
+        issue(warnings, { row: rowNumber, field: 'description', message: `Non-priced scope annotation retained in source: ${description || itemCode} · ${cellText(amountValue)} · quantity ${cellText(quantityValue) || 'not stated'} ${cellText(unitValue)}. No price or allowance inferred.` });
+        continue;
+      }
+      const amountCell = mapping.amount === null ? null : worksheet.getRow(rowNumber).getCell(mapping.amount);
+      const amountFormula = amountCell?.formula;
+      if ([descriptionValue, itemCodeValue, unitValue, quantityValue, unitCostValue].every(blank)
+          && typeof amountFormula === 'string' && /^SUM\s*\(/i.test(amountFormula)) {
+        const localErrors: WorkspaceIssue[] = [];
+        const subtotal = parseNumber(amountValue, 'amount', rowNumber, localErrors, true);
+        if (subtotal) {
+          footerTotals.push({ row: rowNumber, label: 'subtotal', amount: subtotal });
+          issue(warnings, { row: rowNumber, field: 'amount', message: `Unlabelled SUM subtotal ${subtotal.toFixed(2)} retained as source evidence, excluded from item totals to prevent double counting.` });
+          continue;
+        }
+      }
       if (rowErrors.length > 0) {
         for (const entry of rowErrors) issue(parseErrors, entry);
         continue;
       }
-      const footerLabel = isTotalLabel(descriptionValue, itemCodeValue)
-        && !itemCode
-        && !cellText(unitValue)
-        && (quantityValue === null || quantityValue === undefined || cellText(quantityValue) === '')
+      const totalLabel = isTotalLabel(descriptionValue, itemCodeValue);
+      const mergedTotalLabel = Boolean(totalLabel) && [itemCodeValue, descriptionValue, unitValue, quantityValue, unitCostValue]
+        .every(value => blank(value) || isTotalLabel(value) === totalLabel);
+      const footerLabel = totalLabel
+        && ((!itemCode && blank(unitValue) && blank(quantityValue)) || mergedTotalLabel)
         ? isTotalLabel(descriptionValue, itemCodeValue)
         : null;
       if (footerLabel) {
@@ -646,7 +744,7 @@ export async function parseWorkspaceWorkbook(options: {
         continue;
       }
 
-      if (isSectionHeading(description, [itemCodeValue, unitValue, quantityValue, unitCostValue, amountValue])) {
+      if (isSectionHeading(description, [unitValue, quantityValue, unitCostValue, amountValue])) {
         const sectionLabel = itemCode ? `${itemCode} ${description}`.trim() : description;
         activeSection = sectionLabel;
         activeSectionSourceKey = `source:heading:${rowNumber}`;
@@ -675,7 +773,7 @@ export async function parseWorkspaceWorkbook(options: {
       const breakdownValues: Partial<Record<BreakdownField, Prisma.Decimal | null>> = {};
       for (const [field, column] of Object.entries(breakdownMapping) as Array<[BreakdownField, number | null]>) {
         if (column === null) continue;
-        const rawValue = readMappedCell(worksheet, rowNumber, column, field, rowErrors);
+        const rawValue = readMappedCell(worksheet, rowNumber, column, field, rowErrors, warnings);
         if (rawValue === null || rawValue === undefined || cellText(rawValue) === '') continue;
         breakdownValues[field] = parseNumber(rawValue, field, rowNumber, rowErrors, field !== 'percentage');
       }
@@ -773,7 +871,10 @@ export async function parseWorkspaceWorkbook(options: {
   const filteredItems = section?.items ?? items;
   const filteredTotal = filteredItems.reduce((sum, item) => sum.plus(String(item.amount)), new Prisma.Decimal(0));
 
+  const metadata = readProjectMetadata(workbook);
   const analysis: WorkspaceAnalysis = {
+    extractedProjectName: metadata.projectName,
+    extractedContractAmount: metadata.contractAmount,
     fileName,
     fileHash: createHash('sha256').update(buffer).digest('hex'),
     sheets: sheetSummaries,
@@ -793,7 +894,7 @@ export async function parseWorkspaceWorkbook(options: {
     printedTotal: printedTotal?.toFixed(2) ?? null,
     errors: parseErrors,
     warnings,
-    suggestedProjectName: suggestProjectName(fileName),
+    suggestedProjectName: metadata.projectName || suggestProjectName(fileName),
   };
   return { analysis, items };
 }
@@ -806,6 +907,8 @@ export async function analyzeBOQWorkbook(options: {
   breakdownMapping?: WorkspaceBreakdownMapping | null;
   previewOffset?: number;
   sectionKey?: string | null;
+  documentToken?: string | null;
+  documentContext?: string;
 }): Promise<WorkspaceAnalysis> {
   return (await parseWorkspaceWorkbook(options)).analysis;
 }

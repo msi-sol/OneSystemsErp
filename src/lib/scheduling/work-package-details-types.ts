@@ -154,6 +154,7 @@ export function readWorkPackagePlanDetails(raw: string | null | undefined): Work
     || !Array.isArray(value.rows) || !value.rows.length || value.rows.length > 500
     || value.rows.some(row => !isRecord(row) || !Number.isSafeInteger(row.sourceRowNumber) || typeof row.description !== 'string' || typeof row.amount !== 'number' || typeof row.quantity !== 'number' || typeof row.unitCost !== 'number' || typeof row.unit !== 'string')
     || !Array.isArray(value.resourceIds) || value.resourceIds.some(id => typeof id !== 'string') || !isRecord(value.categories)
+    || (value.replacedResources !== undefined && (!Array.isArray(value.replacedResources) || value.replacedResources.length > 500 || value.replacedResources.some(row => !isRecord(row) || typeof row.id !== 'string' || typeof row.description !== 'string' || typeof row.quantity !== 'string' || typeof row.amount !== 'string')))
     || (value.appliedAt !== null && typeof value.appliedAt !== 'string') || (value.appliedById !== null && typeof value.appliedById !== 'string')
     || (value.reason !== null && typeof value.reason !== 'string'))
     || breakdownUploads.reduce((sum, value) => sum + value.rows.length, 0) > 500) {

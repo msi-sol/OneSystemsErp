@@ -1,0 +1,9 @@
+.summary { min-width: 0; }
+.summary div { min-width: 0; }
+.summary p, .summary h3 { overflow-wrap: anywhere; }
+.summary svg { flex-shrink: 0; }
+.bottomGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.factsRow { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 600px) {
+  .bottomGrid { grid-template-columns: minmax(0, 1fr); }
+}

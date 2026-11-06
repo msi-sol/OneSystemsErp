@@ -8,6 +8,7 @@ import { getUserPermissions } from '@/lib/permissions';
 import NewProjectButton from './NewProjectButton';
 import ManagerAssigner from './ManagerAssigner';
 import DeleteProjectButton from './DeleteProjectButton';
+import { groupProjectsByAction } from '@/lib/projects/project-action-groups';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,50 @@ export default async function ProjectsPage() {
     }
   });
 
+  const projectIds = projects.map(project => project.id);
+  const [boqVersions, schedules] = await Promise.all([
+    projectIds.length ? prisma.projectBOQVersion.findMany({
+      where: { projectId: { in: projectIds } },
+      orderBy: [{ versionNumber: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, projectId: true, status: true, checksum: true, sourceProvenance: true },
+    }) : Promise.resolve([]),
+    projectIds.length ? prisma.projectSchedule.findMany({
+      where: { projectId: { in: projectIds } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        projectId: true, name: true, workflowStatus: true, lockedBOQVersionId: true, lockedBOQChecksum: true,
+        baselineCode: true, revisionCode: true, _count: { select: { activities: true } },
+        baselineActivations: {
+          where: { isAuthoritative: true, invalidatedAt: null },
+          orderBy: { activatedAt: 'desc' }, take: 2, select: { lockedBOQChecksum: true },
+        },
+      },
+    }) : Promise.resolve([]),
+  ]);
+
+  const latestBoqByProject = new Map<string, (typeof boqVersions)[number]>();
+  for (const version of boqVersions) if (!latestBoqByProject.has(version.projectId)) latestBoqByProject.set(version.projectId, version);
+  const latestScheduleByProject = new Map<string, (typeof schedules)[number]>();
+  for (const schedule of schedules) if (!latestScheduleByProject.has(schedule.projectId)) latestScheduleByProject.set(schedule.projectId, schedule);
+  const projectActionGroups = groupProjectsByAction(projects.map(project => {
+    const version = latestBoqByProject.get(project.id);
+    const schedule = latestScheduleByProject.get(project.id);
+    return {
+      id: project.id,
+      status: project.status,
+      boqLocked: project.boqLocked,
+      latestBoqVersion: version ? { id: version.id, status: version.status, checksum: version.checksum, sourceProvenance: version.sourceProvenance } : null,
+      latestSchedule: schedule ? {
+        workflowStatus: schedule.workflowStatus,
+        lockedBOQVersionId: schedule.lockedBOQVersionId,
+        lockedBOQChecksum: schedule.lockedBOQChecksum,
+        authoritativeActivationChecksums: schedule.baselineActivations.map(activation => activation.lockedBOQChecksum ?? ''),
+      } : null,
+      record: project,
+      scheduleRecord: schedule ?? null,
+    };
+  }));
+
   const canAssignManager = permissions?.PROJECT_MANAGEMENT?.canUpdate || false;
   let users: { id: string; name: string; role: string }[] = [];
   if (canAssignManager || permissions?.PROJECT_MANAGEMENT?.canCreate) {
@@ -58,7 +103,7 @@ export default async function ProjectsPage() {
   }
 
   return (
-    <div className={styles.container}>
+    <div className={`${styles.container} ${styles.projectList}`}>
       <header className={styles.header}>
         <div>
           <h1>Projects</h1>
@@ -89,6 +134,62 @@ export default async function ProjectsPage() {
         </div>
       </header>
 
+      <section className={styles.actionBoard} aria-labelledby="project-action-heading">
+        <div className={styles.actionIntro}>
+          <div>
+            <h2 id="project-action-heading">Project actions</h2>
+            <p>Open each project at the BOQ or WPS stage recorded for it.</p>
+          </div>
+          <span className={styles.actionCount}>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</span>
+        </div>
+
+        {projects.length === 0 ? <p className={styles.actionEmpty}>No projects found.</p> : <div className={styles.actionGroups}>
+          {([
+            ['boq', 'Needs BOQ decision', 'No approved and locked BOQ baseline is recorded. Review the BOQ module for the current version and its status.'],
+            ['wps', 'Needs WPS decision', 'An approved BOQ is recorded, but the latest schedule has no verified active baseline. Review its actual workflow status in WPS.'],
+            ['other', 'Everything else', 'Projects with a verified active WPS baseline or archived projects.'],
+          ] as const).map(([group, title, description]) => {
+            const entries = projectActionGroups[group];
+            if (!entries.length) return null;
+            return <section className={styles.actionGroup} key={group} aria-labelledby={`project-group-${group}`}>
+              <header className={styles.actionGroupHeader}>
+                <div><h3 id={`project-group-${group}`}>{title}</h3><p>{description}</p></div>
+                <span className={styles.actionCount}>{entries.length}</span>
+              </header>
+              <ul className={styles.actionList}>
+                {entries.map(entry => {
+                  const project = entry.project.record;
+                  const schedule = entry.project.scheduleRecord;
+                  return <li className={styles.actionCard} key={project.id}>
+                    <div className={styles.actionCardTop}>
+                      <div className={styles.actionProjectText}>
+                        <h4>{project.name}</h4>
+                        <p>{project.location || 'No location specified'}</p>
+                      </div>
+                      <span className={`${styles.badge} ${styles['status-' + project.status.toLowerCase()] || styles.badgeDefault}`}>{project.status.replaceAll('_', ' ')}</span>
+                    </div>
+                    <dl className={styles.actionFacts}>
+                      <div><dt>BOQ status</dt><dd>{entry.boqLabel}</dd></div>
+                      <div><dt>WPS status</dt><dd>{entry.wpsLabel}{schedule ? ` · ${schedule._count.activities} ${schedule._count.activities === 1 ? 'package' : 'packages'}` : ''}</dd></div>
+                    </dl>
+                    {schedule && <p className={styles.scheduleName}>{schedule.name}{schedule.baselineCode ? ` · ${schedule.baselineCode}` : schedule.revisionCode ? ` · ${schedule.revisionCode}` : ''}</p>}
+                    <div className={styles.actionCardLinks}>
+                      <Link className={styles.primaryProjectAction} href={entry.nextHref}>{entry.nextLabel}</Link>
+                      <nav aria-label={`Project modules for ${project.name}`} className={styles.moduleLinks}>
+                        <Link href={`/projects/${project.id}/boq`}>BOQ module</Link>
+                        <Link href={entry.wpsHref}>WPS module</Link>
+                      </nav>
+                    </div>
+                  </li>;
+                })}
+              </ul>
+            </section>;
+          })}
+        </div>}
+      </section>
+
+      <details className={styles.registerDetails}>
+        <summary>Full project register · {projects.length}</summary>
       <div className={styles.tableContainer}>
         <table className={styles.table}>
           <thead>
@@ -122,9 +223,9 @@ export default async function ProjectsPage() {
                 </td>
                 <td className={styles.amount}>
                   <div><strong>Awarded:</strong> ₱ {project.contractAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                  <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '4px' }}><strong>Materials:</strong> ₱ {consolidatedCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '4px' }}><strong>Materials:</strong> ₱ {consolidatedCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
                 </td>
-                <td style={{ fontSize: '0.85rem', color: '#4b5563', whiteSpace: 'nowrap' }}>
+                <td style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                   <div><strong>Start:</strong> {formatDate(project.startDate)}</div>
                   <div style={{ marginTop: '4px' }}><strong>Target:</strong> {formatDate(project.revisedCompletionDate || project.originalCompletionDate)}</div>
                 </td>
@@ -149,6 +250,7 @@ export default async function ProjectsPage() {
           </tbody>
         </table>
       </div>
+      </details>
     </div>
   );
 }

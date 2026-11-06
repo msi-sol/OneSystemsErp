@@ -8,6 +8,7 @@ import { ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsh
 import { approveBOQUpload, reviewBOQUpload } from '@/app/actions/boqUploadParser';
 import { WORKSPACE_BREAKDOWN_FIELDS, type WorkspaceAnalysis, type WorkspaceBreakdownMapping, type WorkspaceMapping, type WorkspaceIssue } from '@/lib/boq/workspace-types';
 import styles from './boqTemplate.module.css';
+import PlanningFlowGuide from '@/components/boq/PlanningFlowGuide';
 
 export interface WorkspaceProject {
   id: string; name: string; contractAmount: number; boqLocked: boolean; hasBOQ: boolean;
@@ -40,23 +41,23 @@ const mappingFields: { key: Exclude<keyof WorkspaceMapping, 'headerRow'>; label:
 ];
 const labels: Record<string, string> = { DRAFT_UPLOADED: 'Draft import', PENDING: 'Draft import', SUBMITTED_FOR_REVIEW: 'Submitted for review', RETURNED_FOR_CORRECTION: 'Returned for correction', VALIDATION_FAILED: 'Needs correction', COMMITTED: 'Approved', APPROVED: 'Approved' };
 
-export default function BOQTemplateClient({ projects, actorName, actorRole, canCreate, canAnalyze, canApprove, initialUpload, initialProjectId, initialMode }: Props) {
+export default function BOQTemplateClient({ projects, actorName, actorRole, canCreate, canAnalyze, canApprove, initialUpload, initialMode }: Props) {
   const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
-  const destinationInput = useRef<HTMLSelectElement>(null);
   const contractAmountEdited = useRef(false);
   const [file, setFile] = useState<File | null>(null);
   const [analysis, setAnalysis] = useState<WorkspaceAnalysis | null>(null);
   const [mapping, setMapping] = useState<WorkspaceMapping | null>(null);
   const [breakdownMapping, setBreakdownMapping] = useState<WorkspaceBreakdownMapping | null>(null);
   const [sheetName, setSheetName] = useState('');
-  const [projectId, setProjectId] = useState(initialProjectId ?? '');
+  const [projectId] = useState('');
   const [projectName, setProjectName] = useState('');
   const [projectContractAmount, setProjectContractAmount] = useState('');
-  const [destination, setDestination] = useState<'quick' | 'existing' | 'new'>(initialMode === 'new' ? 'new' : initialProjectId || initialMode === 'existing' ? 'existing' : 'quick');
+  const [destination, setDestination] = useState<'quick' | 'new'>(initialMode === 'new' ? 'new' : 'quick');
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState<'analyze' | 'confirm' | 'review' | 'approve' | null>(null);
   const [error, setError] = useState('');
+  const [projectDetailsEditable, setProjectDetailsEditable] = useState(false);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const [upload, setUpload] = useState(initialUpload);
@@ -77,9 +78,10 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
   function chooseFile(selected?: File) {
     if (!selected || busy) return;
     setError(''); setMessage('');
-    if (!/\.xlsx$/i.test(selected.name)) { setError('Choose an .xlsx workbook.'); return; }
+    if (!/\.(xlsx|pdf|docx)$/i.test(selected.name)) { setError('Choose Excel (.xlsx), PDF, or Word (.docx). Older .xls/.doc files must be saved in a supported format.'); return; }
     if (selected.size === 0 || selected.size > 10 * 1024 * 1024) { setError('Choose a workbook larger than 0 bytes and no bigger than 10 MB.'); return; }
     setFile(selected); setAnalysis(null); setMapping(null); setBreakdownMapping(null); setSheetName(''); setUpload(null); setApprovalConfirmation(false);
+    if (!projectId) setProjectName('');
     setProjectContractAmount(''); contractAmountEdited.current = false;
   }
   function onDrop(event: DragEvent<HTMLDivElement>) {
@@ -92,6 +94,7 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
     setBusy('analyze'); setError(''); setMessage('');
     try {
       const body = new FormData(); body.set('file', file);
+      if (analysis?.documentToken) body.set('documentToken', analysis.documentToken);
       if (projectId) body.set('projectId', projectId);
       if (nextSheet) body.set('sheetName', nextSheet);
       if (nextMapping) body.set('mapping', JSON.stringify(nextMapping));
@@ -104,8 +107,9 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
       const result: WorkspaceAnalysis = data.analysis;
       setAnalysis(result); setMapping(result.mapping); setBreakdownMapping(result.breakdownMapping); setSheetName(result.selectedSheet || '');
       if (!projectName) setProjectName(result.suggestedProjectName);
+      setProjectDetailsEditable(false);
       if (!contractAmountEdited.current && result.itemCount > 0 && result.errors.length === 0 && Number.isFinite(Number(result.total)) && Number(result.total) > 0) {
-        setProjectContractAmount(result.total);
+        setProjectContractAmount(result.extractedContractAmount || result.total);
       }
       setMessage('Workbook analyzed. Review the sheet, columns and item preview before saving.');
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not analyze this workbook.'); }
@@ -116,6 +120,7 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
     setBusy('confirm'); setError(''); setMessage('');
     try {
       const body = new FormData(); body.set('file', file); body.set('fileHash', analysis.fileHash);
+      if (analysis.documentToken) body.set('documentToken', analysis.documentToken);
       body.set('sheetName', sheetName); body.set('mapping', JSON.stringify(mapping)); body.set('projectId', projectId); body.set('projectName', projectName);
       body.set('breakdownMapping', JSON.stringify(breakdownMapping ?? {}));
       body.set('projectContractAmount', projectContractAmount);
@@ -128,7 +133,7 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
         canSubmit: true, canApprove: selectedProject?.canApprove ?? canApprove, sheetName, issues: analysis.warnings });
       setAnalysis(null); setMapping(null); setBreakdownMapping(null); setFile(null);
       if (fileInput.current) fileInput.current.value = '';
-      setMessage('BOQ sheet confirmed and saved as an import draft. Review and approve it below.');
+      setMessage('Draft BOQ saved to its project. Opening the BOQ page to review sections, items and approvals.');
       router.push(`/projects/${data.projectId}/boq`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save this BOQ import.'); }
     finally { setBusy(null); }
@@ -155,10 +160,9 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not approve the BOQ.'); }
     finally { setBusy(null); }
   }
-  function selectDestination(value: 'existing' | 'new') {
+  function selectDestination(value: 'new') {
     setDestination(value); setError('');
-    if (value === 'new') setProjectId('');
-    else destinationInput.current?.focus();
+    setAnalysis(null); setMapping(null); setSheetName('');
   }
   const query = search.trim().toLocaleLowerCase();
   const visibleProjects = projects.filter(project => !query || [project.name, project.id, project.fileName].some(value => value?.toLocaleLowerCase().includes(query)));
@@ -167,17 +171,18 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
   ];
 
   return <div className={styles.container}>
-    <header className={styles.header}><h1>BOQ Workspace</h1><p>Upload a workbook, confirm its BOQ source, then review and approve it with your project team.</p></header>
+    <header className={styles.header}><h1>BOQ Workspace</h1><p>Start a new project from its BOQ. Analyze the file, check the reading, then save a draft for review.</p></header>
+    <PlanningFlowGuide step={upload ? 2 : 1} next={upload ? 'Your import is saved under its project. Open project BOQ to check sections, items and contract value, then complete Engineer review and PM approval.' : analysis ? 'Check the extracted sections, items and total below. Confirm the source to create your new project with a draft BOQ.' : 'Choose your BOQ file, then select Analyze this workbook. Check the contents before creating a new project.'} />
     {error && <div role="alert" className={styles.error}><strong>Unable to continue</strong><span>{error}</span></div>}
     {message && <p role="status" className={styles.message}>{message}</p>}
     <section className={styles.intake} aria-label="BOQ workbook intake" aria-busy={busy === 'analyze' || busy === 'confirm'}>
       <div className={styles.intakeBody}>
         <div className={`${styles.dropzone} ${dragging ? styles.dragging : ''}`} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
           <div className={styles.uploadIcon}><UploadCloud size={28} strokeWidth={1.6} /></div>
-          <h2>{file ? file.name : 'Drop the BOQ workbook here'}</h2>
-          <p>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to analyze` : 'XLSX up to 10 MB'}</p>
+          <h2>{file ? file.name : 'Drop the BOQ document here'}</h2>
+          <p>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to analyze` : 'Excel (.xlsx), PDF, or Word (.docx) · up to 10 MB'}</p>
           <label className={styles.fileButton}><FileSpreadsheet size={18} /> {file ? 'Choose another file' : 'Choose file'}
-            <input ref={fileInput} aria-label="Choose BOQ workbook" className={styles.fileInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event: ChangeEvent<HTMLInputElement>) => chooseFile(event.target.files?.[0])} disabled={!!busy || !canAnalyze} />
+            <input ref={fileInput} aria-label="Choose BOQ workbook" className={styles.fileInput} type="file" accept=".xlsx,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event: ChangeEvent<HTMLInputElement>) => chooseFile(event.target.files?.[0])} disabled={!!busy || !canAnalyze} />
           </label>
           {file && !busy && <button className={styles.clearFile} onClick={() => { setFile(null); setAnalysis(null); setMapping(null); setSheetName(''); setProjectContractAmount(''); contractAmountEdited.current = false; if (fileInput.current) fileInput.current.value = ''; }} aria-label="Remove selected workbook"><X size={16} /></button>}
         </div>
@@ -187,21 +192,18 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
             <li className={analysis || upload ? styles.current : ''}>{analysis || upload ? <Check size={15} /> : null}Checking and reading the workbook</li>
             <li className={upload ? styles.current : ''}>{upload ? <Check size={15} /> : null}Confirm BOQ sheet</li>
           </ol>
-          <button className={styles.primary} disabled={!file || !!busy || !canAnalyze || (destination === 'existing' && !projectId)} onClick={() => analyze()}>{busy === 'analyze' && <Loader2 size={17} className={styles.spin} />} {busy === 'analyze' ? 'Analyzing workbook…' : 'Analyze this workbook'}</button>
+          <button className={styles.primary} disabled={!file || !!busy || !canAnalyze} onClick={() => analyze()}>{busy === 'analyze' && <Loader2 size={17} className={styles.spin} />} {busy === 'analyze' ? 'Analyzing workbook…' : 'Analyze this workbook'}</button>
         </div>
         <p className={styles.note}>Analyzing as {actorName} · {actorRole.replaceAll('_', ' ')}. Analysis creates no project or BOQ. Your original workbook is preserved unchanged when you confirm its source.</p>
         {!canAnalyze && <p className={styles.warning}>Your account can view BOQs. An authorized project editor must upload a workbook.</p>}
         {(destination !== 'quick' || analysis) && <div className={styles.destination}>
-          <div><label htmlFor="boq-destination">Target project</label><select ref={destinationInput} id="boq-destination" value={projectId} disabled={!!busy} onChange={event => { setProjectId(event.target.value); setDestination(event.target.value ? 'existing' : 'new'); }}>
-            <option value="" disabled={!canCreate}>Create a new project after confirmation</option>
-            {projects.map(project => <option key={project.id} value={project.id} disabled={!project.canEdit || project.boqLocked || project.hasBOQ}>{project.name}{project.boqLocked || project.hasBOQ ? ' — BOQ already exists' : ''}</option>)}
-          </select></div>
-          {!projectId && <><div><label htmlFor="boq-project-name">New project name</label><input id="boq-project-name" value={projectName} maxLength={191} onChange={event => setProjectName(event.target.value)} disabled={!!busy || !canCreate} placeholder="Project name" /></div><div><label htmlFor="boq-contract-amount">Signed contract value</label><input id="boq-contract-amount" type="number" min="0.01" step="0.01" required value={projectContractAmount} onChange={event => { contractAmountEdited.current = true; setProjectContractAmount(event.target.value); setError(current => current === 'The BOQ total must match the entered signed contract value.' ? '' : current); }} disabled={!!busy || !canCreate} placeholder="Prefilled after workbook analysis" /></div></>}
-          <p>{projectId ? 'The existing project contract value stays unchanged. The BOQ must reconcile before approval.' : 'Prefilled from the analyzed BOQ total as an unverified starting value. Check it against the signed contract and correct it if needed. Verification and approval follow in the BOQ module.'}</p>
+          <p>A new project will be created only after you confirm the BOQ source.</p>
+          {!projectId && <><div><label htmlFor="boq-project-name">New project name</label><input id="boq-project-name" readOnly={!!analysis && !projectDetailsEditable} value={projectName} maxLength={191} onChange={event => setProjectName(event.target.value)} disabled={!!busy || !canCreate} placeholder="Project name" /></div><div><label htmlFor="boq-contract-amount">Signed contract value</label><input id="boq-contract-amount" readOnly={!!analysis && !projectDetailsEditable} type="number" min="0.01" step="0.01" required value={projectContractAmount} onChange={event => { contractAmountEdited.current = true; setProjectContractAmount(event.target.value); setError(current => current === 'The BOQ total must match the entered signed contract value.' ? '' : current); }} disabled={!!busy || !canCreate} placeholder="Prefilled after workbook analysis" /></div></>}
+          {!projectId && analysis && <button type="button" className={styles.secondary} disabled={!!busy} onClick={() => setProjectDetailsEditable(value => !value)}>{projectDetailsEditable ? 'Finish editing project details' : 'Edit project details'}</button>}<p>{projectId ? 'The existing project contract value stays unchanged. The BOQ must reconcile before approval.' : 'Extracted details are read-only until you choose Edit project details. The stated document contract value is used when available; otherwise the BOQ item total is an unverified candidate. Check it against the signed contract and correct it if needed. Verification and approval follow in the BOQ module.'}</p>
           {contractMismatch && <div className={styles.warning} role="alert"><strong>BOQ and contract amounts differ</strong><dl className={styles.uploadFacts}><div><dt>Recorded contract value</dt><dd>{money(enteredContract)}</dd></div><div><dt>BOQ item total</dt><dd>{money(analysis!.total)}</dd></div><div><dt>Difference to resolve</dt><dd>{money(contractDifference!)}</dd></div></dl><p>You can save this as a draft and resolve the difference in the BOQ review. Approval stays blocked until the amounts reconcile. Check the contract value or correct the BOQ items; neither amount is replaced automatically.</p>{!projectId && <button type="button" className={styles.secondary} disabled={!!busy} onClick={() => { contractAmountEdited.current = false; setProjectContractAmount(analysis!.total); setError(''); }}>Use BOQ total in this field</button>}</div>}
         </div>}
       </div>
-      <div className={styles.moreWays}><span>More ways to start:</span><button disabled={!!busy || !canAnalyze} onClick={() => selectDestination('existing')}>Upload to an existing project</button><button disabled={!!busy || !canCreate} onClick={() => selectDestination('new')}>Start a new project first</button></div>
+      <div className={styles.moreWays}><span>Already have a project?</span><Link href="/projects">Open projects to continue review or corrections</Link><button disabled={!!busy || !canCreate} onClick={() => selectDestination('new')}>Enter new project details</button></div>
     </section>
 
     {analysis && <section className={styles.review} aria-labelledby="source-heading">

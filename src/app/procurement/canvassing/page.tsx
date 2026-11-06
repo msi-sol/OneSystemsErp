@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import DeleteCanvassButton from './DeleteCanvassButton';
+import styles from './canvassing.module.css';
 
 export default async function CanvassingDashboard() {
   const cookieStore = await cookies();
@@ -58,24 +59,31 @@ export default async function CanvassingDashboard() {
   });
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ color: 'var(--accent-color)', margin: 0, textShadow: '0 0 10px var(--accent-glow)' }}>
+    <main className={styles.page}>
+      <div className={styles.header}>
+        <div>
+          <Link href="/procurement" className={styles.backLink}>← Back to Procurement</Link>
+          <h1 style={{ color: 'var(--accent-color)', margin: '10px 0 0', textShadow: '0 0 10px var(--accent-glow)' }}>
           Canvassing & Supplier Comparison
-        </h1>
+          </h1>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+      <div className={styles.grid}>
         
-        {/* MRFs Awaiting Canvass */}
-        <div className="glass-card">
+        {/* Approved MRFs */}
+        <section className={`glass-card ${styles.panel}`}>
           <h3 style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--glass-border)', paddingBottom: '10px' }}>
-            📋 Approved MRFs Ready for Canvass
+            📋 Approved Material Requests
           </h3>
           {mrfForCanvass.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)' }}>No MRFs awaiting canvass.</p>
+            <div className={styles.emptyState}>
+              <p>No approved MRFs are available for canvassing in this project.</p>
+              <Link href="/material-requests">View Material Requests →</Link>
+            </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+            <div className={styles.tableScroller}>
+            <table className={styles.table}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
                   <th style={{ padding: '8px' }}>MRF Number</th>
@@ -92,14 +100,9 @@ export default async function CanvassingDashboard() {
                     <td style={{ padding: '12px 8px' }}>{mr.items.length}</td>
                     <td style={{ padding: '12px 8px' }}>
                       {mr.canvassForms && mr.canvassForms.length > 0 ? (
-                        <button disabled style={{
-                          background: 'transparent',
-                          border: '1px solid var(--glass-border)',
-                          color: 'var(--text-secondary)',
-                          padding: '6px 12px',
-                          borderRadius: '4px',
-                          cursor: 'not-allowed'
-                        }}>Canvass Created</button>
+                        <Link className={styles.actionLink} href={`/procurement/canvassing/${mr.canvassForms[0].id}`}>
+                          Canvass Created · View
+                        </Link>
                       ) : (
                         <Link href={`/procurement/canvassing/new?mrId=${mr.id}`}>
                           <button style={{
@@ -117,18 +120,20 @@ export default async function CanvassingDashboard() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
-        </div>
+        </section>
 
         {/* Active Canvass Forms */}
-        <div className="glass-card">
+        <section className={`glass-card ${styles.panel}`}>
           <h3 style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--glass-border)', paddingBottom: '10px' }}>
             🔍 Active Canvass Forms
           </h3>
           {activeCanvassForms.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)' }}>No active canvass forms.</p>
+            <p className={styles.emptyState}>No canvass forms have been created yet.</p>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+            <div className={styles.tableScroller}>
+            <table className={styles.table}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
                   <th style={{ padding: '8px' }}>Canvass No.</th>
@@ -156,15 +161,8 @@ export default async function CanvassingDashboard() {
                       </span>
                     </td>
                     <td style={{ padding: '12px 8px' }}>
-                      <Link href={`/procurement/canvassing/${cf.id}`}>
-                        <button style={{
-                          background: 'transparent',
-                          border: '1px solid var(--text-secondary)',
-                          color: 'var(--text-primary)',
-                          padding: '6px 12px',
-                          borderRadius: '4px',
-                          cursor: 'pointer'
-                        }}>View</button>
+                      <Link className={styles.actionLink} href={`/procurement/canvassing/${cf.id}`}>
+                        View Details
                       </Link>
                       {isSuperAdmin && (
                         <DeleteCanvassButton canvassId={cf.id} />
@@ -174,10 +172,11 @@ export default async function CanvassingDashboard() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
-        </div>
+        </section>
 
       </div>
-    </div>
+    </main>
   );
 }

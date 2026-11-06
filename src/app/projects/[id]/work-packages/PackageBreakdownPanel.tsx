@@ -2,10 +2,11 @@
 import { useRef, useState } from 'react';
 import type { WorkspaceAnalysis, WorkspaceItem, WorkspaceMapping } from '@/lib/boq/workspace-types';
 import { RESOURCE_KINDS, type BreakdownKind, type PackageBreakdownUpload } from '@/lib/scheduling/package-breakdown';
+import type { PlanResource } from '@/lib/scheduling/work-package-details-types';
 import styles from '../planning/planning.module.css';
 
 type Props = { projectId: string; scheduleId: string; activityId: string; packageName: string; rowVersion: number;
-  uploads: PackageBreakdownUpload[]; existingResourceCount: number; canEdit: boolean; onSaved: () => void };
+  uploads: PackageBreakdownUpload[]; existingResourceCount: number; existingResources?: PlanResource[]; canEdit: boolean; onSaved: () => void };
 const fields = ['itemCode', 'description', 'unit', 'quantity', 'unitCost', 'amount'] as const;
 const labels = ['Item code (optional)', 'Description', 'Unit', 'Quantity', 'Unit rate (optional)', 'Amount'];
 const money = (value: number | string) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(value));
@@ -23,6 +24,7 @@ export default function PackageBreakdownPanel(props: Props) {
   const [categories, setCategories] = useState<Record<string, Record<string, BreakdownKind>>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [acknowledged, setAcknowledged] = useState<Record<string, boolean>>({});
+  const [replacements, setReplacements] = useState<Record<string, string[]>>({});
   const [version, setVersion] = useState({ source: props.rowVersion, value: props.rowVersion });
   const currentVersion = version.source === props.rowVersion ? version.value : props.rowVersion;
   const endpoint = `/api/projects/${encodeURIComponent(props.projectId)}/work-packages/breakdown`;
@@ -38,6 +40,7 @@ export default function PackageBreakdownPanel(props: Props) {
       if (sheet) body.set('sheetName', sheet);
       if (mapping) body.set('mapping', JSON.stringify(mapping));
       if (analysis) body.set('fileHash', analysis.fileHash);
+      if (analysis?.documentToken) body.set('documentToken', analysis.documentToken);
       const response = await fetch(endpoint, { method: 'POST', body });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'The breakdown could not be saved.');
@@ -58,7 +61,7 @@ export default function PackageBreakdownPanel(props: Props) {
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(props.projectId)}/work-packages/details`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'apply-breakdown', scheduleId: props.scheduleId,
-          expectedRowVersion: currentVersion, fields: { uploadId: upload.id, categories: categories[upload.id] || {}, reason: reasons[upload.id] || '', acknowledgeExisting: acknowledged[upload.id] === true } }),
+          expectedRowVersion: currentVersion, fields: { uploadId: upload.id, categories: categories[upload.id] || {}, reason: reasons[upload.id] || '', acknowledgeExisting: acknowledged[upload.id] === true, replaceResourceIds: replacements[upload.id] || [] } }),
       });
       const result = await response.json(); if (!response.ok) throw new Error(result.error || 'The component costs could not be added.');
       setVersion({ source: props.rowVersion, value: result.rowVersion });
@@ -74,9 +77,9 @@ export default function PackageBreakdownPanel(props: Props) {
   }
   return <section className={styles.panel} id="package-breakdown"><h3>Package breakdown / DUPA</h3>
     <p className={styles.muted}>For {props.packageName}. Upload an existing package-level component breakdown independently of BOQ-generated suggestions. The original file and all extracted rows are retained.</p>
-    <p className={styles.muted}>Use an .xlsx worksheet with description, unit, quantity and amount columns; a unit-rate column is optional. Quantities must already be for this package. No automatic scaling or inventory matching is performed.</p>
+    <p className={styles.muted}>Upload Excel (.xlsx), PDF, or Word (.docx). PDF and Word use AI-assisted reading and require source comparison. Include description, unit, quantity and stated amount; a unit rate is optional. Quantities must already be for this package. No automatic scaling or inventory matching is performed.</p>
     {error && <p role="alert" className={styles.error}>{error}</p>}{message && <p role="status" className={styles.success}>{message}</p>}
-    {props.canEdit && <><label htmlFor="package-breakdown-file">Choose package breakdown (.xlsx, up to 10 MiB)</label><input ref={fileInput} id="package-breakdown-file" type="file" accept=".xlsx" disabled={busy} onChange={event => { setFile(event.target.files?.[0] || null); setAnalysis(null); setRows([]); setMapping(null); setSheet(''); setError(''); setMessage(''); }}/>
+    {props.canEdit && <><label htmlFor="package-breakdown-file">Choose package breakdown (Excel, PDF, Word · up to 10 MiB)</label><input ref={fileInput} id="package-breakdown-file" type="file" accept=".xlsx,.pdf,.docx" disabled={busy} onChange={event => { setFile(event.target.files?.[0] || null); setAnalysis(null); setRows([]); setMapping(null); setSheet(''); setError(''); setMessage(''); }}/>
       {analysis && <div className={styles.fields}><div><label htmlFor="breakdown-sheet">Worksheet</label><select id="breakdown-sheet" disabled={busy} value={sheet} onChange={event => { setSheet(event.target.value); setMapping(null); }}><option value="">Choose worksheet</option>{analysis.sheets.map(value => <option key={value.name}>{value.name}</option>)}</select></div>
         {mapping && <><div><label htmlFor="breakdown-header">Header row</label><input id="breakdown-header" type="number" min="1" max="1000" value={mapping.headerRow} disabled={busy} onChange={event => setMapping({ ...mapping, headerRow: Number(event.target.value) })}/></div>{fields.map((field, index) => <div key={field}><label htmlFor={`breakdown-${field}`}>{labels[index]}</label><select id={`breakdown-${field}`} disabled={busy} value={mapping[field] ?? ''} onChange={event => setMapping({ ...mapping, [field]: event.target.value ? Number(event.target.value) : null })}><option value="">Not mapped</option>{analysis.columns.map(column => <option key={column.index} value={column.index}>{column.index} · {column.label}</option>)}</select></div>)}</>}
       </div>}
@@ -88,10 +91,11 @@ export default function PackageBreakdownPanel(props: Props) {
       <p className={styles.muted}>Preserved {new Date(upload.uploadedAt).toLocaleString('en-PH')}. Source quantities and financial values remain available below.</p>
       <a className={styles.link} href={`${endpoint}?scheduleId=${encodeURIComponent(props.scheduleId)}&uploadId=${encodeURIComponent(upload.id)}`}>Download preserved original</a>
       {itemTable(upload.rows, upload)}
-      {upload.appliedAt ? <p>Applied {new Date(upload.appliedAt).toLocaleString('en-PH')} · {upload.reason}. Imported resources retain this upload and source-row reference; later resource edits do not change the original.</p> : props.canEdit && <>
-        <p className={styles.muted}>Adding costs appends component rows to the existing draft budget. It does not replace allowances or change BOQ scope, quantities, dates or approvals. Imported costs require allowance review.</p>
+      {!!upload.replacedResources?.length && <details><summary>{upload.replacedResources.length} replaced draft rows (retained history)</summary><ul>{upload.replacedResources.map(row => <li key={row.id}>{row.kind} · {row.description} · {row.quantity} {row.unit} · {money(row.amount)}</li>)}</ul></details>}{upload.appliedAt ? <p>Applied {new Date(upload.appliedAt).toLocaleString('en-PH')} · {upload.reason}. Imported resources retain this upload and source-row reference; later resource edits do not change the original.</p> : props.canEdit && <>
+        <p className={styles.muted}>Choose any existing draft allowance rows that this DUPA replaces. Unselected rows remain. Replaced values and your reason are retained in the upload history. BOQ scope and approved baselines stay unchanged; new costs require review.</p>
+        {!!props.existingResources?.length && <fieldset><legend>Draft rows to replace (optional)</legend>{props.existingResources.map(resource => <label key={resource.id} style={{display:'block',marginBottom:8}}><input type="checkbox" disabled={busy} checked={(replacements[upload.id] || []).includes(resource.id)} onChange={event => setReplacements(current => ({...current,[upload.id]: event.target.checked ? [...current[upload.id] || [],resource.id] : (current[upload.id] || []).filter(id => id !== resource.id)}))}/>{resource.kind} · {resource.description} · {resource.quantity} {resource.unit} · {money(resource.amount)}</label>)}</fieldset>}
         <label htmlFor={`breakdown-reason-${upload.id}`}>Reason / relationship to generated or existing package costs</label><textarea id={`breakdown-reason-${upload.id}`} maxLength={500} value={reasons[upload.id] || ''} disabled={busy} onChange={event => setReasons({ ...reasons, [upload.id]: event.target.value })}/>
-        {props.existingResourceCount > 0 && <label><input type="checkbox" checked={acknowledged[upload.id] || false} disabled={busy} onChange={event => setAcknowledged({ ...acknowledged, [upload.id]: event.target.checked })}/> I reviewed the {props.existingResourceCount} existing resource rows. These are additional costs; obsolete draft allowances must be removed separately.</label>}
+        {props.existingResourceCount > 0 && <label><input type="checkbox" checked={acknowledged[upload.id] || false} disabled={busy} onChange={event => setAcknowledged({ ...acknowledged, [upload.id]: event.target.checked })}/> I reviewed the {props.existingResourceCount} existing resource rows. I checked the selected replacements and the additional costs that will remain.</label>}
         <button className={styles.button} disabled={busy || upload.rows.some(row => !categories[upload.id]?.[row.sourceRowNumber]) || (reasons[upload.id]?.trim().length || 0) < 5 || (props.existingResourceCount > 0 && !acknowledged[upload.id])} onClick={() => void apply(upload)}>Add reviewed component rows to draft resources</button>
       </>}
     </details>)}

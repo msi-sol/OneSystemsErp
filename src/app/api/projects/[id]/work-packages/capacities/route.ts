@@ -16,7 +16,7 @@ export async function GET(_request:Request,{params}:Context){
     prisma.workPackageCapacityGrant.findMany({where:{projectId,revokedAt:null},select:{id:true,userId:true,capacity:true,createdAt:true}}),
     prisma.projectUserAssignment.findMany({where:{projectId,assignmentStatus:'active'},select:{projectRole:true,user:{select:{id:true,name:true}}}}),
   ]);
-  return NextResponse.json({grants,members,held:access.capacities,canManage:access.canManageCapacities});
+  return NextResponse.json({grants,members,held:access.capacities,sourceUploaderAccess:access.sourceUploaderAccess,canManage:access.canManageCapacities});
 }
 
 export async function POST(request:Request,{params}:Context){

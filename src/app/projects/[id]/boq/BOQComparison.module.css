@@ -1,0 +1,48 @@
+.section,.notice{margin:18px 0;padding:20px;border:1px solid #343b48;border-radius:12px;background:#161b22;color:#e7eaf0;min-width:0}
+.heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:16px}
+.heading h3,.notice h3{margin:0 0 5px;font-size:1.08rem;color:#f3f5f8}
+.heading p,.notice p{margin:0;color:#aeb7c5;font-size:.88rem}
+.action{display:grid;gap:4px;min-width:220px;max-width:340px;padding:10px 12px;border:1px solid #384659;border-radius:8px;background:#1b2430;color:#d5e4ff;font-size:.84rem}
+.action strong{color:#8db8ff;font-size:.73rem;text-transform:uppercase;letter-spacing:.06em}
+.totals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}
+.totals>div{display:grid;align-content:start;gap:7px;min-width:0;padding:12px;border:1px solid #303845;border-radius:8px;background:#1b2029}
+.totals span{color:#aeb7c5;font-size:.76rem}
+.totals strong{font-size:.98rem;overflow-wrap:anywhere}
+.sectionTotals{margin-bottom:18px}
+.sectionTotals h4{margin:0 0 8px;font-size:.9rem}
+.sectionScroll,.tableScroll{max-width:100%;overflow:auto;overscroll-behavior-inline:contain;border:1px solid #303845;border-radius:8px;scrollbar-color:#65748a #1b2029}
+.sectionScroll table{width:100%;min-width:560px;border-collapse:collapse}
+.comparisonTable{width:100%;min-width:2050px;border-collapse:collapse;table-layout:auto}
+.sectionScroll th,.sectionScroll td,.comparisonTable th,.comparisonTable td{padding:9px 10px;border-bottom:1px solid #303845;text-align:left;vertical-align:top;white-space:nowrap;font-size:.78rem}
+.controls{display:flex;align-items:end;flex-wrap:wrap;gap:12px 18px;margin:18px 0 10px;color:#aeb7c5;font-size:.82rem}
+.controls label{display:grid;gap:5px}
+.controls select{min-height:40px;min-width:170px;padding:8px 10px;border:1px solid #384659;border-radius:7px;background:#1b2029;color:#e7eaf0;font:inherit}
+.controls p{flex:1 1 360px;margin:0;line-height:1.5}
+.pagination{display:flex;align-items:center;gap:8px}
+.pagination button{min-height:40px;padding:8px 12px;border:1px solid #384659;border-radius:7px;background:#1b2430;color:#e7eaf0;font:inherit;cursor:pointer}
+.pagination button:disabled{opacity:.55;cursor:default}
+.controls :is(select,button):focus-visible{outline:2px solid #8db8ff;outline-offset:3px}
+.sectionScroll thead th,.comparisonTable thead th{position:sticky;top:0;background:#242c38;color:#d9e2ef;z-index:1}
+.comparisonTable thead tr:first-child th{text-align:center;color:#9bc2ff;font-size:.82rem}
+.comparisonTable td:first-child,.comparisonTable td:nth-child(6){min-width:230px;max-width:310px;white-space:normal}
+.comparisonTable td strong,.comparisonTable td small{display:block}
+.comparisonTable td strong{margin-top:3px;color:#eef1f6;font-weight:600}
+.comparisonTable td small{color:#98a6b9;font-size:.68rem}
+.total th,.total td{background:#252d39;color:#f3f5f8;font-weight:700}
+.missing{color:#e9b86d;font-style:italic;white-space:normal}
+.badge{display:inline-block;padding:4px 7px;border-radius:999px;font-size:.69rem;font-weight:700}
+.matched{background:#173629;color:#9ae0b8}
+.changed{background:#46351d;color:#f2c87f}
+.history{margin-top:16px;border-top:1px solid #303845;padding-top:12px}
+.history summary{cursor:pointer;color:#cbd7e7;font-weight:650;font-size:.84rem}
+.history ol{display:grid;gap:10px;margin:12px 0 0;padding-left:22px}
+.history li{padding-left:3px}
+.history li strong{display:inline-block;margin-right:10px;font-size:.8rem;text-transform:capitalize}
+.history time{color:#aeb7c5;font-size:.73rem}
+.history li p,.history>p{margin:4px 0 0;color:#aeb7c5;font-size:.8rem}
+.notice{border-color:#765d31;background:#292318}
+.notice h3{margin-bottom:8px}
+.notice p+p{margin-top:8px}
+@media(max-width:860px){.heading{display:grid}.action{max-width:none}.totals{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.section,.notice{padding:14px;margin:12px 0}.totals{grid-template-columns:1fr 1fr}.totals>div{padding:9px}.totals strong{font-size:.88rem}}
+@media(max-width:520px){.controls{align-items:stretch}.controls label,.controls select{width:100%;box-sizing:border-box}.controls p{flex-basis:100%}.pagination{justify-content:space-between}}

@@ -105,7 +105,7 @@ async function loadReading(input: { actor: Actor; projectId: string; versionId: 
   if (!state || state.rowVersion !== input.expectedRowVersion) fail('The BOQ review changed. Refresh before previewing the corrected reading.', 409);
   const document = parseBOQReviewDocument(state.dataJson, input.projectId, input.versionId);
   if (!document || !document.source.firstReadAvailable || !document.source.uploadId || !document.source.fileHash) fail('This BOQ has no preserved original workbook to re-read.', 409);
-  const upload = await prisma.uploadedWorkbookFile.findFirst({ where: { id: document.source.uploadId, projectId: input.projectId }, select: { id: true, storagePath: true, originalFilename: true, fileHash: true } });
+  const upload = await prisma.uploadedWorkbookFile.findFirst({ where: { id: document.source.uploadId, projectId: input.projectId }, select: { id: true, storagePath: true, originalFilename: true, fileHash: true, metadataJson: true } });
   if (!upload || !upload.storagePath || upload.fileHash !== document.source.fileHash) fail('The preserved original workbook is unavailable or does not match its recorded hash.', 409);
   const buffer = await readWorkspaceOriginal(upload.storagePath);
   const mapping = input.mapping === undefined
@@ -117,7 +117,13 @@ async function loadReading(input: { actor: Actor; projectId: string; versionId: 
   if (!mapping) fail('Choose a valid corrected column mapping.', 400);
   const selectedSheet = input.selectedSheet ?? document.source.selectedSheet;
   if (!selectedSheet) fail('Choose a workbook sheet.', 400);
-  const parsed = await parseWorkspaceWorkbook({ buffer, fileName: upload.originalFilename, selectedSheet, mapping, breakdownMapping: breakdownMapping ?? {} });
+  let documentExtraction: unknown;
+  if (/\.(pdf|docx)$/i.test(upload.originalFilename)) {
+    try { documentExtraction = JSON.parse(upload.metadataJson || '{}').documentExtraction; } catch { /* explicit failure below */ }
+    if (!documentExtraction) fail('The preserved document reading is unavailable. Use reasoned BOQ line corrections or upload a corrected source.', 409);
+    if (JSON.stringify(mapping) !== JSON.stringify(normalizeWorkspaceMapping(document.source.mapping))) fail('Document columns are fixed. Correct the BOQ lines, or upload a corrected source document.', 409);
+  }
+  const parsed = await parseWorkspaceWorkbook({ buffer, fileName: upload.originalFilename, selectedSheet, mapping, breakdownMapping: breakdownMapping ?? {}, trustedDocumentExtraction: documentExtraction });
   if (parsed.analysis.fileHash !== upload.fileHash) fail('The preserved original workbook failed its hash check.', 409);
   if (parsed.analysis.errors.length || parsed.items.length === 0) fail('Correct the mapping errors before applying this reading.', 400);
   const lines = await prisma.awardedBOQItem.findMany({ where: { projectId: input.projectId }, orderBy: [{ itemCode: 'asc' }, { id: 'asc' }] }) as Line[];

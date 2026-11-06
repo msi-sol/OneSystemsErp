@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { uploadProcurementBenchmark, lockProcurementBenchmark, deleteProcurementBenchmark } from '@/app/actions/mutations';
 
 export default function ProcurementBenchmarkTab({ 
@@ -63,6 +64,11 @@ export default function ProcurementBenchmarkTab({
   if (items.length === 0) {
     return (
       <div style={{ padding: '40px', border: '1px solid var(--glass-border)', borderRadius: '12px', background: 'rgba(0, 0, 0, 0.2)', maxWidth: '600px', margin: '0 auto' }}>
+        <div style={{ marginBottom: '20px', padding: '14px 16px', border: '1px solid rgba(125, 211, 252, 0.35)', borderRadius: '10px', background: 'rgba(14, 116, 144, 0.12)' }}>
+          <strong style={{ display: 'block', marginBottom: '5px' }}>Use the benchmark review workflow</strong>
+          <span style={{ color: 'var(--text-secondary)' }}>Analyze the source, map rows to BOQ items and work packages, then review and approve benchmark limits.</span>
+          <Link href={`/projects/${projectId}/benchmark`} style={{ display: 'inline-block', marginTop: '9px', color: '#7dd3fc', fontWeight: 700 }}>Open benchmark review →</Link>
+        </div>
         <h3 style={{ marginBottom: '15px' }}>Upload Procurement Benchmark (Forecast BOQ)</h3>
         <p style={{ color: 'var(--text-secondary)', marginBottom: '30px' }}>
           Please upload the Excel file (.xlsx) containing the Procurement Benchmark. This file will be parsed and stored. Once locked, it can be used to generate the Master Materials List.
@@ -97,6 +103,11 @@ export default function ProcurementBenchmarkTab({
 
   return (
     <div>
+      <div style={{ marginBottom: '18px', padding: '14px 16px', border: '1px solid rgba(125, 211, 252, 0.35)', borderRadius: '10px', background: 'rgba(14, 116, 144, 0.12)' }}>
+        <strong style={{ display: 'block', marginBottom: '5px' }}>Use the benchmark review workflow</strong>
+        <span style={{ color: 'var(--text-secondary)' }}>Analyze the source, map rows to BOQ items and work packages, then review and approve benchmark limits.</span>{' '}
+        <Link href={`/projects/${projectId}/benchmark`} style={{ display: 'inline-block', marginTop: '9px', color: '#7dd3fc', fontWeight: 700 }}>Open benchmark review →</Link>
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
           <h3>Procurement Benchmark (Forecast BOQ)</h3>

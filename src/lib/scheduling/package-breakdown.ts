@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import type { WorkspaceItem, WorkspaceMapping } from '@/lib/boq/workspace-types';
+import type { PlanResource } from './work-package-details-types';
 
 export const RESOURCE_KINDS = ['MATERIAL', 'LABOR', 'EQUIPMENT', 'ALLOWANCE'] as const;
 export type BreakdownKind = typeof RESOURCE_KINDS[number];
@@ -9,6 +10,7 @@ export type PackageBreakdownUpload = {
   uploadedAt: string; uploadedById: string; originScheduleId: string;
   appliedAt: string | null; appliedById: string | null; resourceIds: string[];
   categories: Record<string, BreakdownKind>; reason: string | null;
+  replacedResources?: PlanResource[];
 };
 
 export class PackageBreakdownError extends Error {

@@ -1,14 +1,33 @@
 .container {
   padding: 2rem;
+  width: 100%;
+  min-width: 0;
   max-width: 1200px;
   margin: 0 auto;
 }
+
+.pageContainer { width: 100%; min-width: 0; max-width: 1440px; margin: 0 auto; }
+.projectList { padding-top: 0; }
+.projectList .header h1 { margin-top: 0; }
+.headerTitle { flex: 1 1 360px; min-width: 0; }
+.projectFacts { min-width: 0; margin-left: auto; text-align: right; overflow-wrap: anywhere; }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
   margin-bottom: 2rem;
+}
+
+.header > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.header h1, .header p {
+  overflow-wrap: anywhere;
 }
 
 .header h1 {
@@ -36,6 +55,8 @@
 }
 
 .tableContainer {
+  max-width: 100%;
+  min-width: 0;
   background-color: var(--glass-panel);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
@@ -45,6 +66,7 @@
 
 .table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
 }
 
@@ -132,4 +154,90 @@
   padding: 3rem !important;
   color: var(--text-muted);
   font-style: italic;
+}
+
+.badgeActive { background-color: rgba(34, 197, 94, 0.2); color: #4ade80; }
+.badgeInactive { background-color: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
+
+.actionBoard {
+  min-width: 0;
+  margin-bottom: 1.75rem;
+}
+
+.actionIntro, .actionGroupHeader, .actionCardTop, .actionCardLinks {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.actionIntro { margin: 0 0 1rem; }
+.actionIntro h2 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+.actionIntro p, .actionGroupHeader p { margin: 0.35rem 0 0; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; }
+.actionCount { flex: 0 0 auto; border: 1px solid var(--glass-border); border-radius: 999px; padding: 0.2rem 0.65rem; color: var(--text-secondary); font-size: 0.8rem; }
+.actionGroups { display: grid; gap: 1rem; }
+
+.actionGroup {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-panel);
+  backdrop-filter: blur(10px);
+}
+
+.actionGroupHeader { align-items: flex-start; margin: 0 0 0.8rem; }
+.actionGroupHeader h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.actionGroupHeader p { max-width: 780px; font-size: 0.82rem; }
+.actionList { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
+
+.actionCard {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.actionCardTop { align-items: flex-start; }
+.actionProjectText { min-width: 0; }
+.actionProjectText h4 { margin: 0; color: var(--text-primary); font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+.actionProjectText p { margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+.actionCardTop .badge { flex: 0 0 auto; white-space: nowrap; }
+.actionFacts { display: grid; gap: 0.55rem; margin: 1rem 0 0; }
+.actionFacts > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.5rem; }
+.actionFacts dt { color: var(--text-secondary); font-size: 0.78rem; }
+.actionFacts dd { margin: 0; color: var(--text-primary); font-size: 0.82rem; font-weight: 600; overflow-wrap: anywhere; }
+.scheduleName { margin: 0.65rem 0 0; color: var(--text-muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+.actionCardLinks { align-items: flex-start; flex-wrap: wrap; margin-top: 1rem; }
+.primaryProjectAction { color: var(--accent-color); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.moduleLinks { display: flex; flex-wrap: wrap; gap: 0.85rem; font-size: 0.8rem; }
+.moduleLinks a { color: var(--text-secondary); text-decoration: underline; text-underline-offset: 3px; }
+.primaryProjectAction:focus-visible, .moduleLinks a:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; border-radius: 2px; }
+.actionEmpty { padding: 2rem; border: 1px solid var(--glass-border); border-radius: 12px; color: var(--text-secondary); text-align: center; }
+
+.registerDetails {
+  min-width: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-panel);
+  overflow: hidden;
+}
+
+.registerDetails > summary { padding: 1rem 1.2rem; color: var(--text-primary); font-weight: 700; cursor: pointer; }
+.registerDetails[open] > summary { border-bottom: 1px solid var(--glass-border); }
+.registerDetails .tableContainer { border: 0; border-radius: 0; }
+
+@media (max-width: 768px) {
+  .container { padding: 1rem 0; }
+  .header { align-items: flex-start; }
+  .header > div { width: 100%; }
+  .projectFacts { margin-left: 0; text-align: left; }
+  .header h1 { margin-top: 0; font-size: 1.7rem; }
+  .header p { line-height: 1.6; }
+  .table th, .table td { padding: 0.875rem 1rem; }
+  .actionIntro { align-items: flex-start; }
+  .actionIntro > .actionCount { margin-top: 0.2rem; }
+  .actionGroup { padding: 0.85rem; }
+  .actionCard { padding: 0.85rem; }
 }

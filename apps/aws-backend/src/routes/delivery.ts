@@ -1,15 +1,20 @@
 import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { requirePermission } from '../lib/permissions';
 import { submitTransaction, approveTransaction } from '../lib/workflow';
 import { validateTransactionWithAI, verifyDeliveryDocumentWithAI } from '../lib/aiValidation';
 import { uploadFileToS3 } from '../services/s3.service';
 import { privateUploadUrl } from '../../../../src/lib/s3';
 import { randomUUID } from 'node:crypto';
+import { calculatePoReceiptProgress } from '../../../../src/lib/procurement/po-receipt-progress';
+import { canReceivePurchaseOrder } from '../../../../src/lib/procurement/receivable-purchase-order';
 
 const router = Router();
+class DeliveryApprovalConflict extends Error {}
+class DeliveryInputError extends Error {}
+
 function getPbacContext(req: any) {
   return {
     userId: req.headers['x-user-session'] as string | undefined,
@@ -38,6 +43,29 @@ router.post('/encode', async (req, res) => {
 
     await requirePermission(user.id, 'DELIVERY_RECEIVING', 'canCreate', simulatedRole);
 
+    if (!Array.isArray(items) || items.length === 0) throw new DeliveryInputError('At least one delivery line is required.');
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id: poId },
+      include: {
+        supplier: true,
+        mr: { select: { projectId: true } },
+        items: { include: { consolidatedBoqItem: { select: { projectId: true } } } },
+      },
+    });
+    if (!po) throw new DeliveryInputError('Purchase order not found.');
+    if (!canReceivePurchaseOrder(po.status)) throw new DeliveryInputError('Only an approved, issued or partially delivered purchase order can receive materials.');
+    for (const item of items) {
+      if (!item || typeof item.consolidatedBoqItemId !== 'string' ||
+          typeof item.quantity !== 'number' || !Number.isFinite(item.quantity) || item.quantity <= 0 ||
+          typeof item.drQuantity !== 'number' || !Number.isFinite(item.drQuantity) || item.drQuantity <= 0) {
+        throw new DeliveryInputError('DR and actual delivery quantities must be positive finite numbers.');
+      }
+      const poItem = po.items.find(line => line.consolidatedBoqItemId === item.consolidatedBoqItemId);
+      if (!poItem || poItem.consolidatedBoqItem.projectId !== po.mr.projectId) {
+        throw new DeliveryInputError('Every delivery item must belong to the selected purchase order and project.');
+      }
+    }
+
     let drDocumentText = noFileReason ? `No document uploaded. Reason provided by user: ${noFileReason}` : 'No document uploaded.';
     let proofFileUrl: string | undefined;
     let hasProof = true;
@@ -46,15 +74,7 @@ router.post('/encode', async (req, res) => {
       const buffer = Buffer.from(fileBase64, 'base64');
       
       const s3Key = `deliveries/${randomUUID()}`;
-      const uploadProject = await prisma.purchaseOrder.findUnique({ where: { id: poId }, select: { mr: { select: { projectId: true } } } });
-      proofFileUrl = privateUploadUrl(await uploadFileToS3(buffer, s3Key, mimeType, { module: 'DELIVERY_RECEIVING', uploadedBy: userId, projectId: uploadProject?.mr.projectId }));
-
-      const po = await prisma.purchaseOrder.findUnique({
-        where: { id: poId },
-        include: { supplier: true }
-      });
-
-      if (!po) throw new Error("PO not found for AI Verification");
+      proofFileUrl = privateUploadUrl(await uploadFileToS3(buffer, s3Key, mimeType, { module: 'DELIVERY_RECEIVING', uploadedBy: userId, projectId: po.mr.projectId }));
 
       const itemIds = items.map((i: any) => i.consolidatedBoqItemId);
       const boqItems = await prisma.consolidatedBOQItem.findMany({
@@ -157,7 +177,7 @@ router.post('/encode', async (req, res) => {
     res.json({ success: true, deliveryId: delivery.id });
   } catch (error: any) {
     console.error('Error encoding delivery:', error);
-    res.status(500).json({ error: error.message || 'Failed to encode delivery' });
+    res.status(error instanceof DeliveryInputError ? 400 : 500).json({ error: error.message || 'Failed to encode delivery' });
   }
 });
 
@@ -173,26 +193,33 @@ router.post('/:id/approve', async (req, res) => {
 
     await requirePermission(user.id, 'DELIVERY_RECEIVING', 'canApprove', simulatedRole);
 
-    const delivery = await prisma.delivery.findUnique({
-      where: { id },
-      include: { 
-        items: { include: { consolidatedBoqItem: true } },
-        po: { include: { supplier: true, items: true, mr: true } }
-      }
-    });
-
-    if (!delivery || delivery.status !== 'FOR_ACCOUNTANT_APPROVAL') {
-      return res.status(400).json({ error: 'Invalid delivery status' });
-    }
-
     await prisma.$transaction(async (tx) => {
-      await tx.delivery.update({
+      const delivery = await tx.delivery.findUnique({
         where: { id },
-        data: { status: 'APPROVED', approverId: user.id }
+        include: {
+          items: { include: { consolidatedBoqItem: true } },
+          po: { include: { supplier: true, items: true, mr: true } },
+        },
       });
+      if (!delivery || delivery.status !== 'FOR_ACCOUNTANT_APPROVAL') {
+        throw new DeliveryApprovalConflict('This delivery is no longer awaiting approval. Refresh before retrying.');
+      }
+      if (!canReceivePurchaseOrder(delivery.po.status)) {
+        throw new DeliveryApprovalConflict('The purchase order is no longer open for receiving. No stock or costs were applied.');
+      }
+      const claimed = await tx.delivery.updateMany({
+        where: { id, status: 'FOR_ACCOUNTANT_APPROVAL' },
+        data: { status: 'APPROVED', approverId: user.id },
+      });
+      if (claimed.count !== 1) throw new DeliveryApprovalConflict('Another approver processed this delivery. Refresh before retrying.');
 
       for (const item of delivery.items) {
         const poItem = delivery.po.items.find(i => i.consolidatedBoqItemId === item.consolidatedBoqItemId);
+        if (!poItem || item.consolidatedBoqItem.projectId !== delivery.po.mr.projectId ||
+            !Number.isFinite(item.quantity) || item.quantity <= 0 ||
+            (item.drQuantity !== null && (!Number.isFinite(item.drQuantity) || item.drQuantity <= 0))) {
+          throw new DeliveryApprovalConflict('A delivery line no longer matches a valid positive purchase-order item. No receipt quantities or costs were applied.');
+        }
         const unitCost = poItem ? poItem.unitCost : item.consolidatedBoqItem.unitCost;
         const actualLineCost = item.quantity * unitCost;
 
@@ -263,14 +290,25 @@ router.post('/:id/approve', async (req, res) => {
           supplierId: delivery.po.supplierId,
         }
       });
-    });
 
-    await approveTransaction(user.id, user.role || 'PROJECT_ACCOUNTANT', 'DELIVERY_RECEIVING', id, 'Approved Delivery', simulatedRole);
+      const approvedDeliveries = await tx.delivery.findMany({
+        where: { poId: delivery.poId, status: { in: ['APPROVED', 'COMPLETED'] } },
+        include: { items: true },
+      });
+      const receiptProgress = calculatePoReceiptProgress(delivery.po.items, approvedDeliveries);
+      if (receiptProgress.status) {
+        await tx.purchaseOrder.update({
+          where: { id: delivery.poId },
+          data: { status: receiptProgress.status },
+        });
+      }
+      await approveTransaction(user.id, user.role || 'PROJECT_ACCOUNTANT', 'DELIVERY_RECEIVING', id, 'Approved Delivery', simulatedRole, tx);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     res.json({ success: true });
   } catch (error: any) {
     console.error('Error approving delivery:', error);
-    res.status(500).json({ error: error.message || 'Failed to approve delivery' });
+    res.status(error instanceof DeliveryApprovalConflict ? 409 : 500).json({ error: error.message || 'Failed to approve delivery' });
   }
 });
 

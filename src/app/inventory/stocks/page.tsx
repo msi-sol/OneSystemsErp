@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import Link from 'next/link';
 import styles from '../../projects/page.module.css';
 import { cookies } from 'next/headers';
+import { getUserPermissions } from '@/lib/permissions';
+import PermissionGuard from '@/components/PermissionGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +18,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
   const activeProjectId = cookieStore.get('activeProjectId')?.value || null;
 
   const user = sessionId ? await prisma.user.findUnique({ where: { id: sessionId } }) : null;
+  const permissions = sessionId ? await getUserPermissions(sessionId) : {};
   const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'SYSTEM_ADMIN';
 
   const baseProjectFilter: any = {};
@@ -65,6 +68,9 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
             </Link>
           </div>
         </div>
+        <PermissionGuard permissions={permissions} moduleName="MATERIAL_ISSUANCE" action="canView">
+          <Link href="/material-issuance" className={styles.primaryButton}>Open Material Issuance</Link>
+        </PermissionGuard>
       </header>
 
       <div className={styles.tableContainer} style={{ overflowX: 'auto' }}>

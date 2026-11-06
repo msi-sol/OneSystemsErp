@@ -408,3 +408,190 @@ For the existing legacy practice record:
 8. Start a reasoned revision to test changes while the previous baseline remains
    active, then review/approve or cancel the proposal. Closed weekly outcomes,
    original source evidence and earlier baseline history remain retained.
+
+## 12. Meeting workflow integration — 6 November 2026
+
+The meeting requirements are implemented in the main `OneSystemsErp` checkout,
+building on the native BOQ/WPS flow above. These are local source changes until
+the exact validation and deployment results are recorded; this section does not
+declare a production deployment.
+
+### Document intake and readable BOQ review
+
+BOQ Workspace and individual package DUPA intake accept `.xlsx`, `.pdf`, and
+`.docx`, at most 10 MiB. Excel keeps the bounded deterministic workbook parser.
+PDF and Word use the configured Gemini reader; Word XML is read from a bounded
+Office archive with namespace-aware XML parsing. `.xls`, `.doc`, invalid archives,
+oversized/empty files and incomplete document tables are rejected explicitly.
+Missing AI configuration or a provider failure leaves the source unimported and
+offers the Excel path; it never creates placeholder financial values.
+
+AI output is unapproved source evidence, not a calculation or approval. It must
+contain explicitly stated item amounts; missing amounts are not filled from
+quantity × rate. A signed, expiring reading binds the complete extraction to the
+original file hash, actor and intended project/package, allowing preview and
+confirmation to reuse exactly the reviewed reading. Confirmation retains the
+original PDF/Word bytes and MIME type as well as normalized rows and extraction
+metadata. Re-reading a saved document uses its preserved reading, not a fresh,
+possibly different model response. Local files remain local; production files
+use the existing private S3 store.
+
+Labelled Excel project metadata and AI-read document metadata prefill the new
+project fields. Extracted details start read-only with an explicit edit action;
+an absent signed value remains an unverified BOQ-total candidate. Existing project
+contract values are never overwritten by intake. Source/current BOQ comparison
+shows item and section changes, quantities by unit, rates, amounts, totals and
+persisted review/approval history. PDF originals can be viewed inline through
+the same project-authorized route; originals remain downloadable.
+
+### DUPA reconciliation
+
+User ruling, 6 November 2026: a reviewer explicitly selects draft allowance rows
+that an uploaded DUPA replaces. Other resource rows remain. Application validates
+the current draft row version, package ownership, category selections and stated
+cost arithmetic, rejects duplicates against retained rows, and stores replaced
+resource snapshots plus the reason and actor in retained upload/audit history.
+An approved schedule still requires the existing reasoned revision process.
+
+### Reviewed procurement benchmark → master materials
+
+`/projects/[id]/benchmark` provides source analysis, manual/AI-assisted scope and
+package suggestions, correction, explicit approval and material generation.
+`PROJECT_MANAGEMENT` project edit capabilities govern drafts; existing approve/
+lock capabilities govern approval. The approved BOQ and active schedule remain
+prerequisites. Approval verifies that the schedule pins the current approved BOQ.
+
+User ruling, 6 November 2026: the approved benchmark defines spending and quantity
+limits; the BOQ remains the contract baseline. Additional budget rows require a
+reason and explicit per-row approver acknowledgement, retained with approver/time.
+Unmapped packages, unclassified resource kinds and quantity × rate differences,
+including a cent, block approval until corrected. Source values remain preserved.
+AI mapping suggestions use only supplied project IDs, remain draft, and show no
+fabricated confidence score. A material-to-BOQ mapping is explicitly a scope
+reference, not a conversion between material and BOQ units.
+
+Review versions and history use the existing append-only audit document pattern
+(`PROCUREMENT_BENCHMARK_REVIEW_STATE`, transaction ID = project ID), with serializable
+transactions and an expected revision token. No SQL schema change is required.
+Approval creates locked benchmark records. Generation is a separate atomic,
+idempotent step: only approved MATERIAL rows enter the existing master-material
+table; matching normalized descriptions AND units combine quantities and stated
+amounts while `BOQMapping` retains each source line/package. Labor/equipment/other
+budget rows remain approved budget evidence and do not become inventory.
+Weighted material rates retain the existing consolidation calculation's precision;
+the sum of approved source amounts remains the authoritative total. A benchmark
+with no material rows can finish generation with an empty material output rather
+than becoming trapped after approval. Missing source units/quantities must be
+completed by the reviewer; the parser's fallback quantity/unit is not approvable.
+
+Generated package quantities become existing WPS material requirements. A generated
+package's requirement cannot be raised above its approved benchmark allocation;
+an unapproved master material cannot be attached through this path. Projects that
+do not use a generated benchmark retain their earlier requirement behavior.
+Existing benchmark/master records are never silently replaced. Locked, mapped,
+or downstream-used records refuse destructive legacy replacement/deletion; an
+approved benchmark cannot be changed through a legacy upload shortcut. Initial
+generation currently requires an empty master-material list; merging a new budget
+version into already-used masters requires an explicit reviewed revision design.
+Draft source replacement is also refused; correcting a row does not replace the
+retained original. Mapping notes retain compact review/line/package references,
+with complete source values and reasons in the immutable review document. This
+supports older local installations whose mapping-note column is still 191
+characters; unusually long legacy identifiers are rejected before approval.
+
+User ruling, 6 November 2026: MR quantities reserve approved allowances on
+submission, not during draft or AI checking. Cancelled/rejected uncommitted
+requests release them. Physical stock holds remain separate. Requests against
+generated materials require explicit package links; all active request quantities
+count once at both material/project and package level, including fulfilled
+requests so prior purchases cannot reopen the original allowance.
+
+Receipt entry now derives remaining quantities from approved receipts attached
+to the specific PO, rather than project-wide delivered stock. Receipts still
+reference material IDs; repeated material lines are allocated in PO-line order
+for display. Positive quantities and same-project/PO membership are checked.
+Approval updates PO delivery progress and receipt/stock/cost/AP/workflow records
+in one serializable transaction; failed or repeated approval cannot partially
+reapply those effects. Over-delivery exception policy is unchanged.
+
+Over-budget PO exception authority and detailed warehouse/site-movement changes
+remain user rulings. New benchmark approval/generation establishes approved
+limits and provenance; it must not be described as complete downstream financial
+enforcement until the PO ceiling/exception implementation has been verified.
+AI document extraction and AI mapping require `GEMINI_API_KEY`; absence is an
+explicit service error with an Excel/manual alternative, not a fabricated reading.
+
+### Planning orientation and summary display (6 November 2026)
+
+The BOQ intake, project BOQ and Work Packages screens share a three-step
+orientation guide: upload/check, BOQ review/approval, and package preparation/
+approval. The guide describes the next action; existing module permissions and
+approval checks remain authoritative. Confirmed intake continues to open the
+BOQ page for the returned project ID. Breadcrumbs provide access to that
+project's summary and BOQ without a second sidebar.
+
+Project Summary reads the latest BOQ version and its total/status, current
+project BOQ item count, and latest-created schedule's status/package count.
+The latest-created schedule is explicitly labeled and is not necessarily an
+active execution baseline. Draft import amounts remain distinct from approved
+actual costs. Missing cost-ledger entries show an unavailable actual cost;
+recorded approved zero entries still show zero. Contract minus posted costs is
+labeled as a balance before future costs, not a projected profit.
+
+Follow-up user rulings on 6 November 2026 restrict BOQ Workspace intake to new
+projects. Existing project links lead back to the owning project BOQ; source
+correction/version controls remain there. Both workspace analysis and confirmation
+reject an existing project target. Project cards group actual BOQ/WPS decisions;
+the original management register remains available with its existing permissions.
+
+The user approved importing numeric values at their explicit Excel display
+precision, with row-level rounding notes and byte-identical original retention.
+Identifiers are not rounded. Merged-header slave cells do not create duplicate
+mapping candidates. Number/formula legend rows, recognized non-priced annotations
+and SUM subtotal evidence do not become priced items. A benchmark row with no
+unit/rate/amount can be marked non-priced only through an explicit row decision
+with a reason; priced or malformed rows cannot use that exception. Such decisions,
+reading notes, source item totals and the printed total remain in benchmark source
+history. The PGH benchmark's printed/item difference remains visible; no balancing
+amount is invented.
+
+The Super Admin uploader receives effective planning/review/approval access to
+their own imported project without a separate membership/grant setup. This is an
+access rule, not automatic approval: Engineer review, PM approval, baseline pins,
+readiness checks, archived restrictions and simulated-role restrictions remain.
+Other users continue through explicit project capacities.
+
+BOQ review presents the current review task before supporting comparison evidence.
+The editable item table and matched source/current comparison provide section
+filters and 25/50-row pages while keeping full-data totals visible. Work Packages
+separates preparation from site-work views and links preparation checks to the
+corresponding editor; generated scope remains an editable draft.
+
+An individual package uses Scope, Schedule, Resources & budgets and DUPA tabs.
+Its resource rows and package choices are scoped to that package; plan-wide
+allowance suggestion stays in the full-plan resources view. Project-wide
+constraints remain visible alongside the selected package's constraints.
+Benchmark source preview and mapping tables page 25 rows at a time, preserving
+full-data totals and edits. Missing AI configuration is reported explicitly;
+manual matching and the existing approval prerequisites remain in effect.
+
+The BOQ page uses addressable Overview, Sections, BOQ items and Evidence & history
+views. Overview retains contract verification and Engineer/PM review controls.
+Sections list source occurrences with counts and totals and link to the selected
+items view. A repeated section name is not a unique key: preserved section
+identities keep those occurrences distinct. Legacy rows without source identities
+use their recorded category without inventing source lineage. The approved item
+viewer searches the whole BOQ and renders 25 rows per page; filtered totals cover
+all matching rows. Evidence holds existing comparisons, corrections and version
+records. No approval or financial calculation is changed by view selection.
+
+Generated benchmark master materials expose project quantity reservations from
+submitted/active MRFs and cost commitments from approved/issued purchase orders.
+PO quantities are not added again to their originating MRF reservations. Draft,
+AI-checking, cancelled and rejected MRFs do not reserve quantity. The cost view is
+commitment tracking, not cash paid or an estimated draft-MRF cost. Each material
+shows its approved quantity/source amount, usage, remaining balance and reached
+or exceeded limits. The master-list MRF action opens the package-linked request
+form for generated benchmark records; legacy records retain their existing
+request path. Explicitly classified benchmark materials using a lot unit remain
+requestable; the legacy lump-sum scope filter does not hide them.

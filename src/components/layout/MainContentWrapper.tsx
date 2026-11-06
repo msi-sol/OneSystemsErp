@@ -39,9 +39,9 @@ export default function MainContentWrapper({
   return (
     <>
       {showMainSidebar && <Sidebar permissions={permissions} user={user} />}
-      <div style={{ marginLeft: sidebarWidthVar, display: 'flex', flexDirection: 'column', minHeight: '100vh', transition: 'margin-left 0.3s ease' }}>
+      <div style={{ marginLeft: sidebarWidthVar, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: '100vh', transition: 'margin-left 0.3s ease' }}>
         {showTopbar && topbar}
-        <main style={{ padding: removePadding ? '0px' : '30px', flex: 1, backgroundColor: 'var(--bg-primary)' }}>
+        <main style={{ padding: removePadding ? '0px' : '30px', flex: 1, minWidth: 0, backgroundColor: 'var(--bg-primary)' }}>
           {children}
         </main>
       </div>

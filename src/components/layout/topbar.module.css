@@ -24,9 +24,11 @@
   .userControls select { max-width: 100%; }
   .identity { min-width: 0; border-left: 0; padding-left: 0; }
 }
+@media (max-width: 768px) {
+  .topbar { padding-inline: 16px; }
+  .topbar > h2 { padding-left: 100px; }
+}
 @media (max-width: 540px) {
-  .topbar { padding-right: 16px; }
-  .topbar > h2 { padding-left: 56px; }
   .topbar > h2, .actions, .userControls, .userControls > div:first-child { width: 100%; }
   .actions { margin-left: 0; }
   .userControls select { width: 100% !important; }

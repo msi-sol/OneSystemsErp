@@ -6,6 +6,10 @@ import AutoConsolidateButton from './AutoConsolidateButton';
 import ConsolidatedBOQViewer from './ConsolidatedBOQViewer';
 
 import UploadMasterMaterialsButton from './UploadMasterMaterialsButton';
+import Link from 'next/link';
+import { Prisma } from '@prisma/client';
+import { readMaterialAllowanceUsage } from '@/lib/boq/material-allowance-usage';
+import MaterialAllowanceSummary from './MaterialAllowanceSummary';
 
 export default async function BOQConsolidationTab({ 
   projectId, 
@@ -18,15 +22,12 @@ export default async function BOQConsolidationTab({
     select: { consolidatedBOQLocked: true }
   });
   const isConsolidatedLocked = project ? project.consolidatedBOQLocked : false;
+  const reviewState = await prisma.auditLog.findFirst({ where: { moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: 'PROCUREMENT_BENCHMARK_REVIEW_STATE' }, select: { id: true } });
 
   const consolidatedItems = await prisma.consolidatedBOQItem.findMany({
-    where: { 
-      projectId,
-      OR: [
-        { totalCost: { gt: 0 } },
-        { isVariationItem: true }
-      ]
-    },
+    // A quantity allowance remains a material even when its approved rate is zero.
+    where: { projectId },
+    include: { mappings: { select: { mappingType: true } } },
     orderBy: [
       { isVariationItem: 'asc' },
       { category: 'asc' },
@@ -61,6 +62,7 @@ export default async function BOQConsolidationTab({
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'SYSTEM_ADMIN' || currentUser?.userRoles?.some(ur => ur.role.roleCode === 'SUPER_ADMIN' || ur.role.roleCode === 'SYSTEM_ADMIN');
 
   if (consolidatedItems.length === 0) {
+    if (reviewState) return <section><h3>Reviewed benchmark materials</h3><p>Generate material rows from the reviewed benchmark. Labor, equipment and other allowances remain budget evidence.</p><Link href={`/projects/${projectId}/benchmark`}>Open benchmark review →</Link></section>;
     if (isPurchasingOfficer) {
       return (
         <div style={{ textAlign: 'center', padding: '40px', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
@@ -95,9 +97,11 @@ export default async function BOQConsolidationTab({
   const totalAmount = consolidatedItems.reduce((sum, item) => sum + item.totalCost, 0);
 
   const users = await prisma.user.findMany({ select: { id: true, name: true } });
+  const allowanceRows = reviewState ? await readMaterialAllowanceUsage(prisma as unknown as Prisma.TransactionClient, projectId) : [];
 
   return (
     <div>
+      <MaterialAllowanceSummary rows={allowanceRows} />
       <ConsolidatedBOQViewer 
         projectId={projectId}
         isLocked={isConsolidatedLocked}
@@ -106,7 +110,7 @@ export default async function BOQConsolidationTab({
         totalAmount={totalAmount}
         users={users}
         canCreateMRF={!isPurchasingOfficer}
-        canLock={!isPurchasingOfficer}
+        canLock={!isPurchasingOfficer && !reviewState}
         isSuperAdmin={isSuperAdmin}
       />
     </div>

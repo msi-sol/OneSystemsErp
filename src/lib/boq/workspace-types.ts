@@ -1,3 +1,4 @@
+export type NonPricedSourceRow = { rowNumber: number; reason: string };
 export type WorkspaceMapping = {
   /** One-based Excel row and column indexes. */
   headerRow: number;
@@ -62,6 +63,11 @@ export type WorkspaceSectionSummary = {
 };
 
 export type WorkspaceAnalysis = {
+  documentToken?: string;
+  documentKind?: 'pdf' | 'docx';
+  extractedProjectName?: string | null;
+  extractedContractAmount?: string | null;
+  documentExtraction?: unknown;
   fileName: string;
   fileHash: string;
   sheets: Array<{ name: string; rowCount: number; candidate: boolean }>;

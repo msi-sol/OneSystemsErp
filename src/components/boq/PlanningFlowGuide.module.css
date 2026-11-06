@@ -1,0 +1,8 @@
+.guide { border: 1px solid var(--glass-border); border-radius: 12px; padding: 16px; margin: 18px 0; background: var(--glass-bg); min-width: 0; }
+.guide ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.guide li { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: .85rem; line-height: 1.5; }
+.guide li[aria-current='step'] { color: var(--accent-color); font-weight: 600; }
+.number { border: 1px solid currentColor; border-radius: 50%; width: 26px; height: 26px; flex: 0 0 26px; display: inline-flex; align-items: center; justify-content: center; }
+.guide p { margin: 14px 0 0; font-size: .875rem; line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere; }
+.guide strong { color: var(--text-primary); }
+@media (max-width: 640px) { .guide ol { grid-template-columns: 1fr; } }

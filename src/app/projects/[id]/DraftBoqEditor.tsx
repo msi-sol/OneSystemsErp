@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Decimal from 'decimal.js';
 import { draftWorkflowMessage } from '@/lib/draft-workflow-messages';
 import styles from './draft-boq.module.css';
+import { boqSections, type SectionIdentity } from '@/lib/boq/section-view';
 
 export interface DraftBoqRow {
   id: string;
@@ -25,11 +26,14 @@ interface Props {
   canEdit: boolean;
   canApprove: boolean;
   showApproval?: boolean;
+  sectionIdentities?: Record<string, SectionIdentity>;
+  initialSection?: string;
 }
 
 const currency = (value: Decimal.Value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(new Decimal(value).toNumber());
+const PAGE_SIZE_DEFAULT = 25;
 
-export default function DraftBoqEditor({ projectId, version, rows, contractAmount, canEdit, canApprove, showApproval = true }: Props) {
+export default function DraftBoqEditor({ projectId, version, rows, contractAmount, canEdit, canApprove, showApproval = true, sectionIdentities = {}, initialSection = 'all' }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -40,8 +44,26 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [confirmApproval, setConfirmApproval] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState(initialSection);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   const total = rows.reduce((sum, row) => sum.plus(String(row.totalCost)), new Decimal(0));
   const difference = new Decimal(String(contractAmount)).minus(total);
+  const sections = boqSections(rows, sectionIdentities);
+  const selectedSection = sections.find(section => section.id === sectionFilter);
+  const filteredRows = rows.filter(row => (sectionFilter === 'all' || selectedSection?.itemIds.includes(row.id)) && (!search.trim() || `${row.itemCode} ${row.category || ''} ${row.description} ${row.unit}`.toLowerCase().includes(search.trim().toLowerCase())));
+  const filteredTotal = filteredRows.reduce((sum, row) => sum.plus(String(row.totalCost)), new Decimal(0));
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const visibleRows = filteredRows.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const interactionLocked = editingId !== null || removingId !== null;
+  function selectSection(value: string) {
+    setSectionFilter(value); setPage(0);
+    const url = new URL(window.location.href);
+    if (value === 'all') url.searchParams.delete('section'); else url.searchParams.set('section', value);
+    window.history.replaceState(null, '', url);
+  }
 
   function edit(row: DraftBoqRow) {
     setEditingId(row.id);
@@ -89,16 +111,24 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
     <div className={styles.heading}><div><h3 id="draft-boq-items">Review BOQ items</h3><p>Edit the draft, reconcile it with the contract, then approve and lock the BOQ.</p></div><span className={styles.status}>Draft · not approved</span></div>
     <dl className={styles.totals}>
       <div><dt>Contract value</dt><dd>{currency(contractAmount)}</dd></div>
-      <div><dt>Draft BOQ total</dt><dd>{currency(total)}</dd></div>
+      <div><dt>All draft items · {rows.length}</dt><dd>{currency(total)}</dd></div>
+      <div><dt>Filtered items · {filteredRows.length}</dt><dd>{currency(filteredTotal)}</dd></div>
       <div><dt>Difference to resolve</dt><dd className={!difference.isZero() ? styles.warning : undefined}>{currency(difference)}</dd></div>
     </dl>
     <p className={styles.hint}>The amount is kept as entered. Changing a quantity or unit rate does not silently replace the BOQ amount. After approval, review any changed quantities in the work packages.</p>
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {message && <p role="status" className={styles.success}>{message}</p>}
+    <div className={styles.listControls} aria-label="Draft BOQ item list controls">
+      <label>Section <select value={sectionFilter} disabled={interactionLocked} onChange={event => selectSection(event.target.value)}><option value="all">All sections ({sections.length})</option>{sections.map((section, index) => <option key={section.id} value={section.id}>{index + 1}. {section.name} ({section.itemIds.length})</option>)}</select></label>
+      <label>Search BOQ items <input type="search" value={search} disabled={interactionLocked} onChange={event => { setSearch(event.target.value); setPage(0); }} placeholder="Item code, description or unit" /></label>
+      <label>Rows per page <select value={pageSize} disabled={interactionLocked} onChange={event => { setPageSize(Number(event.target.value)); setPage(0); }}><option value={25}>25</option><option value={50}>50</option></select></label>
+      <span>{filteredRows.length === 0 ? 'No items in this section' : `Showing ${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, filteredRows.length)} of ${filteredRows.length} filtered items`}</span>
+      <div className={styles.actions}><button type="button" disabled={interactionLocked || safePage === 0} onClick={() => setPage(safePage - 1)}>Previous</button><span>Page {safePage + 1} of {pageCount}</span><button type="button" disabled={interactionLocked || safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>Next</button></div>
+    </div>
     <form onSubmit={save}>
       <div className={styles.scroll} role="region" aria-label="Editable draft BOQ items" tabIndex={0}>
         <table><caption className={styles.srOnly}>Draft BOQ items and their stated quantities and amounts</caption><thead><tr><th scope="col">Item</th><th scope="col">Section</th><th scope="col">Description</th><th scope="col">Unit</th><th scope="col">Quantity</th><th scope="col">Unit rate</th><th scope="col">Amount</th><th scope="col">Action</th></tr></thead>
-          <tbody>{rows.map(row => <tr key={row.id}>
+          <tbody>{visibleRows.length ? visibleRows.map(row => <tr key={row.id}>
             <th scope="row">{editingId === row.id ? <><label className={styles.srOnly} htmlFor="draft-boq-item-code">Item code</label><input id="draft-boq-item-code" required disabled={pending} value={values.itemCode} onChange={e => setValues({ ...values, itemCode: e.target.value })} maxLength={191}/></> : row.itemCode}</th>
             {editingId === row.id ? <>
               <td><label className={styles.srOnly} htmlFor="draft-boq-section">BOQ section</label><input id="draft-boq-section" required disabled={pending} maxLength={191} value={values.section} onChange={e => setValues({ ...values, section: e.target.value })} /></td>
@@ -112,7 +142,7 @@ export default function DraftBoqEditor({ projectId, version, rows, contractAmoun
               <td>{row.category || 'General'}</td><td>{row.description}</td><td>{row.unit}</td><td>{row.quantity.toLocaleString('en-PH', { maximumFractionDigits: 12 })}</td><td>{currency(row.combinedUnitCost)}</td><td>{currency(row.totalCost)}</td>
               <td>{canEdit ? <div className={styles.actions}><button type="button" disabled={pending || editingId !== null} onClick={event => { event.preventDefault(); edit(row); }} aria-label={`Edit BOQ ${row.itemCode}`}>Edit</button><button type="button" disabled={pending || editingId !== null} onClick={() => { setRemovingId(row.id); setRemoveReason(''); }}>Remove</button></div> : 'View only'}{removingId === row.id && <div><label htmlFor={`remove-reason-${row.id}`}>Removal reason</label><input id={`remove-reason-${row.id}`} minLength={5} maxLength={300} value={removeReason} onChange={event => setRemoveReason(event.target.value)}/><button type="button" disabled={pending || removeReason.trim().length < 5} onClick={() => { request('PATCH', 'remove', { itemId: row.id, editReason: removeReason }); setRemovingId(null); }}>Confirm remove</button><button type="button" disabled={pending} onClick={() => setRemovingId(null)}>Cancel</button></div>}</td>
             </>}
-          </tr>)}</tbody>
+          </tr>) : <tr><td colSpan={8}>No BOQ items match this section.</td></tr>}</tbody>
         </table>
       </div>
     </form>

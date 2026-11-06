@@ -7,12 +7,41 @@
 .projectHeader strong { font-variant-numeric: tabular-nums; }
 .projectHeader span { color: var(--text-secondary); font-size: .75rem; }
 .moduleBody { min-width: 0; padding: 24px 0; }
+.moduleBody :is(section,h3,[id]) { scroll-margin-top: 110px; }
+.viewGroups { display: grid; gap: 14px; margin-bottom: 24px; }
+.toolGroup { border: 1px solid var(--glass-border); border-radius: 9px; padding: 14px 16px; }
+.toolGroup > summary { cursor: pointer; font-size: .875rem; line-height: 1.6; }
+.toolGroup > summary span { margin-left: 12px; }
+.toolGroup[open] > summary { margin-bottom: 14px; }
+.viewLabel { min-width: 65px; color: var(--text-secondary); font-size: .8rem; }
+.packageWorkspace { display: grid; gap: 16px; margin-bottom: 24px; min-width: 0; }
+.packageHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 18px 20px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--bg-secondary); }
+.packageHeading h3 { margin: 0 0 5px; font-size: 1.15rem; }
+.packageHeading p { margin: 0; }
+.packageEyebrow { color: var(--accent-color); font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.packageTabs { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--glass-border); }
+.packageTabs [aria-selected='true'] { box-shadow: 0 2px 0 var(--accent-color); }
+.packagePanel { display: grid; gap: 14px; min-width: 0; }
+.packagePanel[hidden] { display: none; }
+.packageAllocation { display: grid; gap: 3px; padding: 12px 0; border-bottom: 1px solid var(--glass-border); font-size: .875rem; }
+.packageAllocation strong { color: var(--text-primary); font-weight: 600; }
+.packageAllocation span { color: var(--text-secondary); font-size: .825rem; }
+.preparationGuide { padding: 18px; border: 1px solid var(--glass-border); border-radius: 12px; margin-bottom: 20px; }
+.preparationGuide ol { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,220px),1fr)); gap: 12px; padding: 0; list-style: none; }
+.preparationGuide li { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--glass-border); border-radius: 8px; font-size: .85rem; }
+.preparationGuide li p { margin: 0; }
+.preparationGuide li button { margin-top: auto; }
+.reviewSteps { display: grid; gap: 12px; padding-left: 24px; margin-block: 18px; font-size: .875rem; }
+.reviewSteps li { padding-left: 4px; line-height: 1.6; }
+.reviewSteps span { display: block; color: var(--text-secondary); }
 .moduleBody h2 { font-size: 1.4rem; margin: 0 0 12px; }
 .moduleBody h3 { font-size: 1rem; margin: 0 0 10px; }
 .moduleBody p { line-height: 1.65; }
 .titleRow { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-bottom: 24px; }
 .titleRow p { margin: 0; font-size: .875rem; color: var(--text-secondary); }
 .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.baselineNav { display: flex; flex-wrap: wrap; gap: 8px; padding-block: 8px 24px; border-bottom: 1px solid var(--glass-border); margin-bottom: 24px; }
+.baselineNav a { text-decoration: none; }
 .link { color: var(--accent-color); display: inline-flex; align-items: center; gap: 7px; font-size: .875rem; text-decoration: underline; text-underline-offset: 4px; }
 .status { border: 1px solid var(--glass-border); background: var(--bg-secondary); border-radius: 8px; padding: 14px 18px; font-size: .875rem; line-height: 1.6; margin-bottom: 24px; }
 .status strong { color: #91dfc1; }
@@ -46,4 +75,4 @@
 .history ul { margin: 0; padding: 0; }
 .moduleBody :is(a,button,summary,input,select,textarea,.scroll):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
 @media (max-width: 1050px) { .moduleBody { padding: 24px 0; } }
-@media (max-width: 600px) { .fields { grid-template-columns: minmax(0,1fr); } .projectHeader h1 { font-size: 1.2rem; } .panel { padding: 16px; } .actions > button { flex: 1 1 150px; } }
+@media (max-width: 600px) { .fields { grid-template-columns: minmax(0,1fr); } .projectHeader h1 { font-size: 1.2rem; } .panel { padding: 16px; } .actions > button { flex: 1 1 150px; } .packageHeading { padding: 15px; } .packageHeading > button { width: 100%; } .packageTabs > button { flex: 1 1 calc(50% - 8px); } }

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionActor } from '@/lib/scheduling/authUtils';
-import { actorCanAccessProject, readWorkspaceOriginal } from '@/lib/boq/workspace-service';
+import { actorCanAccessProject, readWorkspaceOriginal, workspaceDocumentMime } from '@/lib/boq/workspace-service';
 import { WorkspaceError } from '@/lib/boq/workspace-types';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ uploadId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ uploadId: string }> }) {
   try {
     const actor = await getSessionActor();
     const { uploadId } = await params;
@@ -19,12 +19,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ upl
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
     }
     const buffer = await readWorkspaceOriginal(upload.storagePath);
-    const fileName = upload.originalFilename.replace(/[\r\n"\\]/g, '_');
+    const fileName = upload.originalFilename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+    const disposition = /\.pdf$/i.test(upload.originalFilename) && new URL(request.url).searchParams.get('view') === 'inline' ? 'inline' : 'attachment';
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(upload.originalFilename)}`,
+        'Content-Type': workspaceDocumentMime(upload.originalFilename),
+        'Content-Disposition': `${disposition}; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(upload.originalFilename)}`,
         'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   } catch (error) {

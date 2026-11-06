@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/prisma';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { approvePurchaseOrder } from '@/app/actions/poActions';
+import POWorkflowButtons from '../../[id]/POWorkflowButtons';
+import { verifySession } from '@/lib/dal/auth';
+import { getUserPermissions } from '@/lib/permissions';
 
 export default async function PurchaseOrderDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -22,6 +24,9 @@ export default async function PurchaseOrderDetailsPage({ params }: { params: Pro
   if (!po) {
     return notFound();
   }
+  const actor = await verifySession();
+  const currentUser = actor ? await prisma.user.findUnique({ where: { id: actor.id }, select: { id: true, name: true, role: true } }) : null;
+  const permissions = currentUser ? await getUserPermissions(currentUser.id) : {};
 
   return (
     <div style={{ padding: '20px', maxWidth: '1000px', margin: '0 auto' }}>
@@ -102,17 +107,7 @@ export default async function PurchaseOrderDetailsPage({ params }: { params: Pro
           }}>Print PO</button>
           
           {/* Action buttons */}
-          {po.status !== 'APPROVED' && po.status !== 'COMPLETED' && (
-             <form action={async () => {
-               'use server';
-               await approvePurchaseOrder(po.id);
-             }}>
-               <button type="submit" style={{
-                 background: '#10b981', border: 'none', color: '#fff', fontWeight: 'bold',
-                 padding: '10px 20px', borderRadius: '4px', cursor: 'pointer'
-               }}>✅ Approve Purchase Order</button>
-             </form>
-          )}
+          <POWorkflowButtons poId={po.id} status={po.status} currentUser={currentUser} permissions={permissions} />
         </div>
       </div>
     </div>

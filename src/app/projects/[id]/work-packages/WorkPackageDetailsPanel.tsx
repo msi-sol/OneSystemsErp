@@ -32,6 +32,7 @@ type Props = {
   members: Member[];
   canEdit: boolean;
   view: View;
+  packageScoped?: boolean;
   onSaved: () => void;
 };
 
@@ -87,7 +88,7 @@ function ActivitySelect({ id, value, activities, onChange, label = 'Work package
   </div>;
 }
 
-export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVersion, details, activities, members, canEdit, view, onSaved }: Props) {
+export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVersion, details, activities, members, canEdit, view, onSaved, packageScoped = false }: Props) {
   const [versionOverride, setVersionOverride] = useState({ source: rowVersion, value: rowVersion });
   const version = versionOverride.source === rowVersion ? versionOverride.value : rowVersion;
   const [busy, setBusy] = useState(false);
@@ -232,12 +233,12 @@ export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVers
 
     {view === 'resources' && <><div className={styles.status}><p>Budget amounts are quantity × rate. All packages need materials, labor and equipment allowances. Suggested lines must be accepted by a person; dates or scope changes in a revision require another resource review.</p>{activities.map(activity=><div key={activity.id} className={styles.actions}><span>{activity.activityCode} · {activity.name}{details.resourcesReviewNeeded?.[activity.id]?' · Review needed':''}{details.resources.some(row=>row.activityId===activity.id&&row.isSystemSuggested)?' · System suggestions unreviewed':''}</span>{canEdit&&<button className={styles.secondary} disabled={busy} onClick={()=>void mutate('confirm-resources',{activityId:activity.id},'Allowances reviewed and accepted.')}>Confirm allowances</button>}</div>)}</div>
       {canEdit && <>
-        {!confirmSuggest && <div>
+        {!packageScoped && !confirmSuggest && <div>
           <h4>Create BOQ budget allowances</h4>
           <p className={styles.muted}>This creates explicit planning references from the approved BOQ. Allowances are not actual costs, commitments, or proof of spending.</p>
           <button className={styles.secondary} type="button" disabled={busy} onClick={() => setConfirmSuggest(true)}>Review allowance creation</button>
         </div>}
-        {confirmSuggest && <div>
+        {!packageScoped && confirmSuggest && <div>
           <h4>Confirm BOQ allowance creation</h4>
           <p>Missing package budgets receive the source app’s suggested materials, labor and equipment split. These are labeled suggestions and require your review before approval. Existing resource lines are preserved.</p>
           <div className={styles.actions}><button className={styles.button} type="button" disabled={busy} onClick={() => void mutate('suggest-resources', undefined, 'BOQ budget allowance references created.')}>{busy ? 'Creating…' : 'Create BOQ budget allowances'}</button><button className={styles.secondary} type="button" disabled={busy} onClick={() => setConfirmSuggest(false)}>Cancel</button></div>

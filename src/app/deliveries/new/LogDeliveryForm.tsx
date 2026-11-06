@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { encodeDeliveryWithFile } from '@/app/actions/deliveryActions';
 import { submitAIOverrideRequest } from '@/app/actions/aiOverrideActions';
+import { calculatePoReceiptProgress } from '@/lib/procurement/po-receipt-progress';
 import styles from '../../projects/page.module.css';
 
 export default function LogDeliveryForm({ purchaseOrders }: { purchaseOrders: any[] }) {
@@ -26,6 +27,9 @@ export default function LogDeliveryForm({ purchaseOrders }: { purchaseOrders: an
   const [overrideSuccess, setOverrideSuccess] = useState(false);
 
   const selectedPo = purchaseOrders.find(po => po.id === selectedPoId);
+  const receiptProgress = selectedPo
+    ? calculatePoReceiptProgress(selectedPo.items, selectedPo.deliveries || [])
+    : null;
 
   const handleDrQtyChange = (itemId: string, val: string) => {
     setDrQuantities(prev => ({ ...prev, [itemId]: parseFloat(val) || 0 }));
@@ -217,8 +221,7 @@ export default function LogDeliveryForm({ purchaseOrders }: { purchaseOrders: an
                 <tbody>
                   {selectedPo.items.map((item: any) => {
                     const ordered = item.quantity;
-                    const deliveredSoFar = item.consolidatedBoqItem.deliveredQty || 0;
-                    const remaining = Math.max(0, ordered - deliveredSoFar);
+                    const remaining = receiptProgress?.remainingByOrderItemId.get(item.id) || 0;
                     const isDone = remaining === 0;
 
                     const drQty = drQuantities[item.consolidatedBoqItem.id] || 0;

@@ -2,6 +2,8 @@ import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { validateQuotationLines } from '../../../../src/lib/procurement/quotation-validation';
+import { CanvassPurchaseOrderError, generateCanvassPurchaseOrder } from '../services/canvass-purchase-order';
 
 const router = Router();
 function getPbacContext(req: any) {
@@ -10,6 +12,17 @@ function getPbacContext(req: any) {
     activeProjectId: req.headers['x-active-project-id'] as string | undefined,
     simulatedRole: req.headers['x-simulated-role'] as string | undefined,
   };
+}
+
+async function invalidateCanvassComparison(tx: any, canvassId: string) {
+  await tx.supplierQuotation.updateMany({
+    where: { canvassFormId: canvassId },
+    data: { isRecommended: false, aiRank: null, aiRationale: null },
+  });
+  await tx.canvassForm.update({
+    where: { id: canvassId },
+    data: { aiSummary: null, recommendedSupplierId: null },
+  });
 }
 
 // Create Canvass Form
@@ -26,6 +39,14 @@ router.post('/', async (req, res) => {
     });
 
     if (!mr) return res.status(404).json({ success: false, error: 'Material request not found' });
+
+    const canvassItems = mr.items.filter(item => {
+      const quantity = Number(item.approvedQuantity ?? item.quantity);
+      return Number.isFinite(quantity) && quantity > 0;
+    });
+    if (canvassItems.length === 0) {
+      return res.status(400).json({ success: false, error: 'This material request has no approved items with a positive quantity to canvass.' });
+    }
 
     const existingCanvass = await prisma.canvassForm.findFirst({
       where: { mrId: mrId }
@@ -58,8 +79,8 @@ router.post('/', async (req, res) => {
         preparedById: userId,
         status: 'DRAFT',
         items: {
-          create: mr.items.map(item => ({
-            quantityRequired: item.approvedQuantity || item.quantity,
+          create: canvassItems.map(item => ({
+            quantityRequired: item.approvedQuantity ?? item.quantity,
             consolidatedBoqItemId: item.consolidatedBoqItemId
           }))
         }
@@ -79,23 +100,44 @@ router.post('/:id/quotations', async (req, res) => {
     const { id } = req.params;
     const { supplierId, items } = req.body;
 
-    const quotation = await prisma.supplierQuotation.create({
-      data: {
-        canvassFormId: id,
-        supplierId: supplierId,
-        status: 'RECEIVED',
-        totalAmount: items.reduce((acc: number, item: any) => acc + (item.unitCost * item.quantityAvailable), 0),
-        items: {
-          create: items.map((item: any) => ({
-            canvassItemId: item.canvassItemId,
-            unitCost: item.unitCost,
-            quantityAvailable: item.quantityAvailable,
-            totalCost: item.unitCost * item.quantityAvailable,
-            brand: item.brand,
-            remarks: item.remarks
-          }))
+    const canvass = await prisma.canvassForm.findUnique({
+      where: { id },
+      include: { items: { select: { id: true, quantityRequired: true } } },
+    });
+    if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
+
+    let validatedItems;
+    try {
+      validatedItems = validateQuotationLines(items, canvass.items);
+    } catch (validationError: any) {
+      return res.status(400).json({ success: false, error: validationError.message });
+    }
+    const totalAmount = validatedItems.reduce((sum, item) => sum + item.totalCost, 0);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'The quotation must have a finite positive total.' });
+    }
+
+    const quotation = await prisma.$transaction(async tx => {
+      const created = await tx.supplierQuotation.create({
+        data: {
+          canvassFormId: id,
+          supplierId: supplierId,
+          status: 'RECEIVED',
+          totalAmount,
+          items: {
+            create: validatedItems.map(item => ({
+              canvassItemId: item.canvassItemId,
+              unitCost: item.unitCost,
+              quantityAvailable: item.quantityAvailable,
+              totalCost: item.totalCost,
+              brand: item.brand,
+              remarks: item.remarks
+            }))
+          }
         }
-      }
+      });
+      await invalidateCanvassComparison(tx, id);
+      return created;
     });
 
     res.json({ success: true, quotationId: quotation.id });
@@ -108,27 +150,54 @@ router.post('/:id/quotations', async (req, res) => {
 // Update Supplier Quotation
 router.put('/:id/quotations/:quotationId', async (req, res) => {
   try {
+    const { id } = req.params;
     const { quotationId } = req.params;
     const { supplierId, items } = req.body;
 
-    await prisma.quotationItem.deleteMany({ where: { quotationId } });
-    const totalAmount = items.reduce((acc: number, item: any) => acc + (item.unitCost * item.quantityAvailable), 0);
-    await prisma.supplierQuotation.update({
-      where: { id: quotationId },
-      data: {
-        supplierId,
-        totalAmount,
-        items: {
-          create: items.map((item: any) => ({
-            canvassItemId: item.canvassItemId,
-            unitCost: item.unitCost,
-            quantityAvailable: item.quantityAvailable,
-            totalCost: item.unitCost * item.quantityAvailable,
-            brand: item.brand,
-            remarks: item.remarks
-          }))
+    const [canvass, existingQuotation] = await Promise.all([
+      prisma.canvassForm.findUnique({
+        where: { id },
+        include: { items: { select: { id: true, quantityRequired: true } } },
+      }),
+      prisma.supplierQuotation.findFirst({
+        where: { id: quotationId, canvassFormId: id },
+        select: { id: true },
+      }),
+    ]);
+    if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
+    if (!existingQuotation) return res.status(404).json({ success: false, error: 'Quotation not found in this canvass' });
+
+    let validatedItems;
+    try {
+      validatedItems = validateQuotationLines(items, canvass.items);
+    } catch (validationError: any) {
+      return res.status(400).json({ success: false, error: validationError.message });
+    }
+    const totalAmount = validatedItems.reduce((sum, item) => sum + item.totalCost, 0);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'The quotation must have a finite positive total.' });
+    }
+
+    await prisma.$transaction(async tx => {
+      await tx.quotationItem.deleteMany({ where: { quotationId } });
+      await tx.supplierQuotation.update({
+        where: { id: quotationId },
+        data: {
+          supplierId,
+          totalAmount,
+          items: {
+            create: validatedItems.map(item => ({
+              canvassItemId: item.canvassItemId,
+              unitCost: item.unitCost,
+              quantityAvailable: item.quantityAvailable,
+              totalCost: item.totalCost,
+              brand: item.brand,
+              remarks: item.remarks,
+            }))
+          }
         }
-      }
+      });
+      await invalidateCanvassComparison(tx, id);
     });
 
     res.json({ success: true });
@@ -140,73 +209,29 @@ router.put('/:id/quotations/:quotationId', async (req, res) => {
 
 // Auto Generate PO
 router.post('/:id/generate-po', async (req, res) => {
+  const { id } = req.params;
+  const { supplierId } = req.body;
+  const { userId } = getPbacContext(req);
+
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
   try {
-    const { id } = req.params;
-    const { supplierId } = req.body;
-    const { userId } = getPbacContext(req);
-
-    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
-
-    const canvass = await prisma.canvassForm.findUnique({
-      where: { id },
-      include: { mr: true }
-    });
-
-    if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
-
-    if (!canvass.mrId) return res.status(409).json({ success: false, error: 'Link this canvass to a material request before generating a purchase order.' });
-
-    const quotation = await prisma.supplierQuotation.findFirst({
-      where: { canvassFormId: id, supplierId: supplierId },
-      include: { items: { include: { canvassItem: true } } }
-    });
-
-    if (!quotation) return res.status(404).json({ success: false, error: 'Quotation not found' });
-
-    const currentYear = new Date().getFullYear();
-    const prefix = `PO-${currentYear}-`;
-    const lastPO = await prisma.purchaseOrder.findFirst({
-      where: { poNumber: { startsWith: prefix } },
-      orderBy: { poNumber: 'desc' },
-      select: { poNumber: true }
-    });
-
-    let nextNumber = 1;
-    if (lastPO && lastPO.poNumber) {
-      const lastInt = parseInt(lastPO.poNumber.substring(prefix.length), 10);
-      if (!isNaN(lastInt)) nextNumber = lastInt + 1;
-    }
-    const poNumber = `${prefix}${String(nextNumber).padStart(4, '0')}`;
-
-    const po = await prisma.purchaseOrder.create({
-      data: {
-        poNumber,
-        supplierId,
-        mrId: canvass.mrId,
-        canvassFormId: canvass.id,
-        preparerId: userId,
-        status: 'DRAFT',
-        totalAmount: quotation.totalAmount,
-        netAmount: quotation.totalAmount,
-        items: {
-          create: quotation.items.map(qi => ({
-            quantity: qi.quantityAvailable || qi.canvassItem.quantityRequired,
-            unitCost: qi.unitCost,
-            consolidatedBoqItemId: qi.canvassItem.consolidatedBoqItemId
-          }))
-        }
-      }
-    });
-
-    await prisma.canvassForm.update({
-      where: { id },
-      data: { status: 'COMPLETED' }
-    });
-
-    res.json({ success: true, poId: po.id });
+    const result = await generateCanvassPurchaseOrder(prisma, { canvassId: id, supplierId, userId });
+    return res.json({ success: true, poId: result.poId, alreadyExists: result.alreadyExists });
   } catch (error: any) {
     console.error('Error generating PO:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to generate PO' });
+    // A concurrent retry may lose the status claim after another request created the PO.
+    const current = await prisma.canvassForm.findUnique({ where: { id }, select: { status: true } }).catch(() => null);
+    if (current?.status === 'COMPLETED') {
+      const existingPO = await prisma.purchaseOrder.findFirst({
+        where: { canvassFormId: id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      }).catch(() => null);
+      if (existingPO) return res.json({ success: true, poId: existingPO.id, alreadyExists: true });
+    }
+    const statusCode = error instanceof CanvassPurchaseOrderError ? error.statusCode : 500;
+    return res.status(statusCode).json({ success: false, error: error.message || 'Failed to generate PO' });
   }
 });
 

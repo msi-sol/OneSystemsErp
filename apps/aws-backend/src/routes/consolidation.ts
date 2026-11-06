@@ -1,11 +1,144 @@
 import { prisma } from '../lib/prisma';
 import { readStoredUpload } from '../../../../src/lib/s3';
+import { consolidateMaterialRows } from '../../../../src/lib/boq/consolidation-materials';
 // @ts-nocheck
-import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Router, type Request, type Response } from 'express';
+import { Prisma } from '@prisma/client';
+import { getPermissionsForRole, requirePermission } from '../lib/permissions';
 import ExcelJS from 'exceljs'; // ExcelJS is used for modifying and creating Excel files
 
 const router = Router();
+
+function getPbacContext(req: Request) {
+  return {
+    userId: req.headers['x-user-session'] as string | undefined,
+    activeProjectId: req.headers['x-active-project-id'] as string | undefined,
+    simulatedRole: req.headers['x-simulated-role'] as string | undefined,
+  };
+}
+
+async function requireProjectCapability(req: Request, res: Response, projectId: string, capabilities: string[]) {
+  const { userId, simulatedRole } = getPbacContext(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: 'An authenticated user is required.' });
+    return false;
+  }
+  if (!await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } })) {
+    res.status(404).json({ success: false, error: 'Project not found.' });
+    return false;
+  }
+
+  for (const capability of capabilities) {
+    try {
+      await requirePermission(userId, 'PROJECT_MANAGEMENT', capability, simulatedRole);
+      return true;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith('Unauthorized Action:')) throw error;
+    }
+  }
+
+  if (!simulatedRole) {
+    const assignment = await prisma.projectUserAssignment.findUnique({
+      where: { userId_projectId: { userId, projectId } },
+      select: { assignmentStatus: true, projectRole: true },
+    });
+    if (assignment?.assignmentStatus.toLowerCase() === 'active') {
+      const permissions = await getPermissionsForRole(assignment.projectRole);
+      if (capabilities.some(capability => permissions.PROJECT_MANAGEMENT?.[capability])) return true;
+    }
+  }
+
+  res.status(403).json({ success: false, error: 'You do not have permission to change this project.' });
+  return false;
+}
+
+class ConsolidationConflict extends Error {}
+
+async function latestBenchmarkReview(tx: Prisma.TransactionClient, projectId: string) {
+  const row = await tx.auditLog.findFirst({
+    where: { moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: 'PROCUREMENT_BENCHMARK_REVIEW_STATE' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { newValue: true },
+  });
+  if (!row) return null;
+  try { return JSON.parse(row.newValue || '{}'); }
+  catch { throw new ConsolidationConflict('The procurement benchmark review state could not be read safely. Preserve the current master materials list and contact an administrator.'); }
+}
+
+async function assertProjectMaterialsReplaceable(tx: Prisma.TransactionClient, projectId: string) {
+  const project = await tx.project.findUnique({ where: { id: projectId }, select: { consolidatedBOQLocked: true } });
+  if (!project) throw new ConsolidationConflict('Project not found. Refresh the project and try again.');
+  if (project.consolidatedBOQLocked) {
+    throw new ConsolidationConflict('The master materials list is locked. Unlock the project BOQ through the existing workflow before replacing or deleting it.');
+  }
+  const benchmarkReview = await latestBenchmarkReview(tx, projectId);
+  if (benchmarkReview && (benchmarkReview.status === 'APPROVED' || benchmarkReview.status === 'GENERATED' || benchmarkReview.materialIds?.length)) {
+    throw new ConsolidationConflict('An approved procurement benchmark is linked to the master materials workflow. Use that benchmark review instead of replacing or deleting its material records.');
+  }
+
+  const items = await tx.consolidatedBOQItem.findMany({
+    where: { projectId },
+    select: { id: true, _count: { select: {
+      mappings: true, canvassItems: true, consumptionItems: true, deliveryItems: true, expenses: true,
+      issuanceItems: true, mrItems: true, pettyCashExpenses: true, poItems: true, returnItems: true,
+      projectCostLedgers: true, commitmentLedgers: true, subcontractorVariationOrders: true,
+      valueEngineeringRecords: true, scheduleAllocations: true, subcontractPackages: true, jobOrders: true,
+    } } },
+  });
+  if (!items.length) return;
+
+  const itemIds = new Set(items.map(item => item.id));
+  const persistedReferences = new Set<string>();
+  const auditRows = await tx.auditLog.findMany({
+    where: {
+      moduleName: 'PROJECT_SCHEDULING',
+      actionType: { in: ['WPS_MATERIAL_REQUIREMENT_SET', 'WPS_MATERIAL_INSTALLED'] },
+      newValue: { contains: `"projectId":"${projectId}"` },
+    },
+    select: { newValue: true },
+  });
+  for (const row of auditRows) {
+    try {
+      const event = JSON.parse(row.newValue || '{}');
+      if (itemIds.has(event.materialId)) persistedReferences.add(String(event.materialId));
+    } catch {
+      throw new ConsolidationConflict('Work-package material history could not be checked safely. Preserve the existing master materials list and contact an administrator.');
+    }
+  }
+
+  const inventoryRow = await tx.workPackageMaterialInventoryState.findUnique({ where: { id: 'global' }, select: { dataJson: true } });
+  if (inventoryRow) {
+    try {
+      const inventory = JSON.parse(inventoryRow.dataJson);
+      for (const collection of ['bindings', 'reservations', 'transfers']) {
+        for (const row of inventory[collection] ?? []) {
+          if (row.projectId === projectId && itemIds.has(row.materialId)) persistedReferences.add(String(row.materialId));
+        }
+      }
+    } catch {
+      throw new ConsolidationConflict('Work-package inventory references could not be checked safely. Preserve the existing master materials list and contact an administrator.');
+    }
+  }
+
+  const relationLabels: Record<string, string> = {
+    mappings: 'BOQ mappings', canvassItems: 'canvass lines', consumptionItems: 'consumption records',
+    deliveryItems: 'delivery records', expenses: 'expenses', issuanceItems: 'issuances', mrItems: 'material requests',
+    pettyCashExpenses: 'petty-cash expenses', poItems: 'purchase orders', returnItems: 'material returns',
+    projectCostLedgers: 'project cost ledger entries', commitmentLedgers: 'commitment ledger entries',
+    subcontractorVariationOrders: 'subcontractor variation orders', valueEngineeringRecords: 'value-engineering records',
+    scheduleAllocations: 'schedule allocations', subcontractPackages: 'subcontract packages', jobOrders: 'job orders',
+  };
+  const references = new Set<string>();
+  for (const item of items) {
+    for (const [relation, count] of Object.entries(item._count)) {
+      if (count > 0) references.add(relationLabels[relation] || relation);
+    }
+  }
+  if (persistedReferences.size) references.add('work-package material requirements, installation, or inventory records');
+  if (references.size) {
+    throw new ConsolidationConflict(`The master materials list is in use by ${[...references].join(', ')}. The existing list was preserved; resolve or archive those references before replacing or deleting it.`);
+  }
+}
 
 // Assuming express.json() middleware is already configured in your main Express app
 // If not, you'd need `router.use(express.json());` here or in your main app file.
@@ -14,15 +147,22 @@ router.post('/:projectId/auto-consolidate', async (req, res) => {
   try {
     const { projectId } = req.params;
     const { force } = req.body;
+    if (!await requireProjectCapability(req, res, projectId, ['canEdit', 'canEditDraft'])) return;
+    if (await latestBenchmarkReview(prisma, projectId)) {
+      throw new ConsolidationConflict('A benchmark review is saved for this project. Generate master materials through its approved review workflow.');
+    }
 
     // Full auto-consolidation logic migrated from Next.js Server Actions
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { procurementBenchmarkLocked: true }
+      select: { procurementBenchmarkLocked: true, consolidatedBOQLocked: true }
     });
 
     if (!project?.procurementBenchmarkLocked) {
       throw new Error('Procurement Benchmark is not locked. Lock it first before consolidating.');
+    }
+    if (project.consolidatedBOQLocked) {
+      throw new ConsolidationConflict('The master materials list is locked. Unlock the project BOQ through the existing workflow before consolidating it again.');
     }
 
     const existing = await prisma.consolidatedBOQItem.count({
@@ -31,14 +171,6 @@ router.post('/:projectId/auto-consolidate', async (req, res) => {
 
     if (existing > 0 && !force) {
       throw new Error('BOQ is already consolidated for this project.');
-    } else if (existing > 0 && force) {
-      // If forcing, clear the existing mappings first
-      await prisma.bOQMapping.deleteMany({
-        where: { consolidatedBoqItem: { projectId } }
-      });
-      await prisma.consolidatedBOQItem.deleteMany({
-        where: { projectId }
-      });
     }
 
     const benchmarkItems = await prisma.procurementBenchmarkItem.findMany({
@@ -49,88 +181,31 @@ router.post('/:projectId/auto-consolidate', async (req, res) => {
       throw new Error('No Procurement Benchmark items found to consolidate.');
     }
 
-    const groups = new Map<string, any>();
-
-    for (const item of benchmarkItems) {
-      let oldItemCode = item.itemCode || 'N/A';
-      if (oldItemCode === 'N/A' || oldItemCode.trim() === '') {
-        oldItemCode = item.description.trim(); // Fallback category to description if missing
-      }
-
-      // Hardcoded rule: User specifically wants this lengthy string renamed to 'ACU PUMPS'
-      if (oldItemCode.includes('5.0m pump Lift') || oldItemCode.includes('BDU513A450VE')) {
-        oldItemCode = 'ACU PUMPS';
-      }
-
-      const currentDescClean = item.description.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      let finalDesc = item.description.trim();
-      let finalUnit = item.unit.trim();
-      
-      // Attempt to find an existing fuzzy-matched group
-      let matchedKey: string | null = null;
-      let globalIsMatch = false;
-
-      for (const [existingKey, group] of groups.entries()) {
-        const existDescClean = group.description.toLowerCase().replace(/[^a-z0-9]/g, '');
-        
-        // Fuzzy match logic
-        let localIsMatch = false;
-        if (currentDescClean === existDescClean && currentDescClean.length > 0) {
-          localIsMatch = true;
-        } else if (currentDescClean.length > 10 && existDescClean.length > 10 && Math.abs(currentDescClean.length - existDescClean.length) <= 2) {
-          if (currentDescClean.startsWith(existDescClean.substring(0, 10)) || existDescClean.startsWith(currentDescClean.substring(0, 10))) {
-            localIsMatch = true;
-          }
-        }
-
-        if (localIsMatch) {
-          matchedKey = existingKey;
-          globalIsMatch = true;
-          break;
-        }
-      }
-
-      let key = matchedKey;
-
-      if (!key) {
-        // Create new group key
-        key = `${oldItemCode.trim().toLowerCase()}|${finalDesc.toLowerCase()}`;
-        groups.set(key, {
-          itemCodePrefix: oldItemCode,
-          description: finalDesc,
-          unit: finalUnit,
-          quantity: 0,
-          totalCost: 0,
-          items: []
-        });
-      }
-
-      const group = groups.get(key)!;
-
-      // Prioritize "pcs" or "pc" over other units if a conflict exists in the group
-      if (finalUnit.toLowerCase().includes('pc') && !group.unit.toLowerCase().includes('pc')) {
-        group.unit = finalUnit;
-      }
-      
-      // Combine total costs
-      group.totalCost += item.totalCost;
-      
-      // If it's a lot, force quantity to 1. Otherwise, sum the quantities.
-      if (group.unit.toLowerCase().includes('lot')) {
-        group.quantity = 1;
-      } else {
-        group.quantity += item.quantity;
-      }
-      
-      group.items.push(item);
-    }
+    const groups = consolidateMaterialRows(benchmarkItems.map(item => ({
+      sourceId: item.id,
+      itemCode: item.itemCode || '',
+      category: '',
+      description: item.description,
+      unit: item.unit,
+      quantity: item.quantity,
+      unitCost: item.unitCost,
+      totalCost: item.totalCost,
+    })));
+    const benchmarkItemsById = new Map(benchmarkItems.map(item => [item.id, item]));
 
     let index = 1;
 
     // Use a transaction for safety with a longer timeout since there are thousands of BOQ mappings
     await prisma.$transaction(async (tx) => {
-      for (const group of groups.values()) {
-        // Calculate weighted unit cost. If quantity is 0, fallback to 0.
+      const currentCount = await tx.consolidatedBOQItem.count({ where: { projectId } });
+      if (currentCount > 0 && !force) throw new ConsolidationConflict('The master materials list changed while consolidation was preparing. Refresh and try again.');
+      if (currentCount > 0 && force) {
+        await assertProjectMaterialsReplaceable(tx, projectId);
+        await tx.bOQMapping.deleteMany({ where: { consolidatedBoqItem: { projectId } } });
+        await tx.consolidatedBOQItem.deleteMany({ where: { projectId } });
+      }
+      for (const group of groups) {
+        // Preserve source benchmark totals; the shared helper calculates the weighted rate.
         const unitCost = group.quantity > 0 ? group.totalCost / group.quantity : 0;
         
         const itemCodePrefix = group.itemCodePrefix || 'N/A';
@@ -154,11 +229,13 @@ router.post('/:projectId/auto-consolidate', async (req, res) => {
         });
 
         // Create mapping links to prove synchronization
-        for (const item of group.items) {
+        for (const sourceId of group.sourceIds) {
+          const item = benchmarkItemsById.get(sourceId);
+          if (!item) throw new Error('A benchmark source item is missing during consolidation.');
           await tx.bOQMapping.create({
             data: {
-              mappingType: group.items.length > 1 ? 'MANY_TO_ONE' : 'ONE_TO_ONE',
-              aiConfidenceScore: 98.5, // Simulated high confidence score for exact text match
+              mappingType: group.sourceIds.length > 1 ? 'MANY_TO_ONE' : 'ONE_TO_ONE',
+              aiConfidenceScore: null,
               procurementBenchmarkItemId: item.id,
               consolidatedBoqItemId: consolidated.id
             }
@@ -166,60 +243,61 @@ router.post('/:projectId/auto-consolidate', async (req, res) => {
         }
       }
     }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 10000,
       timeout: 120000 // 2 minutes to accommodate thousands of AI heuristic mappings
     });
 
-    res.json({ success: true, message: 'Auto-consolidation complete.' });
+    res.json({ success: true, message: 'Auto-consolidation complete using exact material identity and matching units. Source benchmark amounts were preserved; no confidence score was assigned.' });
   } catch (error: any) {
     console.error('AWS Backend Error in autoConsolidateBOQ:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(error instanceof ConsolidationConflict ? 409 : 500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/:projectId/check-replacement', async (req, res) => {
+  try {
+    if (!await requireProjectCapability(req, res, req.params.projectId, ['canView'])) return;
+    await assertProjectMaterialsReplaceable(prisma, req.params.projectId);
+    res.json({ success: true });
+  } catch (error: unknown) {
+    res.status(error instanceof ConsolidationConflict ? 409 : 500).json({ success: false, error: error instanceof Error ? error.message : 'Could not check whether the master materials list can be replaced.' });
   }
 });
 
 router.post('/:projectId/upload', async (req, res) => {
   try {
     const { projectId } = req.params;
+    if (!await requireProjectCapability(req, res, projectId, ['canEdit', 'canEditDraft'])) return;
     // The Next.js Server Action preprocesses the file and sends documentData and parsedItems.
     const { documentData, parsedItems } = req.body;
+    if (!documentData || !Array.isArray(parsedItems) || parsedItems.length === 0) {
+      return res.status(400).json({ success: false, error: 'A source document and at least one valid material line are required. The current master materials list was left unchanged.' });
+    }
 
-    // 1. Create or Update document record
-    const existingDocument = await prisma.document.findFirst({
-      where: { projectId, title: documentData.title },
-    });
-
-    let documentRecord;
-    if (existingDocument) {
-      documentRecord = await prisma.document.update({
-        where: { id: existingDocument.id },
-        data: {
+    await prisma.$transaction(async tx => {
+      await assertProjectMaterialsReplaceable(tx, projectId);
+      const existingDocument = await tx.document.findFirst({ where: { projectId, title: documentData.title } });
+      if (existingDocument) {
+        await tx.document.update({ where: { id: existingDocument.id }, data: {
           fileUrl: documentData.fileUrl,
           fileType: documentData.fileType,
           fileSize: documentData.fileSize,
           updatedAt: new Date(),
-        },
-      });
-    } else {
-      documentRecord = await prisma.document.create({
-        data: {
+        } });
+      } else {
+        await tx.document.create({ data: {
           projectId,
           title: documentData.title,
-          category: 'MASTER_MATERIALS_LIST', // Assign a specific category for this document type
+          category: 'MASTER_MATERIALS_LIST',
           fileUrl: documentData.fileUrl,
           fileType: documentData.fileType,
           fileSize: documentData.fileSize,
-        },
-      });
-    }
+        } });
+      }
 
-    // 2. Clear existing consolidated items for this project before adding new ones
-    await prisma.consolidatedBOQItem.deleteMany({
-      where: { projectId },
-    });
-
-    // 3. Create new consolidated items
-    await prisma.consolidatedBOQItem.createMany({
-      data: parsedItems.map((item: any) => ({
+      await tx.consolidatedBOQItem.deleteMany({ where: { projectId } });
+      await tx.consolidatedBOQItem.createMany({ data: parsedItems.map((item: any) => ({
         projectId,
         itemCode: item.itemCode,
         category: item.category,
@@ -230,20 +308,20 @@ router.post('/:projectId/upload', async (req, res) => {
         unitCost: item.unitCost,
         totalCost: item.totalCost,
         status: item.status,
-        documentId: documentRecord.id, // Link items to the newly created/updated document
-      })),
-    });
+      })) });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     res.json({ success: true, message: 'Master materials list uploaded and consolidated successfully.' });
   } catch (error: any) {
     console.error('AWS Backend Error in uploadMasterMaterialsList:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(error instanceof ConsolidationConflict ? 409 : 500).json({ success: false, error: error.message });
   }
 });
 
 router.post('/items', async (req, res) => {
   try {
     const { projectId, itemCode, category, description, unit, quantity, unitCost } = req.body;
+    if (typeof projectId !== 'string' || !await requireProjectCapability(req, res, projectId, ['canEdit', 'canEditDraft'])) return;
 
     const newConsolidatedItem = await prisma.consolidatedBOQItem.create({
       data: {
@@ -270,27 +348,25 @@ router.post('/items', async (req, res) => {
 router.delete('/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
+    if (!await requireProjectCapability(req, res, projectId, ['canEdit', 'canEditDraft'])) return;
 
-    // Delete all consolidated items associated with the project first
-    await prisma.consolidatedBOQItem.deleteMany({
-      where: { projectId },
-    });
-
-    // Then delete the document record for the master materials list
-    await prisma.document.deleteMany({
-      where: { projectId, category: 'MASTER_MATERIALS_LIST' }, // Assuming this category for deletion
-    });
+    await prisma.$transaction(async tx => {
+      await assertProjectMaterialsReplaceable(tx, projectId);
+      await tx.consolidatedBOQItem.deleteMany({ where: { projectId } });
+      await tx.document.deleteMany({ where: { projectId, category: 'MASTER_MATERIALS_LIST' } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     res.json({ success: true, message: 'Master materials list and associated items deleted.' });
   } catch (error: any) {
     console.error('AWS Backend Error in deleteMasterMaterialsList:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(error instanceof ConsolidationConflict ? 409 : 500).json({ success: false, error: error.message });
   }
 });
 
 router.post('/:projectId/download-template', async (req, res) => {
   try {
     const { projectId } = req.params;
+    if (!await requireProjectCapability(req, res, projectId, ['canView'])) return;
 
     const templateDoc = await prisma.document.findFirst({
       where: { projectId, category: 'BOQ_TEMPLATE' }, // Find the BOQ template document

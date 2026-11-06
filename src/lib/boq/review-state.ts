@@ -123,7 +123,7 @@ export type BOQReviewDocument = {
   }>;
   contract: { verified: boolean; verifiedBy: string | null; verifiedAt: string | null; verificationReason: string | null };
   setAsideAcknowledgement?: { actorId: string; reason: string; at: string } | null;
-  finalApproval?: { actorId: string; at: string; checksum: string } | null;
+  finalApproval?: { actorId: string; at: string; checksum: string; note?: string } | null;
   history: Array<{ action: string; actorId: string; reason: string | null; at: string; before: unknown; after: unknown }>;
 };
 

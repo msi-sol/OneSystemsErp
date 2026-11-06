@@ -2,7 +2,7 @@
 
 import { useTransition, useState } from 'react';
 import { updatePOStatus } from '@/app/actions/poUpdates';
-import { approvePurchaseOrder } from '@/app/actions/poActions';
+import { approvePurchaseOrder, submitPOForApproval } from '@/app/actions/poActions';
 import PermissionGuard from '@/components/PermissionGuard';
 
 interface Props {
@@ -39,6 +39,17 @@ export default function POWorkflowButtons({ poId, status, currentUser, permissio
     });
   }
 
+  function handleSubmit() {
+    if (!currentUser?.id) return;
+    setErrorMsg(null);
+    startTransition(async () => {
+      try {
+        const result = await submitPOForApproval(poId);
+        if (!result.success) setErrorMsg(result.error || 'The purchase order could not be submitted.');
+      } catch (cause) { setErrorMsg(cause instanceof Error ? cause.message : 'The purchase order could not be submitted.'); }
+    });
+  }
+
   return (
     <div style={{ marginTop: '10px' }}>
       {errorMsg && (
@@ -50,7 +61,12 @@ export default function POWorkflowButtons({ poId, status, currentUser, permissio
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
         
         {/* Approval Phase */}
-        {(status === 'DRAFT' || status === 'FOR_REVIEW') && (
+        {status === 'DRAFT' && <PermissionGuard permissions={permissions} moduleName="PURCHASE_ORDER" action="canSubmit">
+          <button onClick={handleSubmit} disabled={isPending} style={{ backgroundColor: 'var(--accent-color)', color: '#000', padding: '10px 20px', border: 0, borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+            {isPending ? 'Submitting…' : 'Submit PO for Review'}
+          </button>
+        </PermissionGuard>}
+        {status === 'FOR_REVIEW' && (
           <>
             <PermissionGuard permissions={permissions} moduleName="PURCHASE_ORDER" action="canApprove">
               <button onClick={handleApprove} disabled={isPending} style={{ backgroundColor: '#00ffa3', color: '#000', padding: '10px 20px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', opacity: isPending ? 0.5 : 1 }} title="Requires canApprove Permission">

@@ -5,6 +5,7 @@ import React from 'react';
 import Link from 'next/link';
 import MRWorkflowButtons from './MRWorkflowButtons';
 import { cookies } from 'next/headers';
+import { getUserPermissions } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,9 @@ export default async function MaterialRequestDetailsPage({ params }: { params: P
   if (!mr) {
     return <div style={{ padding: '20px', color: 'red' }}>Material Request not found.</div>;
   }
+  const permissions = currentUser ? await getUserPermissions(currentUser.id) : {};
+  const actions = ['canEditDraft', 'canSubmit', 'canReview', 'canApprove', 'canReject', 'canReturnForCorrection', 'canCancel'];
+  const capabilities = Object.fromEntries(actions.map(action => [action, Boolean(permissions.IS_ADMIN || permissions.MATERIALS_REQUEST?.[action])]));
 
   return (
     <div style={{ backgroundColor: '#f0f2f5', minHeight: '100vh', padding: '40px 20px', fontFamily: '"Arial", sans-serif' }}>
@@ -53,7 +57,7 @@ export default async function MaterialRequestDetailsPage({ params }: { params: P
             <span className={`badge-${mr.status}`} style={{ fontWeight: 'bold', padding: '6px 12px', borderRadius: '20px', backgroundColor: 'var(--bg-dark)' }}>{mr.status.replace('_', ' ')}</span>
           </div>
         </div>
-        <MRWorkflowButtons mrId={mr.id} status={mr.status} currentUser={currentUser} />
+        <MRWorkflowButtons mrId={mr.id} status={mr.status} currentUser={currentUser} capabilities={capabilities} />
       </div>
 
       {/* Printable MRF Document */}

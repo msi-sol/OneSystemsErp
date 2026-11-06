@@ -11,6 +11,52 @@ import * as path from 'path';
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import ExcelJS from 'exceljs';
 import { cookies } from 'next/headers';
+import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
+import { materialQuantity } from '@/lib/procurement/material-values';
+import { hasPermission } from '@/lib/permissions';
+import { assertMaterialRequestAllowance, assertMaterialRequestTransition } from '@/lib/boq/benchmark-request-allowance';
+
+async function requireMaterialRequestActor(mrId: string, capabilities: string[]) {
+  const actor = await verifySession();
+  if (!actor || actor.mustChangePassword) throw new Error('Sign in before changing a material request.');
+  const request = await prisma.materialRequest.findUnique({ where: { id: mrId }, select: { projectId: true } });
+  if (!request || !await actorCanAccessProject(actor, request.projectId, ['canView'])) throw new Error('Material request is not available in your project access.');
+  if (!(await Promise.all(capabilities.map(action => hasPermission(actor.id, 'MATERIALS_REQUEST', action)))).some(Boolean)) throw new Error('You do not have permission for this material request action.');
+  return actor;
+}
+
+async function requireMaterialRequestCreation(projectId: string) {
+  const actor = await verifySession();
+  if (!actor || actor.mustChangePassword || !await hasPermission(actor.id, 'MATERIALS_REQUEST', 'canCreate') || !await actorCanAccessProject(actor, projectId, ['canView'])) throw new Error('You do not have permission to create material requests for this project.');
+  return actor;
+}
+
+async function assertProcurementBenchmarkReplaceable(tx: Prisma.TransactionClient, projectId: string) {
+  const project = await tx.project.findUnique({ where: { id: projectId }, select: { procurementBenchmarkLocked: true } });
+  if (!project) throw new Error('Project not found. Refresh the project and try again.');
+  if (project.procurementBenchmarkLocked) {
+    throw new Error('The procurement benchmark is locked. Preserve it and ask a project administrator to resolve the lock; this legacy action cannot unlock or replace a locked benchmark.');
+  }
+  const reviewState = await tx.auditLog.findFirst({
+    where: { moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: 'PROCUREMENT_BENCHMARK_REVIEW_STATE' },
+    select: { id: true },
+  });
+  if (reviewState) {
+    throw new Error('A benchmark review is already saved for this project. Use the benchmark review workspace; the legacy upload/delete action cannot replace its source or review history.');
+  }
+  const mapping = await tx.bOQMapping.findFirst({ where: { procurementBenchmarkItem: { is: { projectId } } }, select: { id: true } });
+  if (mapping) {
+    throw new Error('This procurement benchmark is already linked to the master materials list. Preserve the current benchmark and resolve its consolidation before replacing or deleting it.');
+  }
+}
+
+async function requireProjectCapability(projectId: string, capabilities: string[], message: string) {
+  const actor = await verifySession();
+  if (!actor || actor.mustChangePassword) throw new Error('Unauthorized: sign in before changing this project.');
+  if (!await actorCanAccessProject(actor, projectId, capabilities)) throw new Error(message);
+  return actor;
+}
 
 async function requireProjectTemplateView(projectId: string) {
   const actor = await verifySession();
@@ -121,8 +167,8 @@ export async function createProject(formData: FormData) {
   let name = boqFile.name.replace(/\.[^/.]+$/, ""); // fallback to filename
   let location = 'Unknown Location';
   let description = `Automated Project Import from BOQ File: ${boqFile.name}`;
-  let contractAmount = 0;
   
+  let contractAmount = 0;
   let parsedItems: any[] = [];
   // Process file in memory for parsing
   const buffer = Buffer.from(await boqFile.arrayBuffer());
@@ -545,18 +591,17 @@ export async function createProject(formData: FormData) {
 }
 
 export async function uploadProcurementBenchmark(formData: FormData) {
-  const actor = await verifySession();
-  if (!actor) throw new Error('Unauthorized: sign in before uploading a procurement benchmark.');
-
   const projectId = formData.get('projectId') as string;
   const boqFile = formData.get('benchmarkFile') as File | null;
   if (!boqFile || boqFile.size === 0) {
     throw new Error('No file uploaded');
   }
+  if (!projectId) throw new Error('Select a project before uploading a procurement benchmark.');
+  const actor = await requireProjectCapability(projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project procurement benchmark.');
+  await assertProcurementBenchmarkReplaceable(prisma as unknown as Prisma.TransactionClient, projectId);
 
   let parsedItems: any[] = [];
   const buffer = Buffer.from(await boqFile.arrayBuffer());
-  let contractAmount = 0;
 
   // Parse Excel file
   const workbookXlsx = xlsx.read(buffer, { type: 'buffer' });
@@ -676,7 +721,6 @@ export async function uploadProcurementBenchmark(formData: FormData) {
             totalCost: amount,
             status: 'PENDING'
           });
-          contractAmount += amount;
         }
         
         currentRowNum++;
@@ -745,52 +789,29 @@ export async function uploadProcurementBenchmark(formData: FormData) {
             totalCost: totalCost,
             status: 'PENDING'
           });
-          contractAmount += totalCost;
         }
       }
     }
   }
 
-  // Clear existing un-locked items and insert new ones
+  if (parsedItems.length === 0) throw new Error('No benchmark line items were found. The current benchmark was left unchanged.');
+
   const contentType = boqFile.type || (boqFile.name.toLowerCase().endsWith('.xls')
     ? 'application/vnd.ms-excel'
     : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  const storedFile = await put(`projects/${projectId}/procurement-benchmark/${boqFile.name}`, buffer, {
+  const storedFile = await put(`projects/${projectId}/procurement-benchmark/${randomUUID()}-${boqFile.name}`, buffer, {
     contentType,
     module: 'PROJECT_MANAGEMENT',
     projectId,
     uploadedBy: actor.id,
   });
 
-  await prisma.procurementBenchmarkItem.deleteMany({
-    where: { projectId }
-  });
-
-  if (parsedItems.length > 0) {
-    await prisma.procurementBenchmarkItem.createMany({
-      data: parsedItems
-    });
-    
-    if (isMasterTemplate) {
-      await prisma.project.update({
-        where: { id: projectId },
-        data: {
-          contractAmountVATInclusive: true,
-
-        }
-      });
-    } else {
-      await prisma.project.update({
-        where: { id: projectId },
-        data: {
-          contractAmountVATInclusive: true,
-        }
-      });
-    }
-  }
-
-  await prisma.document.create({
-    data: {
+  await prisma.$transaction(async tx => {
+    await assertProcurementBenchmarkReplaceable(tx as unknown as Prisma.TransactionClient, projectId);
+    await tx.procurementBenchmarkItem.deleteMany({ where: { projectId } });
+    await tx.procurementBenchmarkItem.createMany({ data: parsedItems });
+    await tx.project.update({ where: { id: projectId }, data: { contractAmountVATInclusive: true } });
+    await tx.document.create({ data: {
       projectId,
       title: `Procurement Benchmark: ${boqFile.name}`,
       category: 'PROCUREMENT_BENCHMARK_SOURCE',
@@ -798,7 +819,7 @@ export async function uploadProcurementBenchmark(formData: FormData) {
       fileType: contentType,
       fileSize: buffer.length,
       uploaderId: actor.id,
-    }
+    } });
   });
 
   revalidatePath(`/projects/${projectId}`);
@@ -806,6 +827,7 @@ export async function uploadProcurementBenchmark(formData: FormData) {
 
 export async function createMaterialRequest(formData: FormData) {
   const projectId = formData.get('projectId') as string;
+  const actor = await requireMaterialRequestCreation(projectId);
   const requestedById = formData.get('requestedById') as string;
   const description = formData.get('description') as string;
   
@@ -818,6 +840,7 @@ export async function createMaterialRequest(formData: FormData) {
       mrNumber,
       projectId,
       requesterId: requestedById,
+      preparerId: actor.id,
       status: 'DRAFT',
       remarks: description,
     }
@@ -839,10 +862,14 @@ export async function generateMRFFromConsolidated(data: {
   items: { consolidatedBoqItemId: string; quantity: number; breakdownData?: any }[];
 }) {
   const { projectId, requesterId, purpose, priority, locationOfUse, dateNeeded, remarks, items } = data;
+  const actor = await requireMaterialRequestCreation(projectId);
 
-  if (!items || items.length === 0) {
+  if (!items || items.length === 0 || items.length > 200) {
     throw new Error('No items selected for the material request.');
   }
+  if (items.some(item => !Number.isFinite(item.quantity) || item.quantity <= 0)) throw new Error('Material request quantities must be positive finite numbers.');
+  const materialIds = [...new Set(items.map(item => item.consolidatedBoqItemId))];
+  if (await prisma.consolidatedBOQItem.count({ where: { projectId, id: { in: materialIds } } }) !== materialIds.length) throw new Error('Every requested material must belong to the intended project.');
 
   // Assign a temporary Draft ID until it passes AI Validation
   const mrNumber = `DRAFT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -852,6 +879,7 @@ export async function generateMRFFromConsolidated(data: {
       mrNumber,
       projectId,
       requesterId,
+      preparerId: actor.id,
       status: 'DRAFT',
       purpose,
       priority,
@@ -875,6 +903,7 @@ export async function generateMRFFromConsolidated(data: {
 
 // AI Validation for MRF (deterministic checks)
 export async function runMRFAIValidation(mrId: string) {
+  await requireMaterialRequestActor(mrId, ['canEditDraft', 'canSubmit']);
   const mr = await prisma.materialRequest.findUnique({
     where: { id: mrId },
     include: {
@@ -888,6 +917,7 @@ export async function runMRFAIValidation(mrId: string) {
   });
 
   if (!mr) throw new Error('Material Request not found');
+  if (!['DRAFT', 'AI_CHECKING', 'RETURNED'].includes(mr.status)) throw new Error('Only a draft or returned material request can be checked. Submitted quantities stay reserved.');
 
   const findings: string[] = [];
   let riskLevel = 'LOW';
@@ -902,7 +932,7 @@ export async function runMRFAIValidation(mrId: string) {
       consolidatedBoqItemId: { in: consolidatedBoqItemIds },
       mr: {
         projectId: mr.projectId,
-        status: { in: ['DRAFT', 'SUBMITTED', 'FOR_REVIEW', 'APPROVED'] },
+        status: { notIn: ['DRAFT', 'AI_CHECKING', 'CANCELLED', 'REJECTED'] },
         id: { not: mrId },
       },
     },
@@ -911,7 +941,8 @@ export async function runMRFAIValidation(mrId: string) {
   for (const item of mr.items) {
     if (!item.consolidatedBoqItem) continue;
     const boqItem = item.consolidatedBoqItem;
-    const boqBalance = boqItem.revisedQuantity - boqItem.deliveredQty;
+    const allowedQuantity = materialQuantity(boqItem);
+    const boqBalance = allowedQuantity - boqItem.deliveredQty;
 
     // Check if requested quantity exceeds BOQ balance
     if (item.quantity > boqBalance) {
@@ -922,9 +953,9 @@ export async function runMRFAIValidation(mrId: string) {
     }
 
     // Check if requested quantity exceeds total BOQ quantity
-    if (item.quantity > boqItem.revisedQuantity) {
+    if (item.quantity > allowedQuantity) {
       findings.push(
-        `🚨 EXCEEDS BOQ: "${boqItem.description}" — Requested ${item.quantity} ${boqItem.unit} exceeds total revised BOQ quantity of ${boqItem.revisedQuantity} ${boqItem.unit}.`
+        `🚨 EXCEEDS BOQ: "${boqItem.description}" — Requested ${item.quantity} ${boqItem.unit} exceeds total revised BOQ quantity of ${allowedQuantity} ${boqItem.unit}.`
       );
       riskLevel = 'CRITICAL';
     }
@@ -980,15 +1011,16 @@ export async function runMRFAIValidation(mrId: string) {
   }
 
   // Update the MR with AI validation results
-  await prisma.materialRequest.update({
-    where: { id: mrId },
+  const updated = await prisma.materialRequest.updateMany({
+    where: { id: mrId, status: mr.status },
     data: {
-      status: 'AI_CHECKING',
+      status: mr.status === 'RETURNED' ? 'RETURNED' : 'AI_CHECKING',
       aiValidationRisk: riskLevel,
       aiValidationNotes: findings.join('\n'),
       mrNumber: officialMrNumber,
     },
   });
+  if (updated.count !== 1) throw new Error('The request changed during checking. Refresh before continuing.');
 
   revalidatePath(`/material-requests/${mrId}`);
   revalidatePath('/material-requests');
@@ -997,22 +1029,26 @@ export async function runMRFAIValidation(mrId: string) {
 
 // Update MR status (workflow transitions)
 export async function updateMRStatus(mrId: string, newStatus: string, userId?: string) {
-  const updateData: any = { status: newStatus };
-  
-  if (newStatus === 'APPROVED' && userId) {
-    updateData.approverId = userId;
-  }
-  if (newStatus === 'FOR_REVIEW' && userId) {
-    updateData.checkerId = userId;
-  }
-  if (newStatus === 'SUBMITTED' && userId) {
-    updateData.preparerId = userId;
-  }
-
-  await prisma.materialRequest.update({
-    where: { id: mrId },
-    data: updateData,
-  });
+  // Keep the legacy argument for callers; identity always comes from the session.
+  void userId;
+  const capability: Record<string, string> = { SUBMITTED: 'canSubmit', FOR_REVIEW: 'canReview', APPROVED: 'canApprove', REJECTED: 'canReject', RETURNED: 'canReturnForCorrection', CANCELLED: 'canCancel' };
+  if (!capability[newStatus]) throw new Error('Unsupported material request action.');
+  const actor = await requireMaterialRequestActor(mrId, [capability[newStatus]]);
+  await prisma.$transaction(async rawTx => {
+    const tx = rawTx as unknown as Prisma.TransactionClient;
+    const mr = await tx.materialRequest.findUnique({ where: { id: mrId } });
+    if (!mr) throw new Error('Material request not found.');
+    assertMaterialRequestTransition(mr.status, newStatus);
+    if (newStatus === 'APPROVED' && (mr.preparerId || mr.requesterId) === actor.id && !['SUPER_ADMIN', 'ADMIN'].includes(actor.role)) throw new Error('Self-approval is prohibited. Ask an authorized independent approver to review this request.');
+    await assertMaterialRequestAllowance(tx, mr.projectId, mrId, newStatus);
+    const updateData: Prisma.MaterialRequestUncheckedUpdateManyInput = { status: newStatus };
+    if (newStatus === 'APPROVED') updateData.approverId = actor.id;
+    if (newStatus === 'FOR_REVIEW') updateData.checkerId = actor.id;
+    if (newStatus === 'SUBMITTED') updateData.preparerId = actor.id;
+    const changed = await tx.materialRequest.updateMany({ where: { id: mrId, status: mr.status }, data: updateData });
+    if (changed.count !== 1) throw new Error('The request changed. Refresh before retrying.');
+    await tx.auditLog.create({ data: { userId: actor.id, userRole: actor.role, moduleName: 'MATERIALS_REQUEST', transactionId: mrId, actionType: 'CHANGE_STATUS', oldValue: mr.status, newValue: newStatus, remarks: `Project ${mr.projectId}` } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
   revalidatePath(`/material-requests/${mrId}`);
   revalidatePath('/material-requests');
@@ -1020,25 +1056,10 @@ export async function updateMRStatus(mrId: string, newStatus: string, userId?: s
 
 
 export async function deleteProcurementBenchmark(projectId: string) {
-  // Only allow if not locked
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { procurementBenchmarkLocked: true }
-  });
-
-  // Allow deletion even if locked, but maybe warn in the UI
-  // if (project.procurementBenchmarkLocked) {
-  //   throw new Error('Cannot delete a locked Procurement Benchmark.');
-  // }
-
-  await prisma.procurementBenchmarkItem.deleteMany({
-    where: { projectId }
-  });
-
-  // Reset the locked status so the user can upload a new benchmark
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { procurementBenchmarkLocked: false }
+  await requireProjectCapability(projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project procurement benchmark.');
+  await prisma.$transaction(async tx => {
+    await assertProcurementBenchmarkReplaceable(tx as unknown as Prisma.TransactionClient, projectId);
+    await tx.procurementBenchmarkItem.deleteMany({ where: { projectId } });
   });
 
   revalidatePath(`/projects/${projectId}`);
@@ -1059,18 +1080,25 @@ export async function lockProjectBOQ(projectId: string) {
 }
 
 export async function toggleConsolidatedBOQLock(id: string, lockState: boolean) {
-  await prisma.project.update({
-    where: { id },
-    data: { consolidatedBOQLocked: lockState }
-  });
+  await requireProjectCapability(id, lockState ? ['canApprove', 'canLock'] : ['canUnlockWithAuthorization'], 'You do not have permission to change this project material-list lock.');
+  await prisma.$transaction(async tx => {
+    const review = await tx.auditLog.findFirst({ where: { moduleName: 'PROJECT_MANAGEMENT', transactionId: id, actionType: 'PROCUREMENT_BENCHMARK_REVIEW_STATE' }, select: { id: true } });
+    if (review) throw new Error('This project uses reviewed benchmark materials. Use its controlled review workflow; the legacy lock action cannot change its approved state.');
+    await tx.project.update({ where: { id }, data: { consolidatedBOQLocked: lockState } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   revalidatePath(`/projects/${id}`);
 }
 
 export async function lockProcurementBenchmark(projectId: string) {
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { procurementBenchmarkLocked: true }
-  });
+  await requireProjectCapability(projectId, ['canApprove', 'canLock'], 'You do not have permission to approve or lock this project procurement benchmark.');
+  await prisma.$transaction(async tx => {
+    const reviewState = await tx.auditLog.findFirst({
+      where: { moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: 'PROCUREMENT_BENCHMARK_REVIEW_STATE' },
+      select: { id: true },
+    });
+    if (reviewState) throw new Error('A benchmark review is saved for this project. Use its review and approval workflow; the legacy lock action cannot change its state.');
+    await tx.project.update({ where: { id: projectId }, data: { procurementBenchmarkLocked: true } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   revalidatePath(`/projects/${projectId}`);
 }
 

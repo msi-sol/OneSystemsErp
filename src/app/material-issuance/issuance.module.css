@@ -1,0 +1,111 @@
+.overlay {
+  z-index: 11000 !important;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.dialog {
+  min-width: 0;
+  max-height: calc(100dvh - 40px) !important;
+  overflow-wrap: anywhere;
+}
+
+.dialogHeader {
+  flex-shrink: 0;
+  gap: 16px;
+}
+
+.dialogHeader > :first-child {
+  min-width: 0;
+}
+
+.dialogHeader > button {
+  flex-shrink: 0;
+}
+
+.dialogBody {
+  min-width: 0;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 25px;
+}
+
+.facts > * {
+  min-width: 0;
+}
+
+.facts :is(input, select) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.itemScroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.itemGrid {
+  min-width: 780px;
+}
+
+.tableScroll {
+  max-width: 100%;
+  overflow-x: auto !important;
+  overscroll-behavior-inline: contain;
+}
+
+.tableScroll table {
+  min-width: 560px;
+  overflow-wrap: normal;
+}
+
+.tableScroll th,
+.tableScroll td:last-child,
+.tableScroll td span {
+  white-space: nowrap;
+}
+
+.tableScroll td:first-child {
+  min-width: 180px;
+}
+
+.actions {
+  flex-wrap: wrap;
+}
+
+.sectionHeading {
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+@media (max-width: 600px) {
+  .dialogHeader {
+    padding: 20px 16px !important;
+    align-items: flex-start !important;
+  }
+
+  .dialogHeader h2 {
+    font-size: 1.3rem !important;
+  }
+
+  .dialogBody {
+    padding: 20px 16px !important;
+  }
+
+  .facts {
+    padding: 16px !important;
+  }
+
+  .actions > button {
+    flex: 1 1 180px;
+  }
+}

@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
+import Link from 'next/link';
 import { prisma } from '@/lib/prisma';
 import { getSessionActor } from '@/lib/scheduling/authUtils';
 import { planningCapacity } from '@/lib/scheduling/planning-capacity';
@@ -75,5 +76,5 @@ export default async function WorkPackagesModulePage({params,searchParams}:{para
   }
   return <PlanningModuleShell project={project} active="work-packages"><WorkPackageModuleClient key={`${selected?.id||'empty'}:${query.package||query.view||'schedule'}:${query.activity||''}`} projectId={id} projectStartDate={project.startDate?.toISOString()||null}
     approvedBOQ={project.boqLocked&&!!version&&['APPROVED','LOCKED'].includes(version.status)} boqItems={project.awardedBoqItems} schedule={schedule} summary={summary} capacity={{canEdit:capacity.canEditPlan,canEngineerReview:capacity.canReviewPlan,canApprove:capacity.canApprovePlan,canRecordSiteLogs:capacity.canRecordSiteLogs,canManageWeekly:capacity.canManageWeekly}}
-    members={project.userAssignments.map(assignment=>({id:assignment.user.id,name:assignment.user.name||'Project member'}))} initialView={query.view} initialPackage={query.package} revisionComparison={revisionComparison} executionWarning={executionWarning} executionActivityId={query.activity} hasOpenDraft={!!draft}/></PlanningModuleShell>;
+    members={project.userAssignments.map(assignment=>({id:assignment.user.id,name:assignment.user.name||'Project member'}))} initialView={query.view} initialPackage={query.package} revisionComparison={revisionComparison} executionWarning={executionWarning} executionActivityId={query.activity} hasOpenDraft={!!draft}/>{activeBaseline && <p style={{margin:'24px 0 0',lineHeight:1.7,color:'var(--text-secondary)'}}>Next: review the procurement budget, then generate package-linked materials. <Link href={`/projects/${id}/benchmark`} style={{color:'var(--accent-color)',textDecoration:'underline'}}>Open procurement benchmark review →</Link></p>}</PlanningModuleShell>;
 }

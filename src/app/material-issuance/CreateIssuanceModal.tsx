@@ -1,11 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { getConsolidatedItemsForIssuance, createIssuanceSlip } from '../actions/issuanceActions';
 import { submitAIOverrideRequest } from '../actions/aiOverrideActions';
+import styles from './issuance.module.css';
 
 export default function CreateIssuanceModal({ projects, users, onClose }: { projects: any[], users: any[], onClose: () => void }) {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState('');
   const [projectId, setProjectId] = useState('');
   const [foremanId, setForemanId] = useState('');
   const [activity, setActivity] = useState('');
@@ -18,16 +23,25 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
 
   // Fetch BOQ Items when project changes
   useEffect(() => {
+    let active = true;
+    setBoqItems([]);
+    setItems([{ consolidatedBoqItemId: '', requestedQty: 1 }]);
+    setInventoryError('');
+    setValidationLogId(null);
+    setOverrideSuccess(false);
     if (projectId) {
+      setInventoryLoading(true);
       getConsolidatedItemsForIssuance(projectId).then(res => {
-        if (res.success) {
-          setBoqItems(res.data || []);
-        }
-      });
+        if (!active) return;
+        if (!res.success || !Array.isArray(res.data)) throw new Error(res.error || 'Could not load project stock.');
+        setBoqItems(res.data);
+      }).catch(caught => {
+        if (active) setInventoryError(caught instanceof Error ? caught.message : 'Could not load project stock.');
+      }).finally(() => { if (active) setInventoryLoading(false); });
     } else {
-      setBoqItems([]);
-      setItems([{ consolidatedBoqItemId: '', requestedQty: 1 }]);
+      setInventoryLoading(false);
     }
+    return () => { active = false; };
   }, [projectId]);
 
   const addItem = () => {
@@ -54,6 +68,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (inventoryLoading || inventoryError) return;
     if (!projectId || !foremanId || !activity || items.length === 0) {
       setError('Please fill all required fields and add at least one item.');
       return;
@@ -81,18 +96,18 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
     setLoading(true);
     setError('');
 
-    const res = await createIssuanceSlip({
-      projectId,
-      foremanId,
-      activity,
-      items
-    });
-
-    if (res.success) {
-      onClose();
-    } else {
-      setError(res.error || 'Failed to create slip');
-      setValidationLogId(res.validationLogId || null);
+    try {
+      const res = await createIssuanceSlip({ projectId, foremanId, activity, items });
+      if (res.success) {
+        router.refresh();
+        onClose();
+      } else {
+        setError(res.error || 'Failed to create slip');
+        setValidationLogId(res.validationLogId || null);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to create slip.');
+    } finally {
       setLoading(false);
     }
   };
@@ -120,7 +135,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
   };
 
   return (
-    <div style={{
+    <div className={styles.overlay} style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
       backgroundColor: 'rgba(10, 15, 26, 0.85)',
@@ -131,7 +146,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
       zIndex: 1000,
       padding: '20px'
     }}>
-      <div style={{
+      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label="Material Issuance Slip" style={{
         background: 'var(--bg-secondary)',
         borderRadius: '16px',
         width: '100%',
@@ -144,7 +159,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
       }}>
         
         {/* Header */}
-        <div style={{
+        <div className={styles.dialogHeader} style={{
           padding: '25px 35px',
           borderBottom: '1px solid var(--glass-border)',
           display: 'flex',
@@ -178,7 +193,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ padding: '35px', display: 'flex', flexDirection: 'column', gap: '30px' }}>
+        <form className={styles.dialogBody} onSubmit={handleSubmit} style={{ padding: '35px', display: 'flex', flexDirection: 'column', gap: '30px' }}>
           
           {error && (
             <div style={{ 
@@ -214,7 +229,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
           )}
 
           {/* Section 1: General Info */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '25px' }}>
+          <div className={styles.facts}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--accent-color)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Project Reference
@@ -293,7 +308,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
 
           {/* Section 2: Items Table */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '2px solid var(--glass-border)', paddingBottom: '15px', marginBottom: '20px' }}>
+            <div className={styles.sectionHeading} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '2px solid var(--glass-border)', paddingBottom: '15px', marginBottom: '20px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.3rem', color: '#fff', fontWeight: '600' }}>Item Requisition List</h3>
                 <p style={{ margin: '5px 0 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
@@ -332,9 +347,13 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
             )}
 
             {projectId && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              <>
+              {inventoryLoading && <p role="status">Loading available project stock…</p>}
+              {inventoryError && <p role="alert">{inventoryError}</p>}
+              {!inventoryLoading && !inventoryError && boqItems.length === 0 && <p>No available stock for this project. Receive and approve deliveries, or transfer stock to this project, before issuing materials.</p>}
+              <div className={styles.itemScroll} role="region" aria-label="Issuance materials" tabIndex={0} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                 {/* Headers */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(400px, 4fr) 1.5fr 1fr 80px', gap: '20px', padding: '0 15px', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div className={styles.itemGrid} style={{ display: 'grid', gridTemplateColumns: 'minmax(400px, 4fr) 1.5fr 1fr 80px', gap: '20px', padding: '0 15px', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   <div>Material Specification</div>
                   <div>Available Stock</div>
                   <div>Req. Qty</div>
@@ -348,7 +367,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                   const unit = boqItem ? boqItem.unit : '';
 
                   return (
-                    <div key={index} style={{ 
+                    <div key={index} className={styles.itemGrid} style={{
                       display: 'grid', 
                       gridTemplateColumns: 'minmax(400px, 4fr) 1.5fr 1fr 80px', 
                       gap: '20px', 
@@ -464,11 +483,12 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                   );
                 })}
               </div>
+              </>
             )}
           </div>
 
           {/* Footer Actions */}
-          <div style={{
+          <div className={styles.actions} style={{
             marginTop: '10px',
             paddingTop: '25px',
             borderTop: '1px solid var(--glass-border)',
@@ -504,7 +524,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
             </button>
             <button 
               type="submit" 
-              disabled={loading || !projectId}
+              disabled={loading || !projectId || inventoryLoading || !!inventoryError || boqItems.length === 0}
               style={{
                 padding: '12px 35px',
                 borderRadius: '8px',

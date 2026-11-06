@@ -16,4 +16,8 @@ describe('real package material demand and purchase headroom',()=>{
   tx.consolidatedBOQItem.findMany.mockResolvedValue([{id:'cement',description:'Cement',unit:'bag',deliveredQty:500,consumedQty:80}]);
   const [row]=await readPackageMaterialPlanning(tx as unknown as Prisma.TransactionClient,'project','package');expect(row.shortage).toBe('0');expect(row.pendingRequests).toBe('0');
  });
+ it.each(['DRAFT','AI_CHECKING'])('does not reserve demand for an unsubmitted %s request',async(status)=>{
+  const tx=setup();tx.materialRequest.findMany.mockResolvedValue([{id:'mr',status,items:[{consolidatedBoqItemId:'cement',quantity:100,approvedQuantity:80}],purchaseOrders:[]}]);
+  const [row]=await readPackageMaterialPlanning(tx as unknown as Prisma.TransactionClient,'project','package');expect(row.pendingRequests).toBe('0');expect(row.shortage).toBe('110');
+ });
 });

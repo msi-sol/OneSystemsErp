@@ -3,6 +3,7 @@
 import React, { useState, useTransition } from 'react';
 import { generateMRFFromConsolidated } from '@/app/actions/mutations';
 import { useRouter } from 'next/navigation';
+import { materialQuantity } from '@/lib/procurement/material-values';
 
 interface ConsolidatedItem {
   id: string;
@@ -18,6 +19,7 @@ interface ConsolidatedItem {
   sourceVoNumber?: string | null;
   revisedQuantity?: number;
   voAdditiveQty?: number;
+  voDeductiveQty?: number;
 }
 
 interface Props {
@@ -291,7 +293,7 @@ export default function NewMRFForm({ projectId, items, users }: Props) {
                   </thead>
                   <tbody>
                     {filteredDropdownItems.map(item => {
-                      const effectiveQty = (item.revisedQuantity && item.revisedQuantity > 0) ? item.revisedQuantity : item.quantity;
+                      const effectiveQty = materialQuantity(item);
                       const isVO = item.isVariationItem;
                       return (
                         <tr 
@@ -355,7 +357,7 @@ export default function NewMRFForm({ projectId, items, users }: Props) {
               </thead>
               <tbody>
                 {selectedItemsList.map(item => {
-                  const effectiveQty = (item.revisedQuantity && item.revisedQuantity > 0) ? item.revisedQuantity : item.quantity;
+                  const effectiveQty = materialQuantity(item);
                   const balance = Math.max(0, effectiveQty - item.deliveredQty);
                   const isOverRequest = typeof quantities[item.id] === 'number' && (quantities[item.id] as number) > balance;
                   const isVO = item.isVariationItem;

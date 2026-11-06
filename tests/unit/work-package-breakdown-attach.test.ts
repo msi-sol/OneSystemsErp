@@ -99,7 +99,7 @@ describe('attach package breakdown evidence', () => {
     const saveData = tx.projectSchedule.updateMany.mock.calls[0][0].data;
     const savedDetails = JSON.parse(saveData.description);
 
-    expect(storeWorkspaceOriginal).toHaveBeenCalledWith(savedDetails.breakdownUploads[0].id, 'project-a', fileHash, buffer);
+    expect(storeWorkspaceOriginal).toHaveBeenCalledWith(savedDetails.breakdownUploads[0].id, 'project-a', fileHash, buffer, 'dupa.xlsx');
     expect((storeWorkspaceOriginal as jest.Mock).mock.calls[0][3]).toBe(buffer);
     expect(result).toMatchObject({ rowVersion: 9, scheduleId: 'schedule-a' });
     expect(savedDetails).toMatchObject({ legacyNote: 'keep existing note', resources: [] });

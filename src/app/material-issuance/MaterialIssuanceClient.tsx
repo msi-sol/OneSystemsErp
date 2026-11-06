@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import styles from '../projects/page.module.css';
+import issuanceStyles from './issuance.module.css';
+import { returnableMaterials } from '@/lib/procurement/material-returns';
 import CreateIssuanceModal from './CreateIssuanceModal';
 import IssuanceDetailsModal from './IssuanceDetailsModal';
 
@@ -43,7 +45,7 @@ export default function MaterialIssuanceClient({ issuances, projects, users, ret
   return (
     <>
       <div className={styles.headerActions} style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '20px' }}>
-        <div style={{ display: 'flex', gap: '10px', background: 'rgba(0,0,0,0.2)', padding: '5px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+        <div className={issuanceStyles.tabs} style={{ background: 'rgba(0,0,0,0.2)', padding: '5px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
           <button 
             onClick={() => setActiveTab('ISSUANCES')}
             style={{ 
@@ -220,7 +222,7 @@ export default function MaterialIssuanceClient({ issuances, projects, users, ret
       )}
       {isCreateReturnOpen && (
         <CreateReturnModal 
-          releasedIssuances={issuances.filter(i => i.status === 'RELEASED')}
+          releasedIssuances={issuances.filter(i => ['RELEASED', 'COMPLETED'].includes(i.status) && returnableMaterials(i).length > 0)}
           onClose={() => setIsCreateReturnOpen(false)} 
         />
       )}

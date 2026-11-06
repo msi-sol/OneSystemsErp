@@ -23,7 +23,7 @@ export async function readPackageMaterialPlanning(tx:Prisma.TransactionClient,pr
   const installed=events.filter(event=>event.actionType==='WPS_MATERIAL_INSTALLED').reduce((sum,event)=>{const value=payload(event);return value?.materialId===material.id?sum.plus(String(value.quantity)):sum;},new Prisma.Decimal(0));
   let pending=new Prisma.Decimal(0),openPurchaseOrders=new Prisma.Decimal(0);
   for(const record of ownedRequests){
-   const requested=['CANCELLED','REJECTED'].includes(record.status)?new Prisma.Decimal(0):record.items.filter(row=>row.consolidatedBoqItemId===material.id).reduce((total,row)=>total.plus(String(row.approvedQuantity??row.quantity)),new Prisma.Decimal(0));
+   const requested=['DRAFT','AI_CHECKING','CANCELLED','REJECTED'].includes(record.status)?new Prisma.Decimal(0):record.items.filter(row=>row.consolidatedBoqItemId===material.id).reduce((total,row)=>total.plus(String(row.approvedQuantity??row.quantity)),new Prisma.Decimal(0));
    const orders=record.purchaseOrders.filter(row=>['APPROVED','ISSUED','PARTIALLY_DELIVERED','DELIVERED','COMPLETED'].includes(row.status));
    const ordered=orders.flatMap(order=>order.items).filter(row=>row.consolidatedBoqItemId===material.id).reduce((total,row)=>total.plus(String(row.quantity)),new Prisma.Decimal(0));
    const delivered=orders.flatMap(order=>order.deliveries).filter(delivery=>['APPROVED','COMPLETED'].includes(delivery.status)).flatMap(delivery=>delivery.items).filter(row=>row.consolidatedBoqItemId===material.id).reduce((total,row)=>total.plus(String(row.quantity)),new Prisma.Decimal(0));

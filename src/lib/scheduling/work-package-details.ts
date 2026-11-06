@@ -91,12 +91,17 @@ function applyBreakdown(details: PlanDetails, upload: PackageBreakdownUpload, bo
   const reason = requiredText(body.reason, 'Explain how this upload relates to the existing package budget.', 500);
   if (reason.length < 5) fail('Add a reason of at least five characters.');
   const existing = details.resources.filter(row => row.activityId === upload.activityId);
-  if (existing.length && body.acknowledgeExisting !== true) conflict('Review the existing package costs and explicitly acknowledge adding these rows. Remove obsolete draft allowances separately if needed.');
+  if (existing.length && body.acknowledgeExisting !== true) conflict('Review existing package costs, select any draft allowances to replace, and explicitly acknowledge the retained and uploaded rows.');
+  const replacementIds = body.replaceResourceIds ?? [];
+  if (!Array.isArray(replacementIds) || replacementIds.length > 500 || replacementIds.some(id => typeof id !== 'string') || new Set(replacementIds).size !== replacementIds.length) fail('Choose valid distinct draft resource rows to replace.');
+  const replaced = existing.filter(row => replacementIds.includes(row.id));
+  if (replaced.length !== replacementIds.length) conflict('A selected resource no longer belongs to this draft package. Refresh before applying the DUPA.');
+  const retained = details.resources.filter(row => !replacementIds.includes(row.id));
   let rows;
   try { rows = buildBreakdownResources(upload.rows, body.categories); }
   catch (error) { if (error instanceof PackageBreakdownError) fail(error.message, error.status); throw error; }
-  if (details.resources.length + rows.length > 500) conflict('PLAN_DETAILS_LIMIT_REACHED');
-  const fingerprints = new Set(existing.map(resourceFingerprint));
+  if (retained.length + rows.length > 500) conflict('PLAN_DETAILS_LIMIT_REACHED');
+  const fingerprints = new Set(retained.filter(row => row.activityId === upload.activityId).map(resourceFingerprint));
   for (const row of rows) {
     const fingerprint = resourceFingerprint(row);
     if (fingerprints.has(fingerprint)) conflict(`Duplicate resource component: ${row.description}. Review the current budget or retain the upload as evidence only.`);
@@ -105,7 +110,8 @@ function applyBreakdown(details: PlanDetails, upload: PackageBreakdownUpload, bo
   const now = new Date().toISOString();
   const added = rows.map(row => ({ ...row, id: makeId(), activityId: upload.activityId, breakdownUploadId: upload.id,
     isSystemSuggested: true, reviewedAt: null, reviewedById: null }));
-  details.resources.push(...added);
+  upload.replacedResources = JSON.parse(JSON.stringify(replaced)) as PlanResource[];
+  details.resources = [...retained, ...added];
   details.resourcesReviewNeeded = { ...details.resourcesReviewNeeded, [upload.activityId]: true };
   upload.appliedAt = now; upload.appliedById = actorId; upload.reason = reason;
   upload.categories = body.categories as Record<string, BreakdownKind>;
@@ -116,12 +122,15 @@ function applyBreakdown(details: PlanDetails, upload: PackageBreakdownUpload, bo
 export async function attachWorkPackageBreakdown(args: {
   projectId: string; scheduleId: string; activityId: string; expectedRowVersion: number; actor: Actor;
   buffer: Buffer; fileName: string; fileHash: string; selectedSheet: string; mapping: WorkspaceMapping;
+  documentToken?: string | null;
 }) {
   const capacity = await planningCapacity(args.actor, args.projectId);
   if (!capacity.canEditPlan) fail('PLANNING_EDIT_PERMISSION_REQUIRED', 403);
   const expected = expectedVersion(args.expectedRowVersion);
   if (!args.fileName || args.fileName.length > 191) fail('Use a workbook filename of at most 191 characters.');
-  const { analysis, items } = await parseWorkspaceWorkbook({ buffer: args.buffer, fileName: args.fileName, selectedSheet: args.selectedSheet, mapping: args.mapping });
+  if (/\.(pdf|docx)$/i.test(args.fileName) && !args.documentToken) fail('Analyze the DUPA document before preserving it.');
+  const { analysis, items } = await parseWorkspaceWorkbook({ buffer: args.buffer, fileName: args.fileName, selectedSheet: args.selectedSheet, mapping: args.mapping,
+    documentToken: args.documentToken, documentContext: `dupa:${args.actor.id}:${args.projectId}:${args.scheduleId}:${args.activityId}` });
   if (analysis.fileHash !== args.fileHash) conflict('The workbook changed. Analyze it again before preserving the breakdown.');
   if (analysis.errors.length || !analysis.mapping || !analysis.selectedSheet || !items.length) fail(analysis.errors[0]?.message || 'Choose a worksheet and map the required columns before preserving it.');
   if (items.length > 500) fail('A package breakdown supports at most 500 component rows.');
@@ -137,7 +146,7 @@ export async function attachWorkPackageBreakdown(args: {
       if (uploads.some(row => row.activityId === args.activityId && row.fileHash === analysis.fileHash && row.sheetName === analysis.selectedSheet)) conflict('This worksheet is already preserved for this package. Open its saved evidence instead of uploading it again.');
       if (uploads.length >= 20 || uploads.reduce((sum, row) => sum + row.rows.length, 0) + items.length > 500) conflict('This plan has reached its breakdown evidence limit (20 uploads / 500 component rows).');
       const uploadId = makeId();
-      stored = await storeWorkspaceOriginal(uploadId, args.projectId, analysis.fileHash, args.buffer);
+      stored = await storeWorkspaceOriginal(uploadId, args.projectId, analysis.fileHash, args.buffer, args.fileName);
       const upload: PackageBreakdownUpload = { id: uploadId, activityId: args.activityId, fileName: args.fileName,
         fileHash: analysis.fileHash, storagePath: stored, sheetName: analysis.selectedSheet!, mapping: analysis.mapping!, rows: items,
         uploadedAt: new Date().toISOString(), uploadedById: args.actor.id, originScheduleId: schedule.id,
@@ -238,7 +247,7 @@ export async function updateWorkPackageDetails(args: { projectId: string; actor:
     'suggest-resources': ['action', 'scheduleId', 'expectedRowVersion','activityId'],
     'confirm-resources': ['action','scheduleId','expectedRowVersion','activityId'],
     'package-assumptions': ['action','scheduleId','expectedRowVersion','activityId','plannedStartDay','procurementLeadDays','laborCrew'],
-    'apply-breakdown': ['action','scheduleId','expectedRowVersion','uploadId','categories','reason','acknowledgeExisting'],
+    'apply-breakdown': ['action','scheduleId','expectedRowVersion','uploadId','categories','reason','acknowledgeExisting','replaceResourceIds'],
   };
   if (!allowed[action]) fail('UNKNOWN_ACTION');
   onlyKeys(body, allowed[action]!);
@@ -259,7 +268,7 @@ export async function updateWorkPackageDetails(args: { projectId: string; actor:
       const activity = await tx.scheduleActivity.findFirst({ where: { id: upload.activityId, scheduleId }, select: { id: true } });
       if (!activity) fail('The uploaded breakdown does not belong to a package in this plan.', 409);
       applyBreakdown(details, upload, body, args.actor.id);
-      return bumpAndSave(tx, schedule, expected, args.actor, 'WPS_PACKAGE_BREAKDOWN_APPLIED', details, { uploadId: upload.id, appliedAt: null }, { uploadId: upload.id, resourceIds: upload.resourceIds });
+      return bumpAndSave(tx, schedule, expected, args.actor, 'WPS_PACKAGE_BREAKDOWN_APPLIED', details, { uploadId: upload.id, appliedAt: null, replacedResources: upload.replacedResources || [] }, { uploadId: upload.id, resourceIds: upload.resourceIds });
     }
     const before = JSON.parse(JSON.stringify(details)) as PlanDetails;
     const activities = await tx.scheduleActivity.findMany({ where: { scheduleId }, select: { id: true, name: true, allocatedAmount: true } });

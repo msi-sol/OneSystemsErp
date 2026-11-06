@@ -1,13 +1,23 @@
 'use server';
 import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
+import { actorCanAccessProject } from '@/lib/boq/workspace-service';
 
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import * as xlsx from 'xlsx';
 import { uploadToS3 as put } from '@/lib/s3'; // S3 upload utility remains in Next.js Server Action
+import { consolidateMaterialRows } from '@/lib/boq/consolidation-materials';
+import { randomUUID } from 'node:crypto';
 
 const API_ROUTE_PREFIX = '/api/consolidation'; // The base route name for the AWS backend
+
+async function requireProjectCapability(projectId: string, capabilities: string[], message: string) {
+  const actor = await verifySession();
+  if (!actor || actor.mustChangePassword) throw new Error('Unauthorized: sign in before changing this project.');
+  if (!await actorCanAccessProject(actor, projectId, capabilities)) throw new Error(message);
+  return actor;
+}
 
 // fetchWithAuth wrapper to handle session/project headers and backend response structure
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
@@ -46,6 +56,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 // --- Original Exported Functions (now acting as proxies) ---
 
 export async function autoConsolidateBOQ(projectId: string, force: boolean = false) {
+  await requireProjectCapability(projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project master materials list.');
   await fetchWithAuth(`${API_ROUTE_PREFIX}/${projectId}/auto-consolidate`, {
     method: 'POST',
     body: JSON.stringify({ force })
@@ -55,30 +66,15 @@ export async function autoConsolidateBOQ(projectId: string, force: boolean = fal
 }
 
 export async function uploadMasterMaterialsList(formData: FormData) {
-  const actor = await verifySession();
-  if (!actor) throw new Error('Unauthorized: sign in before uploading the master materials list.');
-
   const projectId = formData.get('projectId') as string;
   const materialsFile = formData.get('materialsFile') as File | null;
   if (!materialsFile || materialsFile.size === 0) {
     throw new Error('No file uploaded');
   }
+  if (!projectId) throw new Error('Select a project before uploading the master materials list.');
+  const actor = await requireProjectCapability(projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project master materials list.');
 
   const buffer = Buffer.from(await materialsFile.arrayBuffer());
-
-  const storedFile = await put(`templates/${projectId}/master-materials-template.xlsx`, buffer, {
-    contentType: materialsFile.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    module: 'PROJECT_MANAGEMENT',
-    projectId,
-    uploadedBy: actor.id,
-  });
-
-  const documentData = {
-    title: 'Master Materials Template',
-    fileUrl: storedFile.url,
-    fileType: materialsFile.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    fileSize: buffer.length
-  };
 
   // Excel parsing and item consolidation logic remains in this Next.js Server Action
   // as it prepares the data (`parsedItems`) to be sent to the backend.
@@ -96,7 +92,7 @@ export async function uploadMasterMaterialsList(formData: FormData) {
     }
   }
 
-  const groups = new Map<string, any>();
+  const materialRows: Array<{ itemCode: string; category: string; description: string; unit: string; quantity: number; unitCost: number }> = [];
 
   if (headerRowIndex !== -1) {
     const headers = rows[headerRowIndex].map(h => (h || '').toString().toLowerCase().trim());
@@ -131,74 +127,31 @@ export async function uploadMasterMaterialsList(formData: FormData) {
       if (itemDesc) {
         if (isNaN(quantity)) quantity = 0;
         if (isNaN(unitCost)) unitCost = 0;
-        
-        let oldItemCode = itemCode || 'N/A';
-        if (oldItemCode === 'N/A' || oldItemCode.trim() === '') {
-          oldItemCode = itemDesc;
-        }
-
-        if (oldItemCode.includes('5.0m pump Lift') || oldItemCode.includes('BDU513A450VE')) {
-          oldItemCode = 'ACU PUMPS';
-        }
-
-        const currentDescClean = itemDesc.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        let finalDesc = itemDesc.trim();
-        let finalUnit = unit.trim() || 'lot';
-
-        let matchedKey: string | null = null;
-        for (const [existingKey, group] of groups.entries()) {
-          const existDescClean = group.description.toLowerCase().replace(/[^a-z0-9]/g, '');
-          
-          let localIsMatch = false;
-          if (currentDescClean === existDescClean && currentDescClean.length > 0) {
-            localIsMatch = true;
-          } else if (currentDescClean.length > 10 && existDescClean.length > 10 && Math.abs(currentDescClean.length - existDescClean.length) <= 2) {
-            if (currentDescClean.startsWith(existDescClean.substring(0, 10)) || existDescClean.startsWith(currentDescClean.substring(0, 10))) {
-              localIsMatch = true;
-            }
-          }
-
-          if (localIsMatch) {
-            matchedKey = existingKey;
-            break;
-          }
-        }
-
-        let key = matchedKey;
-        if (!key) {
-          key = `${oldItemCode.trim().toLowerCase()}|${finalDesc.toLowerCase()}`;
-          groups.set(key, {
-            itemCodePrefix: oldItemCode,
-            category: category,
-            description: finalDesc,
-            unit: finalUnit,
-            quantity: 0,
-            totalCost: 0,
-            unitCost: unitCost || 0,
-          });
-        }
-
-        const group = groups.get(key)!;
-
-        if (finalUnit.toLowerCase().includes('pc') && !group.unit.toLowerCase().includes('pc')) {
-          group.unit = finalUnit;
-        }
-        
-        const itemTotal = quantity * unitCost;
-        group.totalCost += itemTotal;
-        
-        if (group.unit.toLowerCase().includes('lot')) {
-          group.quantity = 1;
-        } else {
-          group.quantity += quantity;
-        }
+        materialRows.push({ itemCode, category, description: itemDesc, unit, quantity, unitCost });
       }
     }
   }
 
-  if (groups.size === 0) {
+  const groups = consolidateMaterialRows(materialRows);
+
+  if (groups.length === 0) {
     throw new Error('No valid material items found in the uploaded file.');
   }
+
+  // Validate that the current project master may be replaced before persisting the source upload.
+  await fetchWithAuth(`${API_ROUTE_PREFIX}/${projectId}/check-replacement`, { method: 'POST' });
+  const storedFile = await put(`templates/${projectId}/master-materials/${randomUUID()}.xlsx`, buffer, {
+    contentType: materialsFile.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    module: 'PROJECT_MANAGEMENT',
+    projectId,
+    uploadedBy: actor.id,
+  });
+  const documentData = {
+    title: 'Master Materials Template',
+    fileUrl: storedFile.url,
+    fileType: materialsFile.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    fileSize: buffer.length
+  };
 
   const parsedItems: any[] = [];
   let index = 1;
@@ -236,6 +189,7 @@ export async function addManualConsolidatedItem(data: {
   quantity: number;
   unitCost: number;
 }) {
+  await requireProjectCapability(data.projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project master materials list.');
   await fetchWithAuth(`${API_ROUTE_PREFIX}/items`, {
     method: 'POST',
     body: JSON.stringify(data)
@@ -245,6 +199,7 @@ export async function addManualConsolidatedItem(data: {
 }
 
 export async function deleteMasterMaterialsList(projectId: string) {
+  await requireProjectCapability(projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project master materials list.');
   await fetchWithAuth(`${API_ROUTE_PREFIX}/${projectId}`, {
     method: 'DELETE'
   });
@@ -253,6 +208,7 @@ export async function deleteMasterMaterialsList(projectId: string) {
 }
 
 export async function downloadMasterMaterialsTemplate(projectId: string): Promise<string> {
+  await requireProjectCapability(projectId, ['canView'], 'You do not have permission to view this project master materials list.');
   // The AWS backend now handles the template fetching, modification, and returns a base64 string
   const result = await fetchWithAuth(`${API_ROUTE_PREFIX}/${projectId}/download-template`, {
     method: 'POST' // Using POST for consistency with other backend routes

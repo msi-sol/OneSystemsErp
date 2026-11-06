@@ -1,11 +1,14 @@
 'use client';
+import styles from './issuance.module.css';
+import { returnableMaterials } from '@/lib/procurement/material-returns';
 
 import { useState } from 'react';
-import styles from '../projects/page.module.css';
+import { useRouter } from 'next/navigation';
 import { processIssuanceSlip, approveIssuanceSlip, rejectIssuanceSlip } from '../actions/issuanceActions';
 import CreateReturnModal from './CreateReturnModal';
 
 export default function IssuanceDetailsModal({ issuance, users, onClose }: { issuance: any, users: any[], onClose: () => void }) {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
@@ -13,7 +16,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
   // Track quantities entered by warehouseman
   const [items, setItems] = useState(issuance.items.map((i: any) => ({
     ...i,
-    releasedQty: i.releasedQty || i.requestedQty // Default to requested
+    releasedQty: issuance.status === 'PENDING' ? (i.releasedQty || i.requestedQty) : (i.releasedQty ?? 0)
   })));
 
   const updateItemQty = (index: number, value: number) => {
@@ -44,11 +47,13 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
     setLoading(true);
     setError('');
 
-    const res = await processIssuanceSlip(issuance.id, warehouseman.id, items);
-    if (res.success) {
-      onClose();
-    } else {
-      setError(res.error || 'Failed to process');
+    try {
+      const res = await processIssuanceSlip(issuance.id, warehouseman.id, items);
+      if (res.success) { router.refresh(); onClose(); }
+      else setError(res.error || 'Failed to process');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to process');
+    } finally {
       setLoading(false);
     }
   };
@@ -60,22 +65,27 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
     setLoading(true);
     setError('');
 
-    const res = await approveIssuanceSlip(issuance.id, accountant.id);
-    if (res.success) {
-      onClose();
-    } else {
-      setError(res.error || 'Failed to approve');
+    try {
+      const res = await approveIssuanceSlip(issuance.id, accountant.id);
+      if (res.success) { router.refresh(); onClose(); }
+      else setError(res.error || 'Failed to approve');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to approve');
+    } finally {
       setLoading(false);
     }
   };
 
   const handleReject = async () => {
     setLoading(true);
-    const res = await rejectIssuanceSlip(issuance.id, users[0].id);
-    if (res.success) {
-      onClose();
-    } else {
-      setError(res.error || 'Failed to reject');
+    setError('');
+    try {
+      const res = await rejectIssuanceSlip(issuance.id, users[0].id);
+      if (res.success) { router.refresh(); onClose(); }
+      else setError(res.error || 'Failed to reject');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to reject');
+    } finally {
       setLoading(false);
     }
   };
@@ -84,7 +94,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
   const isProcessed = issuance.status === 'PROCESSED';
 
   return (
-    <div style={{
+    <div className={styles.overlay} style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
       backgroundColor: 'rgba(10, 15, 26, 0.85)',
@@ -95,7 +105,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
       zIndex: 1000,
       padding: '20px'
     }}>
-      <div style={{
+      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label="Material Issuance Details" style={{
         background: 'var(--bg-secondary)',
         borderRadius: '16px',
         width: '100%',
@@ -106,7 +116,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
         display: 'flex',
         flexDirection: 'column'
       }}>
-        <div style={{
+        <div className={styles.dialogHeader} style={{
           padding: '25px 35px',
           borderBottom: '1px solid var(--glass-border)',
           display: 'flex',
@@ -147,7 +157,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
           </button>
         </div>
 
-        <div style={{ padding: '35px', display: 'flex', flexDirection: 'column', gap: '30px' }}>
+        <div className={styles.dialogBody} style={{ padding: '35px', display: 'flex', flexDirection: 'column', gap: '30px' }}>
           {error && (
             <div style={{ 
               background: 'rgba(255, 107, 107, 0.1)', 
@@ -161,7 +171,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '25px', background: 'rgba(0,0,0,0.15)', padding: '25px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+          <div className={styles.facts} style={{ background: 'rgba(0,0,0,0.15)', padding: '25px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
             <div>
               <p style={{ margin: '0 0 5px', color: 'var(--accent-color)', fontSize: '0.85rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Project</p>
               <p style={{ margin: 0, fontWeight: 'bold', fontSize: '1.1rem', color: '#fff' }}>{issuance.project.name}</p>
@@ -178,7 +188,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
 
           <div>
             <h3 style={{ margin: '0 0 15px 0', fontSize: '1.3rem', color: '#fff', fontWeight: '600', borderBottom: '2px solid var(--glass-border)', paddingBottom: '10px' }}>Requested Materials</h3>
-            <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
+            <div className={styles.tableScroll} role="region" aria-label="Requested materials" tabIndex={0} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', color: '#fff' }}>
                 <thead>
                   <tr style={{ background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid var(--glass-border)', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -247,7 +257,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
             </div>
           )}
 
-          <div style={{
+          <div className={styles.actions} style={{
             marginTop: '10px',
             paddingTop: '25px',
             borderTop: '1px solid var(--glass-border)',
@@ -333,7 +343,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
           {/* Return Action for RELEASED/COMPLETED Slips */}
           {['RELEASED', 'COMPLETED'].includes(issuance.status) && (
             (() => {
-              const hasProcessedReturn = issuance.returns && issuance.returns.some((r: any) => r.status === 'COMPLETED');
+              const hasProcessedReturn = returnableMaterials(issuance).length === 0;
               return (
                 <button 
                   type="button" 
@@ -348,9 +358,9 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
                   onMouseDown={e => { if (!hasProcessedReturn) e.currentTarget.style.transform = 'scale(0.95)' }}
                   onMouseUp={e => { if (!hasProcessedReturn) e.currentTarget.style.transform = 'scale(1)' }}
                   onMouseLeave={e => { if (!hasProcessedReturn) e.currentTarget.style.transform = 'scale(1)' }}
-                  title={hasProcessedReturn ? 'Materials have already been returned and processed for this slip' : ''}
+                  title={hasProcessedReturn ? 'All released quantities have been returned or are pending return.' : ''}
                 >
-                  {hasProcessedReturn ? 'Return Processed' : 'Return Unutilized Materials'}
+                  {hasProcessedReturn ? 'No Materials Remaining to Return' : 'Return Unutilized Materials'}
                 </button>
               );
             })()

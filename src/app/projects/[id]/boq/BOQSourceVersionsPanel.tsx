@@ -24,9 +24,9 @@ export default function BOQSourceVersionsPanel({ projectId, versionId, rowVersio
     if (!file) return;
     setBusy(true); setError(''); setMessage('');
     try {
-      const form = new FormData(); form.set('file', file); form.set('projectId', projectId); if (nextSheet) form.set('sheetName', nextSheet);
+      const form = new FormData(); form.set('file', file); form.set('versionId', versionId); if (nextSheet) form.set('sheetName', nextSheet);
       if (nextMapping) { form.set('mapping', JSON.stringify(nextMapping)); form.set('breakdownMapping', JSON.stringify(breakdown)); }
-      const response = await fetch('/api/boq-workspace/analyze', { method: 'POST', body: form });
+      const response = await fetch(`/api/projects/${projectId}/boq-review/source/analyze`, { method: 'POST', body: form });
       const body = await response.json();
       if (!response.ok || !body.success) throw new Error(body.error || 'The corrected workbook could not be analyzed.');
       setBreakdown(body.analysis.breakdownMapping ?? {}); setAnalysis(body.analysis as WorkspaceAnalysis); setMapping(body.analysis.mapping); setSheetName(body.analysis.selectedSheet || '');

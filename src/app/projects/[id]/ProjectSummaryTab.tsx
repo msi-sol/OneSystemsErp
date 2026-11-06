@@ -1,22 +1,43 @@
 import { prisma } from '@/lib/prisma';
 import React from 'react';
+import Link from 'next/link';
 import { 
-  Wallet, DollarSign, Activity, AlertCircle, FileText, Briefcase, Truck, HardHat, Calendar, Clock, BarChart3, Receipt
+  Wallet, DollarSign, Activity, FileText, Truck, HardHat, Calendar, BarChart3, Receipt
 } from 'lucide-react';
 import ProjectTimelineEditor from './ProjectTimelineEditor';
+import styles from './ProjectSummary.module.css';
+import { RECEIVABLE_PO_STATUSES } from '@/lib/procurement/receivable-purchase-order';
+import { summarizeMaterialRequests } from '@/lib/procurement/request-summary';
 
 export default async function ProjectSummaryTab({ projectId }: { projectId: string }) {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    include: {
-      variationOrders: { where: { currentStatus: 'APPROVED' } },
-      billings: { where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } }, include: { payments: true } },
-      expenses: { where: { status: 'APPROVED' } },
-      subcontractBillings: true,
-      materialRequests: true,
-      workers: { where: { employmentStatus: 'ACTIVE' } }
-    }
-  });
+  const [project, boqVersion, latestSchedule] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        variationOrders: { where: { currentStatus: 'APPROVED' } },
+        billings: { where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } }, include: { payments: true } },
+        expenses: { where: { status: 'APPROVED' } },
+        subcontractBillings: true,
+        projectCostLedgers: { where: { approvalStatus: 'APPROVED' }, select: { netAmount: true } },
+        materialRequests: true,
+        workers: { where: { employmentStatus: 'ACTIVE' } },
+        awardedBoqItems: { select: { id: true } },
+      }
+    }),
+    prisma.projectBOQVersion.findFirst({
+      where: { projectId },
+      orderBy: [{ versionNumber: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      select: { versionNumber: true, versionLabel: true, status: true, totalAmount: true, sourceProvenance: true },
+    }),
+    prisma.projectSchedule.findFirst({
+      where: { projectId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        name: true, workflowStatus: true, baselineCode: true, revisionCode: true,
+        _count: { select: { activities: true } },
+      },
+    }),
+  ]);
 
   if (!project) return null;
 
@@ -39,22 +60,24 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
   // Calculate Costs
   const totalExpenses = project.expenses.reduce((sum, e) => sum + e.netAmount, 0);
   const totalSubcontract = project.subcontractBillings.reduce((sum, sb) => sum + sb.currentGross, 0);
-  const totalCostToDate = totalExpenses + totalSubcontract;
+  // Match the approved actual-cost ledger used by the profitability module,
+  // including delivery costs and avoiding a second sum of their source records.
+  const totalCostToDate = project.projectCostLedgers.reduce((sum, entry) => sum + entry.netAmount, 0);
+  const approvedActualCostEntries = project.projectCostLedgers.length;
   
-  // Profitability Projection
-  const estimatedProfit = revisedContract - totalCostToDate;
-  const margin = revisedContract > 0 ? (estimatedProfit / revisedContract) * 100 : 0;
+  // This balance excludes all future costs; keep the existing calculation but do not present it as a forecast.
+  const contractLessActualCost = revisedContract - totalCostToDate;
+  const contractLessActualCostPercent = revisedContract > 0 ? (contractLessActualCost / revisedContract) * 100 : 0;
 
   // Queries for other stats
   const activePOs = await prisma.purchaseOrder.count({
     where: {
-      status: { in: ['APPROVED', 'PARTIAL_DELIVERY'] },
+      status: { in: [...RECEIVABLE_PO_STATUSES] },
       mr: { projectId }
     }
   });
 
-  const pendingMRs = project.materialRequests.filter(mr => mr.status === 'PENDING').length;
-  const approvedMRs = project.materialRequests.filter(mr => mr.status === 'APPROVED').length;
+  const { pending: pendingMRs, approved: approvedMRs } = summarizeMaterialRequests(project.materialRequests);
   const activeWorkers = project.workers.length;
 
   // Timeline Calculations
@@ -73,12 +96,13 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
   }
 
   const formatCurrency = (amount: number) => `₱ ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const actualCostDisplay = approvedActualCostEntries === 0 ? 'Not available' : formatCurrency(totalCostToDate);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className={styles.summary} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
       {/* Top Overview Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '20px' }}>
         
         {/* Contract & Financial Progress */}
         <div style={{ 
@@ -106,7 +130,7 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
             <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
               <div style={{ width: `${financialProgress}%`, height: '100%', background: 'var(--accent-color)', borderRadius: '4px', transition: 'width 1s ease-in-out' }} />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginTop: '8px', color: 'var(--text-secondary)' }}>
+            <div className={styles.factsRow} style={{ fontSize: '0.8rem', marginTop: '8px', color: 'var(--text-secondary)' }}>
               <span>Billed: {formatCurrency(totalBilled)}</span>
               <span>Remaining: {formatCurrency(Math.max(0, revisedContract - totalBilled))}</span>
             </div>
@@ -127,19 +151,22 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Actual Cost to Date</h3>
-              <p style={{ margin: 0, fontSize: '1.5rem', fontWeight: 'bold', color: '#ff6b6b' }}>{formatCurrency(totalCostToDate)}</p>
+              <p style={{ margin: 0, fontSize: '1.5rem', fontWeight: 'bold', color: '#ff6b6b' }}>{actualCostDisplay}</p>
             </div>
           </div>
           
           <div style={{ marginTop: '20px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Estimated Gross Margin</span>
-              <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: margin > 15 ? '#4ade80' : margin > 5 ? '#fbbf24' : '#ef4444' }}>
-                {margin.toFixed(1)}%
+              <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Contract remaining after approved costs</span>
+              <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: contractLessActualCostPercent > 15 ? '#4ade80' : contractLessActualCostPercent > 5 ? '#fbbf24' : '#ef4444' }}>
+                {contractLessActualCostPercent.toFixed(1)}%
               </span>
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Projected Profit: {formatCurrency(estimatedProfit)}
+              Balance before future costs: {formatCurrency(contractLessActualCost)}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              {approvedActualCostEntries === 0 ? 'No approved actual-cost ledger entries recorded.' : `${approvedActualCostEntries} approved actual-cost ledger ${approvedActualCostEntries === 1 ? 'entry' : 'entries'} included.`}
             </div>
           </div>
         </div>
@@ -186,8 +213,33 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
 
       </div>
 
+      {/* BOQ and schedule status */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '16px' }}>
+        <section style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px' }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: '1rem' }}>Latest BOQ version</h3>
+          {boqVersion ? <>
+            <p style={{ margin: '0 0 6px', fontWeight: 700 }}>Version {boqVersion.versionNumber}{boqVersion.versionLabel ? ` · ${boqVersion.versionLabel}` : ''}</p>
+            <p style={{ margin: '0 0 6px', color: 'var(--text-secondary)' }}>Status: {boqVersion.status.replaceAll('_', ' ')}</p>
+            <p style={{ margin: '0 0 6px', color: 'var(--text-secondary)' }}>BOQ total: {boqVersion.totalAmount === null ? 'Not available' : formatCurrency(boqVersion.totalAmount)}</p>
+            <p style={{ margin: '0 0 6px', color: 'var(--text-secondary)' }}>{project.awardedBoqItems.length} project BOQ {project.awardedBoqItems.length === 1 ? 'item' : 'items'}</p>
+            {boqVersion.status === 'DRAFT' && <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)' }}>{boqVersion.sourceProvenance === 'BOQ_WORKSPACE' ? 'Draft workbook import · not approved' : 'Draft BOQ version · not approved'}</p>}
+          </> : <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)' }}>No BOQ version recorded. BOQ total and item count are unavailable.</p>}
+          <Link href={`/projects/${projectId}/boq`} style={{ color: 'var(--accent-color)', textDecoration: 'underline' }}>Open BOQ review →</Link>
+        </section>
+
+        <section style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px' }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: '1rem' }}>Latest-created work package schedule</h3>
+          {latestSchedule ? <>
+            <p style={{ margin: '0 0 6px', fontWeight: 700 }}>{latestSchedule.name}</p>
+            <p style={{ margin: '0 0 6px', color: 'var(--text-secondary)' }}>Status: {latestSchedule.workflowStatus.replaceAll('_', ' ')}</p>
+            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)' }}>{latestSchedule._count.activities} {latestSchedule._count.activities === 1 ? 'package' : 'packages'}{latestSchedule.baselineCode ? ` · ${latestSchedule.baselineCode}` : latestSchedule.revisionCode ? ` · ${latestSchedule.revisionCode}` : ''}</p>
+          </> : <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)' }}>No work package schedule recorded; package count and execution status are unavailable.</p>}
+          <Link href={`/projects/${projectId}/work-packages`} style={{ color: 'var(--accent-color)', textDecoration: 'underline' }}>Open Work Packages and WPS →</Link>
+        </section>
+      </div>
+
       {/* Middle Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '16px' }}>
         
         {/* Collections */}
         <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', transition: 'transform 0.2s', cursor: 'pointer' }}>
@@ -236,14 +288,14 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
       </div>
 
       {/* Bottom Layout - Charts & Logs placeholder */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+      <div className={styles.bottomGrid}>
         <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '24px' }}>
           <h3 style={{ margin: '0 0 16px 0', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <BarChart3 size={20} color="var(--accent-color)" /> Material Requests Activity
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Pending Requests</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Requests awaiting action</span>
               <span style={{ fontWeight: 'bold', color: '#fbbf24' }}>{pendingMRs}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>

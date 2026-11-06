@@ -42,7 +42,7 @@ export default async function MaterialIssuancePage() {
       warehouseman: true,
       accountant: true,
       releasedBy: true,
-      returns: true,
+      returns: { include: { items: true } },
       items: {
         include: {
           consolidatedBoqItem: true

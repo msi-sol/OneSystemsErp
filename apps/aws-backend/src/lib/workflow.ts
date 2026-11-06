@@ -1,5 +1,5 @@
 import { prisma } from './prisma';
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { requirePermission } from './permissions';
 
 export async function submitTransaction(
@@ -7,11 +7,13 @@ export async function submitTransaction(
   userRole: string, 
   moduleName: string, 
   transactionId: string,
-  simulatedRole?: string
+  simulatedRole?: string,
+  tx?: Prisma.TransactionClient
 ) {
   await requirePermission(userId, moduleName, 'canSubmit', simulatedRole);
+  const client = tx || prisma;
 
-  await prisma.transactionWorkflow.upsert({
+  await client.transactionWorkflow.upsert({
     where: {
       id: `${moduleName}_${transactionId}`
     },
@@ -34,7 +36,7 @@ export async function submitTransaction(
     }
   });
 
-  await logAudit(userId, userRole, moduleName, transactionId, 'SUBMIT', 'DRAFT', 'SUBMITTED');
+  await logAudit(userId, userRole, moduleName, transactionId, 'SUBMIT', 'DRAFT', 'SUBMITTED', undefined, tx);
 }
 
 export async function approveTransaction(
@@ -43,16 +45,18 @@ export async function approveTransaction(
   moduleName: string,
   transactionId: string,
   remarks?: string,
-  simulatedRole?: string
+  simulatedRole?: string,
+  tx?: Prisma.TransactionClient
 ) {
   await requirePermission(userId, moduleName, 'canApprove', simulatedRole);
+  const client = tx || prisma;
 
-  let workflow = await prisma.transactionWorkflow.findFirst({
+  let workflow = await client.transactionWorkflow.findFirst({
     where: { moduleName, transactionId }
   });
 
   if (!workflow) {
-    workflow = await prisma.transactionWorkflow.create({
+    workflow = await client.transactionWorkflow.create({
       data: {
         id: `${moduleName}_${transactionId}`,
         moduleName,
@@ -70,7 +74,7 @@ export async function approveTransaction(
     throw new Error("Self-approval is strictly prohibited by system rules.");
   }
 
-  await prisma.transactionWorkflow.update({
+  await client.transactionWorkflow.update({
     where: { id: workflow.id },
     data: {
       currentStatus: 'APPROVED',
@@ -82,7 +86,7 @@ export async function approveTransaction(
     }
   });
 
-  await logAudit(userId, userRole, moduleName, transactionId, 'APPROVE', workflow.currentStatus, 'APPROVED', remarks);
+  await logAudit(userId, userRole, moduleName, transactionId, 'APPROVE', workflow.currentStatus, 'APPROVED', remarks, tx);
 }
 
 export async function logAudit(
@@ -93,9 +97,11 @@ export async function logAudit(
   actionType: string,
   oldValue?: string,
   newValue?: string,
-  remarks?: string
+  remarks?: string,
+  tx?: Prisma.TransactionClient
 ) {
-  await prisma.auditLog.create({
+  const client = tx || prisma;
+  await client.auditLog.create({
     data: {
       userId,
       userRole,

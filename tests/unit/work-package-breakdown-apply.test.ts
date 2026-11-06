@@ -91,7 +91,26 @@ describe('work package breakdown apply transaction', () => {
     await expect(updateWorkPackageDetails({
       projectId: 'project-a', actor,
       body: { action: 'apply-breakdown', scheduleId: 'schedule-a', expectedRowVersion: 4, uploadId: 'upload-a', categories: { '8': 'MATERIAL' }, reason: 'Detailed package cost', acknowledgeExisting: false },
-    })).rejects.toThrow(/explicitly acknowledge adding these rows/);
+    })).rejects.toThrow(/explicitly acknowledge the retained and uploaded rows/);
+    expect(tx.projectSchedule.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('replaces only explicitly selected draft rows and preserves their exact values as evidence', async () => {
+    const obsolete = { id: 'old-allowance', activityId: 'package-a', kind: 'ALLOWANCE', description: 'Generated provisional allowance', unit: 'lot', quantity: '1', unitCost: '20', amount: '20' };
+    const retained = { id: 'keep-labor', activityId: 'package-a', kind: 'LABOR', description: 'Reviewed labor', unit: 'day', quantity: '1', unitCost: '3', amount: '3' };
+    transactionHarness([obsolete, retained]);
+    const result = await updateWorkPackageDetails({ projectId: 'project-a', actor,
+      body: { action: 'apply-breakdown', scheduleId: 'schedule-a', expectedRowVersion: 4, uploadId: 'upload-a', categories: { '8': 'MATERIAL' }, reason: 'Replace provisional material allowance with DUPA', acknowledgeExisting: true, replaceResourceIds: ['old-allowance'] } });
+    expect(result.details.resources.map(row => row.id)).toContain('keep-labor');
+    expect(result.details.resources.map(row => row.id)).not.toContain('old-allowance');
+    expect(result.details.breakdownUploads?.[0].replacedResources).toEqual([expect.objectContaining(obsolete)]);
+    expect(result.details.resources.filter(row => row.breakdownUploadId === 'upload-a')).toHaveLength(1);
+  });
+
+  it('rejects replacing a resource belonging to another package without any write', async () => {
+    const { tx } = transactionHarness([{ id: 'foreign-row', activityId: 'another-package', kind: 'ALLOWANCE', description: 'Other package', unit: 'lot', quantity: '1', unitCost: '20', amount: '20' }]);
+    await expect(updateWorkPackageDetails({ projectId: 'project-a', actor,
+      body: { action: 'apply-breakdown', scheduleId: 'schedule-a', expectedRowVersion: 4, uploadId: 'upload-a', categories: { '8': 'MATERIAL' }, reason: 'Replace a draft allowance', acknowledgeExisting: true, replaceResourceIds: ['foreign-row'] } })).rejects.toThrow(/no longer belongs/);
     expect(tx.projectSchedule.updateMany).not.toHaveBeenCalled();
   });
 });

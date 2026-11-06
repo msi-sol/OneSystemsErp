@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { addSupplierQuotation, updateSupplierQuotation, autoGeneratePOFromCanvass, sendCanvassEmail, approveCanvassRecommendation, endorseCanvassRecommendation } from '@/app/actions/canvass';
 import { uploadAndAnalyzeQuotationsBulk } from '@/app/actions/aiQuotationActions';
 import PrintableCanvass from './PrintableCanvass';
+import { isFullQuotationCoverage } from '@/lib/procurement/quotation-validation';
 
 export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any, suppliers: any[] }) {
   const router = useRouter();
@@ -42,7 +43,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
   const [showAddQuote, setShowAddQuote] = useState(false);
   const [editQuotationId, setEditQuotationId] = useState<string | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState('');
-  const [quoteItems, setQuoteItems] = useState<Record<string, { unitCost: number, quantityAvailable: number }>>({});
+  const [quoteItems, setQuoteItems] = useState<Record<string, { unitCost?: number, quantityAvailable?: number }>>({});
   
   // Print & Email states
   const [showPrint, setShowPrint] = useState(false);
@@ -78,12 +79,26 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
 
   const handleSubmitQuotation = async () => {
     if (!selectedSupplier) return alert('Select a supplier');
-    
-    const items = canvass.items.map((item: any) => ({
-      canvassItemId: item.id,
-      unitCost: quoteItems[item.id]?.unitCost || 0,
-      quantityAvailable: quoteItems[item.id]?.quantityAvailable || item.quantityRequired
-    }));
+
+    let availableLineCount = 0;
+    const items = [];
+    for (const item of canvass.items) {
+      const quantityAvailable = quoteItems[item.id]?.quantityAvailable ?? item.quantityRequired;
+      const unitCost = quoteItems[item.id]?.unitCost;
+      if (!Number.isFinite(quantityAvailable) || quantityAvailable < 0 || quantityAvailable > item.quantityRequired) {
+        return alert(`Available quantity for ${item.consolidatedBoqItem.description} must be between 0 and ${item.quantityRequired}.`);
+      }
+      if (quantityAvailable > 0 && (!Number.isFinite(unitCost) || unitCost! <= 0)) {
+        return alert(`Enter a positive unit cost for ${item.consolidatedBoqItem.description}, or set its available quantity to 0.`);
+      }
+      if (quantityAvailable > 0) availableLineCount++;
+      items.push({
+        canvassItemId: item.id,
+        unitCost: quantityAvailable === 0 ? 0 : unitCost,
+        quantityAvailable,
+      });
+    }
+    if (availableLineCount === 0) return alert('At least one quoted item must have a positive available quantity and price.');
 
     const res = editQuotationId 
       ? await updateSupplierQuotation(canvass.id, editQuotationId, selectedSupplier, items)
@@ -104,7 +119,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
     setEditQuotationId(q.id);
     setSelectedSupplier(q.supplierId);
     
-    const initialQuoteItems: Record<string, { unitCost: number, quantityAvailable: number }> = {};
+    const initialQuoteItems: Record<string, { unitCost?: number, quantityAvailable?: number }> = {};
     q.items.forEach((item: any) => {
       initialQuoteItems[item.canvassItemId] = {
         unitCost: item.unitCost,
@@ -433,6 +448,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                   <tr style={{ textAlign: 'left', color: 'var(--text-secondary)' }}>
                     <th style={{ padding: '8px' }}>Item</th>
                     <th style={{ padding: '8px' }}>Req Qty</th>
+                    <th style={{ padding: '8px' }}>Available Qty</th>
                     <th style={{ padding: '8px' }}>Unit Cost (₱)</th>
                   </tr>
                 </thead>
@@ -442,11 +458,31 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                       <td style={{ padding: '8px', color: '#fff' }}>{item.consolidatedBoqItem.description}</td>
                       <td style={{ padding: '8px' }}>{item.quantityRequired}</td>
                       <td style={{ padding: '8px' }}>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.quantityRequired}
+                          step="any"
+                          value={quoteItems[item.id]?.quantityAvailable ?? item.quantityRequired}
+                          onChange={e => setQuoteItems(current => ({
+                            ...current,
+                            [item.id]: { ...current[item.id], quantityAvailable: e.target.value === '' ? undefined : Number(e.target.value) }
+                          }))}
+                          style={{ width: '100%', minWidth: '90px', padding: '8px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px' }}
+                        />
+                      </td>
+                      <td style={{ padding: '8px' }}>
                         <input 
                           type="number" 
+                          min="0.01"
+                          step="any"
+                          required={(quoteItems[item.id]?.quantityAvailable ?? item.quantityRequired) > 0}
                           placeholder="0.00"
-                          value={quoteItems[item.id]?.unitCost || ''}
-                          onChange={e => setQuoteItems({ ...quoteItems, [item.id]: { ...quoteItems[item.id], unitCost: parseFloat(e.target.value) } })}
+                          value={quoteItems[item.id]?.unitCost ?? ''}
+                          onChange={e => setQuoteItems(current => ({
+                            ...current,
+                            [item.id]: { ...current[item.id], unitCost: e.target.value === '' ? undefined : Number(e.target.value) }
+                          }))}
                           style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px' }}
                         />
                       </td>
@@ -465,7 +501,9 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
             <p style={{ color: 'var(--text-secondary)' }}>No quotations received yet.</p>
           ) : (
             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-              {canvass.quotations.map((q: any) => (
+              {canvass.quotations.map((q: any) => {
+                const coversFullRequest = isFullQuotationCoverage(canvass.items, q.items);
+                return (
                 <div key={q.id} style={{ 
                   background: 'rgba(255,255,255,0.02)', 
                   border: q.isRecommended ? '2px solid #a855f7' : '1px solid var(--glass-border)', 
@@ -475,8 +513,10 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                     {q.isRecommended && '⭐ '} {q.supplier.name}
                   </h4>
                   <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}>Total: <strong style={{ color: '#fff' }}>₱{q.totalAmount.toLocaleString()}</strong></p>
+                  {!coversFullRequest && <p style={{ margin: '5px 0', color: '#fbbf24', fontSize: '0.85rem' }}>Partial availability — not compared as full fulfillment.</p>}
                   <p style={{ margin: '5px 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Delivery: {q.deliveryPeriod || 'N/A'} | Payment: {q.paymentTerms || 'N/A'}</p>
                   <p style={{ margin: '5px 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Status: {q.status}</p>
+                  {q.aiRationale && <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{q.aiRationale}</p>}
                   
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
                     {q.fileUrl ? (
@@ -495,7 +535,8 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

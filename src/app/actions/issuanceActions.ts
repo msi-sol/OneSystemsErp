@@ -18,16 +18,16 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   if (simulatedRole) headers.set('x-simulated-role', simulatedRole);
   headers.set('Content-Type', 'application/json');
 
-  const res = await backendFetch(`${endpoint}`, {
-    ...options,
-    headers,
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+  try {
+    const res = await backendFetch(`${endpoint}`, { ...options, headers });
+    const result = await res.json();
+    if (!res.ok) return { success: false, error: result.error || `The issuance request failed (${res.status}).` };
+    return result;
+  } catch {
+    // Callers already render success:false; throwing left their saving state
+    // active indefinitely and hid stock/quantity validation failures.
+    return { success: false, error: 'The issuance service is unavailable. Try again; your entries have been kept.' };
   }
-  return res.json();
 }
 
 export async function getConsolidatedItemsForIssuance(projectId: string) {

@@ -232,7 +232,7 @@ function deriveLookAhead(packages: ExecutionPackageView[], logs: ExecutionSiteLo
 
 export async function getWorkPackageExecutionData(projectId: string, horizonDays = 21): Promise<WorkPackageExecutionData> {
   if (![14, 21, 28, 42].includes(horizonDays)) fail('INVALID_LOOK_AHEAD_HORIZON');
-  return prisma.$transaction(tx => readData(tx as unknown as Db, projectId, horizonDays), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  return prisma.$transaction(tx => readData(tx as unknown as Db, projectId, horizonDays), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 15000, timeout: 30000 });
 }
 
 /** Keep prior measured quantity in the approved scope during revision/scope edits. */

@@ -66,7 +66,8 @@ export default async function BOQWorkspacePage({ searchParams }: { searchParams:
   ]);
   const { upload: requestedUpload, project: requestedProject, mode: requestedMode } = await searchParams;
   const initialProjectId = projects.find(project => project.id === requestedProject && project.canEdit)?.id;
-  const initialMode = initialProjectId ? 'existing' as const : requestedMode === 'new' && canCreate ? 'new' as const : undefined;
+  if (initialProjectId) redirect(`/projects/${initialProjectId}/boq`);
+  const initialMode = requestedMode === 'new' && canCreate ? 'new' as const : undefined;
   let initialUpload: WorkspaceUpload | null = null;
   if (requestedUpload && requestedUpload.length <= 191) {
     const upload = await prisma.uploadedWorkbookFile.findFirst({
@@ -92,5 +93,5 @@ export default async function BOQWorkspacePage({ searchParams }: { searchParams:
     }
   }
   return <BOQTemplateClient key={initialUpload?.uploadId || initialProjectId || initialMode || 'workspace'} projects={projects} actorName={actor.name || actor.email || 'Current user'}
-    actorRole={effectiveRole} canCreate={canCreate} canApprove={canApprove} canAnalyze={canCreate || projects.some(project => project.canEdit)} initialUpload={initialUpload} initialProjectId={initialProjectId} initialMode={initialMode} />;
+    actorRole={effectiveRole} canCreate={canCreate} canApprove={canApprove} canAnalyze={canCreate} initialUpload={initialUpload} initialMode={initialMode} />;
 }

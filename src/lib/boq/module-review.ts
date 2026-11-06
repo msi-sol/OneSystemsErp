@@ -125,6 +125,8 @@ export async function reviewBOQModule(projectId: string, actor: { id: string; ro
   if (!capacity.canView || (body.action === 'review' ? !capacity.canEngineerReview : !capacity.canApprove)) fail('Your project capacity does not allow this action.', 403);
   const comments = typeof body.comments === 'string' ? body.comments.trim() : '';
   if (body.action === 'review' && (comments.length < 5 || comments.length > 10000)) fail('Enter an engineering review between 5 and 10,000 characters.', 400);
+  const approvalNote = typeof body.approvalNote === 'string' ? body.approvalNote.trim() : '';
+  if (body.action === 'approve' && ((body.approvalNote !== undefined && typeof body.approvalNote !== 'string') || (approvalNote && (approvalNote.length < 5 || approvalNote.length > 1000)))) fail('An optional approval note must contain 5–1,000 characters.', 400);
   try {
     return await transactionContext.run({ sourceProvenance: 'GATE9_WORKFLOW_ENGINE' }, () => prisma.$transaction(async tx => {
       const version = await tx.projectBOQVersion.findFirst({ where: { projectId }, orderBy: { versionNumber: 'desc' } });
@@ -162,7 +164,7 @@ export async function reviewBOQModule(projectId: string, actor: { id: string; ro
         }
         document.setAsideAcknowledgement = { actorId: actor.id, reason: body.setAsideReason.trim(), at: new Date().toISOString() };
       }
-      document.finalApproval = { actorId: actor.id, at: new Date().toISOString(), checksum };
+      document.finalApproval = { actorId: actor.id, at: new Date().toISOString(), checksum, ...(approvalNote ? { note: approvalNote } : {}) };
       const stateUpdated = await tx.bOQReviewState.updateMany({ where: { id: state.id, projectId, versionId, rowVersion: state.rowVersion }, data: { dataJson: reviewDocumentJson(document), rowVersion: { increment: 1 } } });
       if (stateUpdated.count !== 1) fail('The BOQ review changed. Refresh before continuing.', 409);
       const approvalClient: DraftBOQDatabase = { $transaction: callback => callback(tx as unknown as DraftBOQTransaction) };

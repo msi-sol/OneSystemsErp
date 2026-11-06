@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useEffect, useState, useTransition } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { setActiveProjectCookie } from '@/app/actions/activeProject';
 
 export default function ActiveProjectSelector({ 
@@ -12,16 +12,32 @@ export default function ActiveProjectSelector({
   activeProjectId: string | null;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
+  const [contextError, setContextError] = useState('');
+  const routeProjectId = /^\/projects\/([^/]+)(?:\/|$)/.exec(pathname ?? '')?.[1];
+  const authorizedRouteProjectId = assignments.some(row => row.projectId === routeProjectId) ? routeProjectId : null;
+  const displayedProjectId = authorizedRouteProjectId || activeProjectId;
+
+  useEffect(() => {
+    if (!authorizedRouteProjectId || authorizedRouteProjectId === activeProjectId) return;
+    let active = true;
+    setActiveProjectCookie(authorizedRouteProjectId).then(() => { if (active) router.refresh(); })
+      .catch(() => { if (active) setContextError('The project context could not be updated. Select the project again.'); });
+    return () => { active = false; };
+  }, [authorizedRouteProjectId, activeProjectId, router]);
 
   const handleProjectChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProjectId = e.target.value;
     
     // We can show a warning here if there is unsaved work, but for now we proceed
     startTransition(async () => {
-      await setActiveProjectCookie(newProjectId || null);
-      // Refresh the route to trigger server components to read the new cookie
-      router.refresh();
+      try {
+        setContextError('');
+        await setActiveProjectCookie(newProjectId || null);
+        if (authorizedRouteProjectId && newProjectId !== authorizedRouteProjectId) router.push(newProjectId ? `/projects/${encodeURIComponent(newProjectId)}` : '/projects');
+        else router.refresh();
+      } catch { setContextError('The project context could not be updated. Select the project again.'); }
     });
   };
 
@@ -33,7 +49,7 @@ export default function ActiveProjectSelector({
     );
   }
 
-  const currentAssignment = assignments.find(a => a.projectId === activeProjectId);
+  const currentAssignment = assignments.find(a => a.projectId === displayedProjectId);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginRight: '20px' }}>
@@ -42,7 +58,9 @@ export default function ActiveProjectSelector({
       </label>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <select
-          value={activeProjectId || ''}
+          value={displayedProjectId || ''}
+          aria-label="Active Project Workspace"
+          title={currentAssignment?.project.name}
           onChange={handleProjectChange}
           disabled={isPending}
           style={{
@@ -83,6 +101,7 @@ export default function ActiveProjectSelector({
           </div>
         )}
       </div>
+      {contextError && <p role="alert" style={{ color: '#fca5a5', fontSize: '.8rem' }}>{contextError}</p>}
     </div>
   );
 }

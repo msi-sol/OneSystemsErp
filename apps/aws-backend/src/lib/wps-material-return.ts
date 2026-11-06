@@ -1,11 +1,13 @@
 import{Prisma}from'@prisma/client';
 import{prisma}from'./prisma';
 
-/** Protect the WPS installation evidence when the existing ERP receives a material return. */
+/** Receive returns atomically, retaining any WPS installation evidence. */
 export async function processWpsMaterialReturn(returnId:string,warehousemanId:string){
  return prisma.$transaction(async tx=>{
   const record=await tx.materialReturn.findUnique({where:{id:returnId},include:{items:true,issuance:{include:{items:true,returns:{where:{status:'COMPLETED'},include:{items:true}}}}}});
-  if(!record||record.status!=='PENDING'||record.projectId!==record.issuance.projectId)throw Error('Return slip is not an open package return.');
+  if(!record||record.status!=='PENDING'||record.projectId!==record.issuance.projectId)throw Error('Return slip is not an open return for this project.');
+  if(!['RELEASED','COMPLETED'].includes(record.issuance.status))throw Error('Only released materials can be returned.');
+  if(!record.items.length||record.items.some(item=>!['GOOD','DAMAGED','SCRAP'].includes(item.condition)))throw Error('Return items need a valid condition.');
   const events=await tx.auditLog.findMany({where:{actionType:'WPS_MATERIAL_INSTALLED',newValue:{contains:`"issuanceId":"${record.issuanceId}"`}},select:{newValue:true}});
   const totals=new Map<string,Prisma.Decimal>();
   for(const item of record.items){if(!(item.returnedQty>0)||!record.issuance.items.some(row=>row.id===item.issuanceItemId&&row.consolidatedBoqItemId===item.consolidatedBoqItemId))throw Error('Return material does not match the released issuance.');totals.set(item.consolidatedBoqItemId,(totals.get(item.consolidatedBoqItemId)||new Prisma.Decimal(0)).plus(String(item.returnedQty)));}

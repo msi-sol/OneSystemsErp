@@ -2828,7 +2828,7 @@ model SupplierQuotation {
   deliveryPeriod String?
   paymentTerms   String?
   aiRank         Int?
-  aiRationale    String?
+  aiRationale    String? @db.LongText
   canvassFormId  String
   supplierId     String
   createdAt      DateTime        @default(now())

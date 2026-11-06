@@ -1,13 +1,32 @@
 'use client';
 import { useEffect,useState } from 'react';
 import {useRouter}from'next/navigation';
+import Link from 'next/link';
 import styles from '../planning/planning.module.css';
-type Data={grants:{id:string;userId:string;capacity:string}[];members:{projectRole:string;user:{id:string;name:string|null}}[];held:string[];canManage:boolean};
+type Data={grants:{id:string;userId:string;capacity:string}[];members:{projectRole:string;user:{id:string;name:string|null}}[];held:string[];sourceUploaderAccess:boolean;canManage:boolean};
 export default function WorkPackageCapacities({projectId}:{projectId:string}){
   const router=useRouter();
   const[data,setData]=useState<Data|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   async function load(){const response=await fetch(`/api/projects/${projectId}/work-packages/capacities`);const result=await response.json();if(!response.ok)throw Error(result.error);setData(result);}
   useEffect(()=>{let cancelled=false;fetch(`/api/projects/${projectId}/work-packages/capacities`).then(async response=>{const result=await response.json();if(!response.ok)throw Error(result.error);if(!cancelled)setData(result);}).catch(caught=>{if(!cancelled)setError(caught.message);});return()=>{cancelled=true;};},[projectId]);
   async function change(userId:string,capacity:string,action:string){setBusy(true);setError('');try{const response=await fetch(`/api/projects/${projectId}/work-packages/capacities`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId,capacity,action})});const result=await response.json();if(!response.ok)throw Error(result.error);await load();router.refresh();}catch(caught){setError(caught instanceof Error?caught.message:'Could not change capacity.');}finally{setBusy(false);}}
-  return <details className={styles.history}><summary>Project WPS capacities{data?` · Yours: ${data.held.map(role=>role.replaceAll('_',' ')).join(', ')||'view only'}`:''}</summary><p className={styles.muted}>Planner or Project Engineer prepares; Project Engineer records the review; Project Manager approves the baseline. WPS capacities are assigned explicitly per project. An administrator manages grants; administrator status alone does not approve a plan.</p>{error&&<p role="alert" className={styles.error}>{error}</p>}{data&&<div className={styles.scroll}><table className={styles.table}><thead><tr><th>Project member</th>{['PLANNER','PROJECT_ENGINEER','PROJECT_MANAGER'].map(role=><th key={role}>{role.replaceAll('_',' ')}</th>)}</tr></thead><tbody>{data.members.map(member=><tr key={member.user.id}><th>{member.user.name||'Project member'}</th>{['PLANNER','PROJECT_ENGINEER','PROJECT_MANAGER'].map(capacity=>{const held=data.grants.some(grant=>grant.userId===member.user.id&&grant.capacity===capacity);return <td key={capacity}>{data.canManage?<button className={styles.secondary} disabled={busy} onClick={()=>change(member.user.id,capacity,held?'revoke':'grant')}>{held?'Revoke':'Grant'}</button>:held?'Assigned':'—'}</td>;})}</tr>)}</tbody></table></div>}</details>;
+  return <details className={styles.history}>
+    <summary>Project WPS capacities{data ? ` · Yours: ${data.held.map(role => role.replaceAll('_', ' ')).join(', ') || 'view only'}` : ''}</summary>
+    <p className={styles.muted}>Planner or Project Engineer prepares; Project Engineer records the review; Project Manager approves the baseline. Capacities come from explicit member grants or this project&apos;s original source BOQ uploader when that user is a SUPER_ADMIN. Uploader access is derived from the source record and does not create a capacity grant or audit row. Administrator status alone does not grant planning capacity or approve a plan.</p>
+    {data?.sourceUploaderAccess && <p className={styles.status}>Your planning, Engineer review, and PM approval capabilities come from your SUPER_ADMIN identity on this project&apos;s original BOQ upload. Plan readiness, Engineer review, and the separate PM approval action are still required; no plan is approved automatically.</p>}
+    {error && <p role="alert" className={styles.error}>{error}</p>}
+    {data && !data.members.length && <p className={styles.status}>No project members are assigned yet. An administrator assigns project members through Users, then grants planning and approval capacities here. <Link className={styles.link} href={`/projects/${projectId}?tab=team-access`}>Open Team Access</Link>{data.canManage && <Link className={styles.link} href="/users">Manage project assignments in Users</Link>}</p>}
+    {data && data.members.length > 0 && <div className={styles.scroll}>
+      <table className={styles.table}>
+        <thead><tr><th>Project member</th>{['PLANNER', 'PROJECT_ENGINEER', 'PROJECT_MANAGER'].map(role => <th key={role}>{role.replaceAll('_', ' ')}</th>)}</tr></thead>
+        <tbody>{data.members.map(member => <tr key={member.user.id}>
+          <th>{member.user.name || 'Project member'}</th>
+          {['PLANNER', 'PROJECT_ENGINEER', 'PROJECT_MANAGER'].map(capacity => {
+            const held = data.grants.some(grant => grant.userId === member.user.id && grant.capacity === capacity);
+            return <td key={capacity}>{data.canManage ? <button className={styles.secondary} disabled={busy} onClick={() => change(member.user.id, capacity, held ? 'revoke' : 'grant')}>{held ? 'Revoke' : 'Grant'}</button> : held ? 'Assigned' : '—'}</td>;
+          })}
+        </tr>)}</tbody>
+      </table>
+    </div>}
+  </details>;
 }

@@ -62,6 +62,18 @@ const command = (body: Record<string, unknown>) => runWorkPackageExecutionComman
 describe('Work Package execution transactions', () => {
   beforeEach(() => jest.clearAllMocks());
 
+  it('keeps the complete execution snapshot available beyond the default five-second transaction limit', async () => {
+    setup();
+    const readSnapshot = (prisma.$transaction as jest.Mock).getMockImplementation()!;
+    (prisma.$transaction as jest.Mock).mockImplementation((callback, options) => {
+      if (!options?.timeout || options.timeout < 10_000) throw new Error('Transaction already closed before the snapshot was read.');
+      return readSnapshot(callback, options);
+    });
+    const result = await getWorkPackageExecutionData(projectId);
+    expect(result.packages[0]).toMatchObject({ activityId: 'activity-current', sourcePackageId, name: 'Concrete' });
+    expect(result.packages[0].allocations[0]).toMatchObject({ itemCode: '1.1', allocatedQuantity: '100', measuredToDate: '0', remainingQuantity: '100' });
+  });
+
   it('allows omitted, short and blank narratives while preserving omitted streams', async () => {
     const { getStored } = setup();
     await command({ action: 'create-site-log', scheduleId, activityId: 'activity-current', logDate: '2026-11-05' });

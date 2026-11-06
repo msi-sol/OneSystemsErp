@@ -29,6 +29,88 @@ function addHeader(worksheet: ExcelJS.Worksheet) {
 }
 
 describe('BOQ workspace workbook parser', () => {
+  it('keeps identifiers intact and does not read a PROJECT table heading as metadata', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('BOQ');
+    sheet.addRow(['PROJECT', 'Description', 'Unit', 'Qty', 'Unit Cost', 'Amount']);
+    sheet.addRow([1.5, 'Numeric identifier', 'ea', 1, 20, 20]);
+    sheet.getCell('A2').numFmt='0';
+    const result=await analyzeBOQWorkbook({buffer:await workbookBuffer(workbook),fileName:'identifiers.xlsx',mapping:{headerRow:1,itemCode:1,description:2,unit:3,quantity:4,unitCost:5,amount:6},selectedSheet:'BOQ'});
+    expect(result.extractedProjectName).toBeNull();
+    expect(result.preview[0].itemCode).toBe('1.5');
+  });
+
+  it('requires explicit reasoned non-priced decisions and refuses to exclude priced rows', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet=workbook.addWorksheet('Benchmark'); addHeader(sheet);
+    sheet.addRow(['1','Security guards',null,1,null,null]);
+    sheet.addRow(['2','Priced item','ea',1,20,20]);
+    const buffer=await workbookBuffer(workbook);
+    const base={buffer,fileName:'decisions.xlsx'};
+    const before=await parseWorkspaceWorkbook(base);
+    expect(before.analysis.errors).toContainEqual(expect.objectContaining({row:2,field:'amount'}));
+    const after=await parseWorkspaceWorkbook({...base,nonPricedRows:[{rowNumber:2,reason:'Excluded scope confirmed against awarded BOQ'}]});
+    expect(after.analysis.errors).toEqual([]);
+    expect(after.analysis.total).toBe('20.00');
+    expect(after.analysis.warnings).toContainEqual(expect.objectContaining({row:2,message:expect.stringContaining('User-confirmed non-priced scope')}));
+    const invalid=await parseWorkspaceWorkbook({...base,nonPricedRows:[{rowNumber:3,reason:'Trying to omit a priced source row'}]});
+    expect(invalid.analysis.errors).toContainEqual(expect.objectContaining({row:3,message:expect.stringContaining('cannot be excluded')}));
+    await expect(parseWorkspaceWorkbook({...base,nonPricedRows:[{rowNumber:2,reason:''}]})).rejects.toThrow('reason');
+  });
+  it('preserves displayed amounts, non-priced annotations and merged totals without counting subtotals twice', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('BOQ');
+    addHeader(sheet);
+    sheet.addRow(['(1)', '(2)', '(3)', '(4)', '(5)', '(6)']);
+    sheet.addRow(['I', 'GENERAL REQUIREMENTS']);
+    sheet.addRow(['A', 'By-client scope', 'lot', 1, null, 'By Client']);
+    sheet.addRow(['B', 'Included elsewhere', null, null, null, 'Included']);
+    sheet.addRow(['C', 'Priced work', 'lot', 1, 19.999999999999996, {formula:'20',result:19.999999999999996}]);
+    sheet.getCell('E6').numFmt='#,##0.00';
+    sheet.getCell('F6').numFmt='#,##0.00';
+    sheet.addRow([null, null, null, null, null, {formula:'SUM(F4:F6)',result:20}]);
+    sheet.addRow(['TOTAL PROJECT COST', null, null, null, null, 20]);
+    sheet.mergeCells('A8:E8');
+    const result = await analyzeBOQWorkbook({buffer:await workbookBuffer(workbook),fileName:'displayed.xlsx'});
+    expect(result.itemCount).toBe(1);
+    expect(result.total).toBe('20.00');
+    expect(result.printedTotal).toBe('20.00');
+    expect(result.preview[0].section).toBe('I GENERAL REQUIREMENTS');
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({row:4,message:expect.stringContaining('Non-priced scope annotation')}),
+      expect.objectContaining({row:6,message:expect.stringContaining('Excel displayed precision')}),
+      expect.objectContaining({row:7,message:expect.stringContaining('excluded from item totals')}),
+    ]));
+  });
+
+  it('recognizes Unit/s and keeps malformed prices blocking despite a display format', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Benchmark');
+    sheet.addRow(['Item No.', 'Description of Work', 'Unit/s', 'Qty', 'Unit Cost', 'Total Cost']);
+    sheet.addRow(['1', 'Malformed price', 'ea', 1, 10, 'not a price']);
+    sheet.getCell('F2').numFmt='#,##0.00';
+    const result = await analyzeBOQWorkbook({buffer:await workbookBuffer(workbook),fileName:'benchmark.xlsx'});
+    expect(result.mapping?.unit).toBe(3);
+    expect(result.itemCount).toBe(0);
+    expect(result.errors).toContainEqual(expect.objectContaining({row:2,field:'amount'}));
+  });
+  it('detects merged description headers once and reads a PROJECT metadata label', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('BOQ');
+    sheet.addRow(['PROJECT', 'Merged header sample']);
+    sheet.addRow(['Item No.', 'Description', null, null, 'Unit', 'Qty', 'Unit Cost', 'Total Cost']);
+    sheet.mergeCells('B2:D2');
+    sheet.addRow(['1', 'Scope item', null, null, 'ea', 2, 10, 20]);
+    sheet.mergeCells('B3:D3');
+    const result = await analyzeBOQWorkbook({ buffer: await workbookBuffer(workbook), fileName: 'merged.xlsx' });
+    expect(result.selectedSheet).toBe('BOQ');
+    expect(result.mapping?.description).toBe(2);
+    expect(result.extractedProjectName).toBe('Merged header sample');
+    expect(result.itemCount).toBe(1);
+    expect(result.total).toBe('20.00');
+    expect(result.errors).toEqual([]);
+  });
   it('detects a BOQ sheet and preserves the supplied amount instead of multiplying unit cost', async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Cost Plan');

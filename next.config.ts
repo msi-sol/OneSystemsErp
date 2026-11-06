@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     '/*': ['./.runtime/**/*', './.env*', './outputs/**/*', './.git/**/*'],
   },
-  turbopack: {},
+  turbopack: { root: __dirname },
   serverExternalPackages: ['pdf-parse', 'pdfjs-dist'],
   experimental: {
     serverActions: {

@@ -15,6 +15,7 @@ export interface WorkPackageWorkspaceProps {
   baselineCode?: string | null;
   boqLocked: boolean;
   onPlan: () => void;
+  onReview?: () => void;
   canEditDraft?: boolean;
   rowVersion?: number;
   onRefresh?: () => void;
@@ -52,7 +53,7 @@ const workflowLabels: Record<string, string> = {
   ARCHIVED_BASELINE: 'Archived baseline',
 };
 
-export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, canEditDraft = false, rowVersion = 0, onRefresh, moduleMode = false, onOpenPackage, completionWeights }: WorkPackageWorkspaceProps) {
+export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, onReview, canEditDraft = false, rowVersion = 0, onRefresh, moduleMode = false, onOpenPackage, completionWeights }: WorkPackageWorkspaceProps) {
   const [query, setQuery] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
   const canEditScope = !moduleMode && canEditDraft && !summary.isImmutable && boqLocked
@@ -80,19 +81,19 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
     <section className={styles.workspace} aria-labelledby="work-package-heading">
       <div className={styles.header}>
         <div>
-          <h2 id="work-package-heading">Work packages</h2>
-          <p>Turn the approved BOQ into a plan the project team can follow.</p>
+          <h2 id="work-package-heading">{moduleMode ? 'Package list and schedule' : 'Work packages'}</h2>
+          <p>{moduleMode ? 'Open a package to check its scope, dates, resources and DUPA.' : 'Turn the approved BOQ into a plan the project team can follow.'}</p>
         </div>
         <a className={styles.link} href={moduleMode ? `/projects/${encodeURIComponent(projectId)}/boq` : `/projects/${encodeURIComponent(projectId)}?tab=awarded-boq`}>
           <BookOpen size={16} aria-hidden="true" /> View contract BOQ <ArrowRight size={16} aria-hidden="true" />
         </a>
       </div>
 
-      <ol className={styles.workflow} aria-label="BOQ to work package workflow">
+      {!moduleMode && <ol className={styles.workflow} aria-label="BOQ to work package workflow">
         <li><span>1</span><div><strong>Establish the BOQ</strong><small>{boqLocked ? 'Contract BOQ locked' : 'Review and lock the contract BOQ'}</small></div></li>
         <li><span>2</span><div><strong>Plan work packages</strong><small>{summary.packages.length} activities · {summary.datedCount} fully dated</small></div></li>
         <li><span>3</span><div><strong>Review and approve</strong><small>{workflowLabels[workflowStatus] || workflowStatus.replaceAll('_', ' ')}</small></div></li>
-      </ol>
+      </ol>}
 
       <div className={styles.standing}>
         <div>
@@ -101,7 +102,7 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
             ? 'This baseline is locked. Planning changes follow the existing revision and approval workflow.'
             : 'Review the allocated BOQ scope and dates, then use the schedule review controls to request approval.'}</p>
         </div>
-        <a className={styles.link} href={moduleMode ? '#plan-review' : '#schedule-review'}>Review workflow <ArrowRight size={16} aria-hidden="true" /></a>
+        {moduleMode && onReview ? <button type="button" className={styles.link} onClick={onReview}>Review workflow <ArrowRight size={16} aria-hidden="true" /></button> : <a className={styles.link} href="#schedule-review">Review workflow <ArrowRight size={16} aria-hidden="true" /></a>}
       </div>
 
       <dl className={styles.facts}>

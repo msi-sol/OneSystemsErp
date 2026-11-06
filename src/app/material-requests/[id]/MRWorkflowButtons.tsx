@@ -6,46 +6,51 @@ import { updateMRStatus, runMRFAIValidation } from '@/app/actions/mutations';
 interface Props {
   mrId: string;
   status: string;
+  capabilities: Record<string, boolean>;
   currentUser: { id: string; name: string | null; role: string } | null;
 }
 
-export default function MRWorkflowButtons({ mrId, status, currentUser }: Props) {
+export default function MRWorkflowButtons({ mrId, status, currentUser, capabilities }: Props) {
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState('');
   
   const role = currentUser?.role || '';
   if (role === 'GUEST_USER') return null;
-  const isSimAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'PROJECT_DIRECTOR';
+
 
   function handleAIValidation() {
     startTransition(async () => {
-      await runMRFAIValidation(mrId);
+      setError('');
+      try { await runMRFAIValidation(mrId); } catch (cause) { setError(cause instanceof Error ? cause.message : 'The request could not be checked.'); }
     });
   }
 
   function handleStatusUpdate(newStatus: string) {
     if (!currentUser?.id) return;
     startTransition(async () => {
-      await updateMRStatus(mrId, newStatus, currentUser.id);
+      setError('');
+      try { await updateMRStatus(mrId, newStatus); } catch (cause) { setError(cause instanceof Error ? cause.message : 'The request status could not be changed.'); }
     });
   }
 
   return (
     <div style={{ marginTop: '10px' }}>
+      {error && <p role="alert" style={{ color: '#fca5a5', marginBottom: 12 }}>{error}</p>}
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
         
         {/* Preparation Phase - Materials Engineer */}
         {status === 'DRAFT' && (
-          <button onClick={handleAIValidation} disabled={isPending || (!isSimAdmin && role !== 'MATERIALS_ENGINEER' && role !== 'PROJECT_ENGINEER')} className="btn-ai" title="Requires Materials Engineer Role">
+          <button onClick={handleAIValidation} disabled={isPending || !(capabilities.canEditDraft || capabilities.canSubmit)} className="btn-ai" title="Requires configured material-request preparation permission">
             {isPending ? 'Running AI Check...' : '🤖 Run AI Check'}
           </button>
         )}
 
         {(status === 'AI_CHECKING' || status === 'RETURNED') && (
           <>
-            <button onClick={handleAIValidation} disabled={isPending || (!isSimAdmin && role !== 'MATERIALS_ENGINEER' && role !== 'PROJECT_ENGINEER')} className="btn-ai" title="Requires Materials Engineer Role">
+            <button onClick={handleAIValidation} disabled={isPending || !(capabilities.canEditDraft || capabilities.canSubmit)} className="btn-ai" title="Requires configured material-request preparation permission">
               {isPending ? 'Running AI Check...' : '🤖 Re-run AI Check'}
             </button>
-            <button onClick={() => handleStatusUpdate('SUBMITTED')} disabled={isPending || (!isSimAdmin && role !== 'MATERIALS_ENGINEER' && role !== 'PROJECT_ENGINEER')} className="btn-primary" title="Requires Materials Engineer Role">
+            <button onClick={() => handleStatusUpdate('SUBMITTED')} disabled={isPending || !capabilities.canSubmit} className="btn-primary" title="Requires configured material-request preparation permission">
               {isPending ? 'Submitting...' : '📤 Submit for Review'}
             </button>
           </>
@@ -54,10 +59,10 @@ export default function MRWorkflowButtons({ mrId, status, currentUser }: Props) 
         {/* Checking Phase - Cost Control */}
         {status === 'SUBMITTED' && (
           <>
-            <button onClick={() => handleStatusUpdate('FOR_REVIEW')} disabled={isPending || (!isSimAdmin && role !== 'COST_CONTROL')} className="btn-primary" title="Requires Cost Control Role">
+            <button onClick={() => handleStatusUpdate('FOR_REVIEW')} disabled={isPending || !capabilities.canReview} className="btn-primary" title="Requires configured material-request review permission">
               {isPending ? 'Processing...' : '🔍 Mark as Checked (Cost Control)'}
             </button>
-            <button onClick={() => handleStatusUpdate('RETURNED')} disabled={isPending || (!isSimAdmin && role !== 'COST_CONTROL')} className="btn-danger" title="Requires Cost Control Role">
+            <button onClick={() => handleStatusUpdate('RETURNED')} disabled={isPending || !capabilities.canReturnForCorrection} className="btn-danger" title="Requires configured material-request review permission">
               {isPending ? 'Processing...' : '↩️ Return to Preparer'}
             </button>
           </>
@@ -66,14 +71,15 @@ export default function MRWorkflowButtons({ mrId, status, currentUser }: Props) 
         {/* Approval Phase - Project Manager */}
         {status === 'FOR_REVIEW' && (
           <>
-            <button onClick={() => handleStatusUpdate('APPROVED')} disabled={isPending || (!isSimAdmin && role !== 'PROJECT_MANAGER' && role !== 'PROJECT_DIRECTOR')} className="btn-success" title="Requires Project Manager Role">
-              {isPending ? 'Approving...' : '✅ Approve MRF (Project Manager)'}
+            <button onClick={() => handleStatusUpdate('APPROVED')} disabled={isPending || !capabilities.canApprove} className="btn-success" title="Requires configured material-request approval permission">
+              {isPending ? 'Approving...' : '✅ Approve MRF'}
             </button>
-            <button onClick={() => handleStatusUpdate('REJECTED')} disabled={isPending || (!isSimAdmin && role !== 'PROJECT_MANAGER' && role !== 'PROJECT_DIRECTOR')} className="btn-danger" title="Requires Project Manager Role">
+            <button onClick={() => handleStatusUpdate('REJECTED')} disabled={isPending || !capabilities.canReject} className="btn-danger" title="Requires configured material-request approval permission">
               {isPending ? 'Rejecting...' : '❌ Reject MRF'}
             </button>
           </>
         )}
+        {capabilities.canCancel && ['DRAFT','AI_CHECKING','SUBMITTED','FOR_REVIEW','RETURNED','APPROVED'].includes(status) && <button className="btn-danger" disabled={isPending} onClick={() => handleStatusUpdate('CANCELLED')}>Cancel request</button>}
       </div>
 
       <style>{`

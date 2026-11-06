@@ -25,16 +25,17 @@ type ConfirmWorkspaceInput = {
   projectId: string | null;
   projectName: string;
   projectContractAmount?: unknown;
+  documentToken?: string | null;
 };
 
 const STORAGE_DIR = path.join('.runtime', 'boq-workspace');
 function localOriginalPath(storagePath:string):string {
   const normalized=storagePath.replaceAll('\\','/');
-  if(/^retained:boq-workspace\/[A-Za-z0-9-]+\.xlsx$/.test(normalized)) {
+  if(/^retained:boq-workspace\/[A-Za-z0-9-]+\.(xlsx|pdf|docx)$/.test(normalized)) {
     // The release directory is read-only; uploads is linked to retained writable storage.
     return path.join(process.cwd(),'uploads','.boq-workspace',path.basename(normalized));
   }
-  if(!/^\.runtime\/boq-workspace\/[A-Za-z0-9-]+\.xlsx$/.test(normalized))throw new WorkspaceError('The original workbook path is invalid.',404);
+  if(!/^\.runtime\/boq-workspace\/[A-Za-z0-9-]+\.(xlsx|pdf|docx)$/.test(normalized))throw new WorkspaceError('The original document path is invalid.',404);
   return path.join(process.cwd(),'.runtime','boq-workspace',path.basename(normalized));
 }
 // Accept the existing backend BOQ upload setting as well as the frontend alias.
@@ -125,18 +126,24 @@ export function parseWorkspaceContractCandidate(value: unknown): Prisma.Decimal 
   return amount;
 }
 
-export async function storeWorkspaceOriginal(uploadId: string, projectId: string, fileHash: string, buffer: Buffer): Promise<string> {
+export function workspaceDocumentMime(fileName: string): string {
+  return /\.pdf$/i.test(fileName) ? 'application/pdf' : /\.docx$/i.test(fileName) ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+}
+
+export async function storeWorkspaceOriginal(uploadId: string, projectId: string, fileHash: string, buffer: Buffer, fileName = 'workbook.xlsx'): Promise<string> {
+  const extension = /\.(xlsx|pdf|docx)$/i.exec(fileName)?.[1].toLowerCase();
+  if (!extension) throw new WorkspaceError('Unsupported original document format.', 400);
   if (cloudStorageConfigured()) {
-    const key = `boq-workspace/${projectId}/${uploadId}-${fileHash}.xlsx`;
+    const key = `boq-workspace/${projectId}/${uploadId}-${fileHash}.${extension}`;
     await getS3Client().send(new PutObjectCommand({
       Bucket: s3Bucket(),
       Key: key,
       Body: buffer,
-      ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ContentType: workspaceDocumentMime(fileName),
     }));
     return `s3:${key}`;
   }
-  const relativePath = path.join(STORAGE_DIR, `${uploadId}.xlsx`);
+  const relativePath = path.join(STORAGE_DIR, `${uploadId}.${extension}`);
   const absolutePath = localOriginalPath(relativePath);
   await fs.mkdir(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
   await fs.writeFile(absolutePath, buffer, { flag: 'wx', mode: 0o600 });
@@ -186,12 +193,15 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
   if (input.projectName && Array.from(input.projectName.trim()).length > 191) throw new WorkspaceError('The project name must be 191 characters or fewer.', 400);
 
   await authorizeConfirm(input.actor, input.projectId);
+  if (/\.(pdf|docx)$/i.test(input.fileName) && !input.documentToken) throw new WorkspaceError('Analyze the document before confirming it.', 409);
   const { analysis, items } = await parseWorkspaceWorkbook({
     buffer: input.buffer,
     fileName: input.fileName,
     selectedSheet: input.selectedSheet,
     mapping: input.mapping,
   breakdownMapping: input.breakdownMapping,
+    documentToken: input.documentToken,
+    documentContext: `boq:${input.actor.id}:${input.projectId || 'new'}`,
   });
   if (analysis.fileHash !== input.expectedFileHash) throw new WorkspaceError('The workbook changed after analysis. Analyze it again before confirming.', 409);
   if (analysis.errors.length) throw new WorkspaceError('Correct the workbook errors before confirming the BOQ.', 400);
@@ -243,7 +253,7 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
       }
 
       const uploadId = randomUUID();
-      storedPath = await storeWorkspaceOriginal(uploadId, projectId, analysis.fileHash, input.buffer);
+      storedPath = await storeWorkspaceOriginal(uploadId, projectId, analysis.fileHash, input.buffer, input.fileName);
       const originalUrl = `/api/boq-workspace/uploads/${uploadId}/original`;
       const warningRows = new Set(analysis.warnings.map(entry => String(entry.row))).size;
       const report = {
@@ -266,6 +276,8 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
         fileHash: analysis.fileHash,
         mapping: analysis.mapping,
         breakdownMapping: analysis.breakdownMapping,
+        documentKind: analysis.documentKind,
+        documentExtraction: analysis.documentExtraction,
       };
       const metadataJson = JSON.stringify(metadata);
 
@@ -278,7 +290,7 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
           documentType: 'BOQ',
           originalFilename: input.fileName,
           fileHash: analysis.fileHash,
-          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          mimeType: workspaceDocumentMime(input.fileName),
           fileSize: input.buffer.byteLength,
           storagePath: storedPath,
           preservedOriginalUrl: originalUrl,

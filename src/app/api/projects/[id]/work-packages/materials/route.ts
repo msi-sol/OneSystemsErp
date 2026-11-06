@@ -9,7 +9,9 @@ import{readWorkPackagePlanDetails}from'@/lib/scheduling/work-package-details-typ
 import type{WorkPackageExecutionDocument}from'@/lib/scheduling/work-package-execution-types';
 import{canInstallMaterial,confirmedMaterialRequestLines}from'@/lib/scheduling/work-package-material-quantities';
 import{readPackageMaterialPlanning,WPS_REQUIREMENT}from'@/lib/scheduling/work-package-material-planning';
+import{readGeneratedPackageAllowance,readGeneratedPackageMaterialBudget}from'@/lib/boq/benchmark-allowance';
 import{loadMaterialInventory,runMaterialInventoryCommand}from'@/lib/scheduling/work-package-material-inventory';
+import{readMaterialAllowanceUsage}from'@/lib/boq/material-allowance-usage';
 type Context={params:Promise<{id:string}>};
 const ACTION='WPS_PROCUREMENT_RECORD_LINKED';
 async function context(projectId:string,activityId:string){
@@ -34,10 +36,12 @@ export async function GET(request:Request,{params}:Context){
   const installations=audits.filter(row=>row.actionType==='WPS_MATERIAL_INSTALLED').flatMap(row=>{try{const value=JSON.parse(row.newValue||'{}');return value.projectId===projectId&&value.sourcePackageId===current.sourcePackageId?[{id:row.transactionId,...value,recordedAt:row.createdAt}]:[];}catch{return[];}});
   const siteLogs=execution?(JSON.parse(execution.dataJson)as WorkPackageExecutionDocument).siteLogs.filter(row=>row.sourcePackageId===current.sourcePackageId&&row.baselineScheduleId===current.schedule.id).map(row=>({id:row.id,logDate:row.logDate})):[];
   const requirements=await readPackageMaterialPlanning(prisma as unknown as Prisma.TransactionClient,projectId,current.sourcePackageId);
+  const benchmarkMaterialBudget=await readGeneratedPackageMaterialBudget(prisma as unknown as Prisma.TransactionClient,projectId,current.sourcePackageId);
+  const projectMaterialLimits=await readMaterialAllowanceUsage(prisma as unknown as Prisma.TransactionClient,projectId);
   const inventory=await loadMaterialInventory(prisma as unknown as Prisma.TransactionClient);
   const inventoryView={rowVersion:inventory.row?.rowVersion||0,warehouses:inventory.doc.warehouses,catalog:inventory.doc.catalog,bindings:inventory.doc.bindings.filter(row=>row.projectId===projectId),reservations:inventory.doc.reservations.filter(row=>row.projectId===projectId&&row.sourcePackageId===current.sourcePackageId),transfers:inventory.doc.transfers.filter(row=>row.projectId===projectId&&row.sourcePackageId===current.sourcePackageId),adjustments:inventory.doc.adjustments};
   const mine=(recordType:string,id:string)=>links.some(row=>row.recordType===recordType&&row.recordId===id&&row.sourcePackageId===current.sourcePackageId);
-  return NextResponse.json({items,requests,issuances,consumption,installations,siteLogs,requirements,inventory:inventoryView,canOperateInventory:await hasPermission(actor.id,'INVENTORY','canEditDraft'),canApproveInventory:await hasPermission(actor.id,'INVENTORY','canApprove'),canInstall:access.canRecordSiteLogs,canPlanMaterials:await hasPermission(actor.id,'INVENTORY','canEditDraft'),linked:{requestIds:requests.filter(row=>mine('REQUEST',row.id)).map(row=>row.id),issuanceIds:issuances.filter(row=>mine('ISSUANCE',row.id)).map(row=>row.id),consumptionIds:consumption.filter(row=>mine('CONSUMPTION',row.id)).map(row=>row.id)},plannedMaterialAllowance:current.details.resources.filter(row=>row.activityId===activityId&&row.kind==='MATERIAL').reduce((sum,row)=>sum.plus(row.amount),new Prisma.Decimal(0)).toFixed(2),canCreate:access.canView&&await hasPermission(actor.id,'PROCUREMENT','canCreate')});
+  return NextResponse.json({benchmarkMaterialBudget,projectMaterialLimits,items,requests,issuances,consumption,installations,siteLogs,requirements,inventory:inventoryView,canOperateInventory:await hasPermission(actor.id,'INVENTORY','canEditDraft'),canApproveInventory:await hasPermission(actor.id,'INVENTORY','canApprove'),canInstall:access.canRecordSiteLogs,canPlanMaterials:await hasPermission(actor.id,'INVENTORY','canEditDraft'),linked:{requestIds:requests.filter(row=>mine('REQUEST',row.id)).map(row=>row.id),issuanceIds:issuances.filter(row=>mine('ISSUANCE',row.id)).map(row=>row.id),consumptionIds:consumption.filter(row=>mine('CONSUMPTION',row.id)).map(row=>row.id)},plannedMaterialAllowance:current.details.resources.filter(row=>row.activityId===activityId&&row.kind==='MATERIAL').reduce((sum,row)=>sum.plus(row.amount),new Prisma.Decimal(0)).toFixed(2),canCreate:access.canView&&await hasPermission(actor.id,'PROCUREMENT','canCreate')});
  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'MATERIALS_UNAVAILABLE'},{status:400});}
 }
 export async function POST(request:Request,{params}:Context){
@@ -59,6 +63,8 @@ export async function POST(request:Request,{params}:Context){
      const existing=(await readPackageMaterialPlanning(tx,projectId,current.sourcePackageId)).find(row=>row.materialId===material.id);
      if((existing?.eventId||null)!==(body.expectedEventId||null))throw Error('MATERIAL_REQUIREMENT_CHANGED');
      if(existing&&quantity.lt(existing.installed))throw Error('REQUIREMENT_BELOW_INSTALLED_MATERIAL');
+     const approvedAllowance=await readGeneratedPackageAllowance(tx,projectId,current.sourcePackageId,material.id);
+     if(approvedAllowance&&quantity.gt(approvedAllowance))throw Error(`REQUIREMENT_EXCEEDS_APPROVED_BENCHMARK: maximum ${approvedAllowance.toString()} for this package.`);
      if(typeof body.note!=='string'||body.note.trim().length<3)throw Error('MATERIAL_REQUIREMENT_REASON_REQUIRED');
      const id=randomUUID();await tx.auditLog.create({data:{userId:actor.id,userRole:actor.role,moduleName:'PROJECT_SCHEDULING',transactionId:id,actionType:WPS_REQUIREMENT,newValue:JSON.stringify({projectId,sourcePackageId:current.sourcePackageId,materialId:material.id,requiredQuantity:quantity.toString(),note:body.note.trim()})}});
      return{recordId:id,recordType:'REQUIREMENT'};

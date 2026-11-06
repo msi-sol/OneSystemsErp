@@ -5,13 +5,14 @@ import Link from 'next/link';
 import {useRouter}from'next/navigation';
 import type { WorkPackageExecutionData, ExecutionPackageView } from '@/lib/scheduling/work-package-execution-types';
 import { CONSTRAINT_TYPES, CONSTRAINT_TYPE_LABEL } from '@/lib/scheduling/work-package-constraints';
+import { descendantIds, formatLocationPath } from '@/lib/scheduling/work-package-location';
 import styles from '../planning/planning.module.css';
 
 function Field({label,value,onChange,type='text',required=false}:{label:string;value:string;onChange:(value:string)=>void;type?:string;required?:boolean}){
   const id=useId();return <div><label htmlFor={id}>{label}</label><input id={id} type={type} step={type==='number'?'any':undefined} value={value} required={required} onChange={event=>onChange(event.target.value)}/></div>;
 }
-function Choice({label,value,onChange,options,required=false}:{label:string;value:string;onChange:(value:string)=>void;options:{id:string;name:string}[];required?:boolean}){
-  const id=useId();return <div><label htmlFor={id}>{label}</label><select id={id} value={value} required={required} onChange={event=>onChange(event.target.value)}><option value="">Choose…</option>{options.map(option=><option key={option.id} value={option.id}>{option.name}</option>)}</select></div>;
+function Choice({label,value,onChange,options,required=false,placeholder='Choose…'}:{label:string;value:string;onChange:(value:string)=>void;options:{id:string;name:string}[];required?:boolean;placeholder?:string}){
+  const id=useId();return <div><label htmlFor={id}>{label}</label><select id={id} value={value} required={required} onChange={event=>onChange(event.target.value)}><option value="">{placeholder}</option>{options.map(option=><option key={option.id} value={option.id}>{option.name}</option>)}</select></div>;
 }
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const errorText=(value:unknown)=>typeof value==='string'?(['APPROVED_BOQ_PIN_REQUIRED','ACTIVE_BASELINE_REQUIRED','AUTHORITATIVE_BASELINE_REQUIRED'].includes(value)?'Complete Engineer review and PM approval of a prepared work-package plan to enable daily measurements and weekly commitments.':value.replaceAll('_',' ').toLowerCase()):'The change could not be saved.';
@@ -30,6 +31,8 @@ export default function WorkPackageExecutionPanel({projectId,view,canPrepare,can
   const [laborEdit,setLaborEdit]=useState('');
   const [constraint,setConstraint]=useState({id:'',activityId:activityId||'',type:'OTHER',title:'',description:'',ownerId:'',neededBy:'',resolution:''});
   const [reason,setReason]=useState('');
+  const [locationFilter,setLocationFilter]=useState('');
+  const [laneFilter,setLaneFilter]=useState('all');
   const load=useCallback(async()=>{
     const response=await fetch(`/api/projects/${projectId}/work-packages/execution?horizon=${horizon}`);const result=await response.json();
     if(!response.ok)throw Error(errorText(result.error));setData(result);
@@ -41,7 +44,10 @@ export default function WorkPackageExecutionPanel({projectId,view,canPrepare,can
   }
   if(!data)return <div className={styles.status}><h3>Approved-plan execution</h3><p role={error?'alert':'status'}>{error||'Loading the current approved baseline…'}</p><p>Look-ahead, weekly commitments and daily measurements use the active approved work-package baseline.</p></div>;
   const packages=activityId?data.packages.filter(pkg=>pkg.activityId===activityId):data.packages;
-  const focusedPackages=view==='look-ahead'?[...new Map([...data.lookAhead.late,...data.lookAhead.underway,...data.lookAhead.upcoming,...data.lookAhead.attention.undated].map(pkg=>[pkg.activityId,pkg])).values()]:packages;
+  const candidatePackages=view==='look-ahead'?[...new Map([...data.lookAhead.late,...data.lookAhead.underway,...data.lookAhead.upcoming,...data.lookAhead.attention.undated].map(pkg=>[pkg.activityId,pkg])).values()]:packages;
+  const selectedLocations=locationFilter?descendantIds(data.locations,locationFilter):null;
+  const lanePackages=laneFilter==='late'?data.lookAhead.late:laneFilter==='underway'?data.lookAhead.underway:laneFilter==='upcoming'?data.lookAhead.upcoming:laneFilter==='undated'?data.lookAhead.attention.undated:null;
+  const focusedPackages=view==='look-ahead'?candidatePackages.filter(pkg=>(!selectedLocations||pkg.allocations.some(row=>row.locationId&&selectedLocations.has(row.locationId)))&&(!lanePackages||lanePackages.some(row=>row.activityId===pkg.activityId))):candidatePackages;
   const pkgOptions=data.packages.map(pkg=>({id:pkg.activityId,name:`${pkg.code} · ${pkg.name}`}));
   const allocations=data.packages.flatMap(pkg=>pkg.allocations.map(allocation=>({...allocation,packageCode:pkg.code})));
   const allocationName=(id:string)=>{const row=allocations.find(allocation=>allocation.allocationId===id);return row?`${row.packageCode} · ${row.itemCode} · ${locationName(row.locationId)} · ${row.unit}`:id;};
@@ -61,6 +67,8 @@ export default function WorkPackageExecutionPanel({projectId,view,canPrepare,can
       <div className={styles.titleRow}><h3>{view==='operations'?'Package operations':'Look-ahead'}</h3><label>Planning horizon <select value={horizon} onChange={event=>setHorizon(event.target.value)}>{[['14','2 weeks'],['21','3 weeks'],['28','4 weeks'],['42','6 weeks']].map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label></div>
       <p className={styles.muted}>Focus on overdue, underway and upcoming work. Undated packages and open constraints remain visible for attention.</p>
       {view==='look-ahead'&&<div className={styles.actions}>{[['Late',data.lookAhead.late.length],['Underway',data.lookAhead.underway.length],['Upcoming',data.lookAhead.upcoming.length],['Undated',data.lookAhead.attention.undated.length]].map(([label,count])=><span className={styles.status} key={String(label)}>{label}: {count}</span>)}</div>}
+      {view==='look-ahead'&&<div className={styles.panel}><div className={styles.fields}><Choice label="Location" placeholder="Everywhere" value={locationFilter} onChange={setLocationFilter} options={data.locations.map(location=>({id:location.id,name:formatLocationPath(data.locations,location.id)}))}/><Choice label="Schedule lane" value={laneFilter} onChange={setLaneFilter} options={[{id:'all',name:'All work in the window'},{id:'late',name:'Late'},{id:'underway',name:'Underway'},{id:'upcoming',name:'Upcoming'},{id:'undated',name:'Undated'}]}/></div><div className={styles.actions}><span>{focusedPackages.length} of {candidatePackages.length} packages in this window</span><button className={styles.secondary} onClick={()=>{setLocationFilter('');setLaneFilter('all');}}>Clear filters</button></div></div>}
+      {view==='look-ahead'&&!focusedPackages.length&&<p className={styles.empty}>No packages match these filters. Clear filters or change the planning horizon.</p>}
       {focusedPackages.map(pkg=>{const value=pkg.allocations.reduce((sum,row)=>sum+Number(row.allocatedAmount),0);const earned=pkg.allocations.reduce((sum,row)=>sum+Number(row.allocatedAmount)*(Number(row.allocatedQuantity)>0?Math.min(1,Number(row.measuredToDate)/Number(row.allocatedQuantity)):0),0);return <details className={styles.panel} key={pkg.activityId} open={!!activityId}><summary>{pkg.code} · {pkg.name} · {pkg.startDate||'No start'} – {pkg.finishDate||'No finish'} · measured progress {value>0?(earned/value*100).toFixed(2):'0'}%</summary><p>{readiness(pkg).length?`Blocked: ${readiness(pkg).map(row=>row.title).join('; ')}`:'No open recorded constraint.'}</p><div className={styles.scroll}><table className={styles.table}><thead><tr><th>BOQ item / location</th><th>Allocated</th><th>Measured to date</th><th>Remaining</th></tr></thead><tbody>{pkg.allocations.map(row=><tr key={row.allocationId}><th>{row.itemCode} · {locationName(row.locationId)}<br/>{row.description}</th><td>{row.allocatedQuantity} {row.unit}</td><td>{row.measuredToDate} {row.unit}</td><td>{row.remainingQuantity} {row.unit}</td></tr>)}</tbody></table></div><Link className={styles.link} href={`/projects/${projectId}/work-packages?view=site-logs&activity=${pkg.activityId}`}>Open daily site logs</Link> <Link className={styles.link} href={`/projects/${projectId}/work-packages?view=weekly`}>Open weekly commitments</Link></details>;})}
     </>}
     {view==='weekly'&&<>

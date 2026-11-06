@@ -241,7 +241,7 @@ export default async function ProjectDetailsPage({
           <p style={{ whiteSpace: 'pre-wrap' }}>{project.description?.replace(/BOQ File Uploaded: .*/, '') || 'No description provided.'}</p>
           
         </div>
-        <div style={{ textAlign: 'right', minWidth: 'max-content', marginLeft: '20px' }}>
+        <div className={styles.projectFacts}>
           <div style={{ fontSize: '1.15rem', color: 'var(--accent-color)', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
             ₱ {project.contractAmount?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </div>

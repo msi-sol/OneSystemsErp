@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { validateTransactionWithAI } from '../lib/aiValidation';
+import { prepareIssuance, validateIssuanceDraft } from '../services/material-issuance';
 
 const router = Router();
 function getPbacContext(req: any) {
@@ -35,6 +36,7 @@ router.post('/create', async (req, res) => {
   try {
     const data = req.body;
     const { userId } = getPbacContext(req);
+    await validateIssuanceDraft(prisma, data);
 
     const validation = await validateTransactionWithAI(
       'Material Issuance',
@@ -59,7 +61,9 @@ router.post('/create', async (req, res) => {
     const count = await prisma.materialIssuance.count();
     const misNumber = `MIS-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
 
-    const issuance = await prisma.materialIssuance.create({
+    const issuance = await prisma.$transaction(async tx => {
+      await validateIssuanceDraft(tx, data);
+      return tx.materialIssuance.create({
       data: {
         misNumber,
         projectId: data.projectId,
@@ -72,48 +76,39 @@ router.post('/create', async (req, res) => {
           }))
         }
       }
-    });
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     res.json({ success: true, issuance });
   } catch (error: any) {
     console.error('Error creating issuance slip:', error);
-    res.status(500).json({ success: false, error: 'Failed to create issuance slip' });
+    res.status(400).json({ success: false, error: error.message || 'Failed to create issuance slip' });
   }
 });
 
 router.post('/:id/process', async (req, res) => {
   try {
     const { id } = req.params;
-    const { warehousemanId, itemsData } = req.body;
+    const { userId } = getPbacContext(req);
+    const { itemsData } = req.body;
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
     await prisma.$transaction(async (tx) => {
-      for (const item of itemsData) {
-        await tx.issuanceItem.update({
-          where: { id: item.id },
-          data: { releasedQty: item.releasedQty }
-        });
-      }
-
-      await tx.materialIssuance.update({
-        where: { id },
-        data: {
-          status: 'PROCESSED',
-          warehousemanId: warehousemanId
-        }
-      });
-    });
+      await prepareIssuance(tx, id, userId, itemsData);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     res.json({ success: true });
   } catch (error: any) {
     console.error('Error processing issuance:', error);
-    res.status(500).json({ success: false, error: 'Failed to process issuance' });
+    res.status(400).json({ success: false, error: error.message || 'Failed to process issuance' });
   }
 });
 
 router.post('/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
-    const { accountantId } = req.body;
+    const { userId } = getPbacContext(req);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
     await prisma.$transaction(async (tx) => {
       const slip = await tx.materialIssuance.findUnique({
@@ -139,7 +134,7 @@ router.post('/:id/approve', async (req, res) => {
           throw new Error(`Not enough inventory for ${boqItem.description}. Available: ${available}, Requested: ${item.releasedQty}`);
         }
 
-        if(item.releasedQty<=0)throw Error('Released quantity must be positive.');
+        if(!Number.isFinite(item.releasedQty)||item.releasedQty<=0||item.releasedQty>item.requestedQty)throw Error('Released quantity must be positive and cannot exceed the requested quantity.');
         await consumeMaterialReservations(tx,{projectId:slip.projectId,materialId:boqItem.id,quantity:item.releasedQty,projectStock:available,sourcePackageId});
         await tx.consolidatedBOQItem.update({
           where: { id: boqItem.id },
@@ -153,9 +148,9 @@ router.post('/:id/approve', async (req, res) => {
         where: { id },
         data: {
           status: 'RELEASED',
-          accountantId: accountantId,
+          accountantId: userId,
           releaseDate: new Date(),
-          releasedById: accountantId
+          releasedById: userId
         }
       });
     },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});

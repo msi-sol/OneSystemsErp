@@ -8,6 +8,11 @@
 .totals dd { margin: 6px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .warning { color: #f8c76a; }
 .hint { margin-bottom: 20px; }
+.listControls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px 18px; margin: 18px 0 10px; color: var(--text-secondary); font-size: .84rem; }
+.listControls label { display: grid; gap: 5px; }
+.listControls select { min-height: 40px; min-width: 150px; padding: 8px 10px; border: 1px solid var(--glass-border); border-radius: 6px; background: var(--bg-tertiary); color: var(--text-primary); font: inherit; }
+.listControls .actions { align-items: center; }
+.listControls .actions span { min-width: 78px; text-align: center; }
 .scroll { max-width: 100%; overflow-x: auto; scrollbar-color: var(--text-secondary) var(--bg-tertiary); }
 .scroll table { width: 100%; border-collapse: collapse; font-size: .875rem; font-variant-numeric: tabular-nums; }
 .scroll th, .scroll td { padding: 12px; border-bottom: 1px solid var(--glass-border); text-align: left; vertical-align: top; }
@@ -28,5 +33,6 @@
 .error { color: #fca5a5; }
 .success { color: #8ce8bd; }
 .editor :is(button,input,textarea,.scroll):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
+.editor :is(select):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-@media (max-width: 600px) { .editor { padding: 16px; } .totals { gap: 20px; } .approval button { width: 100%; } }
+@media (max-width: 600px) { .editor { padding: 16px; } .totals { gap: 20px; } .approval button { width: 100%; } .listControls { align-items: stretch; } .listControls > span { width: 100%; } }

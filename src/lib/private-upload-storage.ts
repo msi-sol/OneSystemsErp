@@ -98,8 +98,8 @@ export async function headStoredUpload(key: string) {
 }
 
 export async function readStoredUpload(source: string): Promise<Buffer> {
-  if (/^\.runtime\/boq-workspace\/[A-Za-z0-9-]+\.xlsx$/.test(source)) return fs.readFile(path.join(process.cwd(), source));
-  if (/^retained:boq-workspace\/[A-Za-z0-9-]+\.xlsx$/.test(source)) return fs.readFile(path.join(process.cwd(), 'uploads', '.boq-workspace', path.basename(source)));
+  if (/^\.runtime\/boq-workspace\/[A-Za-z0-9-]+\.(xlsx|pdf|docx)$/.test(source)) return fs.readFile(path.join(process.cwd(), source));
+  if (/^retained:boq-workspace\/[A-Za-z0-9-]+\.(xlsx|pdf|docx)$/.test(source)) return fs.readFile(path.join(process.cwd(), 'uploads', '.boq-workspace', path.basename(source)));
   const key = storedUploadKey(source);
   if (key) {
     if (process.env.NODE_ENV !== 'production') return fs.readFile(localUploadPath(key));

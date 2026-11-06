@@ -24,7 +24,7 @@ export default async function ProcurementHub() {
       <PermissionGuard permissions={permissions} moduleName="PROCUREMENT" action="canView" fallback={<div style={{ padding: '20px', color: '#ef4444' }}>You do not have permission to view the Procurement Hub.</div>}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
           gap: '30px'
         }}>
           {/* Material Requests Card */}
