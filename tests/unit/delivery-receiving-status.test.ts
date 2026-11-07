@@ -69,4 +69,26 @@ describe('delivery receipt status enforcement', () => {
     expect(tx.consolidatedBOQItem.update).not.toHaveBeenCalled();
     expect(tx.accountsPayable.create).not.toHaveBeenCalled();
   });
+
+  it('posts the same correctly allocated repeated-material cost to stock, ledger and payable', async () => {
+    const receipt = { id: 'delivery-1', poId: 'po-1', status: 'FOR_ACCOUNTANT_APPROVAL', receiptNumber: 'DR-TEST', createdAt: new Date(),
+      items: [{ consolidatedBoqItemId: materialId, quantity: 5, drQuantity: 5, consolidatedBoqItem: { projectId: 'project-1', unitCost: 999, deliveredQty: 0, actualCost: 0 } }],
+      po: { status: 'APPROVED', supplierId: 'supplier', supplier: { name: 'Supplier', isVatable: false }, mr: { projectId: 'project-1' }, items: [
+        { id: 'a', consolidatedBoqItemId: materialId, quantity: 4, unitCost: 10 },
+        { id: 'b', consolidatedBoqItemId: materialId, quantity: 6, unitCost: 20 },
+      ] },
+    };
+    const tx = {
+      delivery: { findUnique: jest.fn().mockResolvedValue(receipt), updateMany: jest.fn().mockResolvedValue({ count: 1 }), findMany: jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([receipt]) },
+      consolidatedBOQItem: { update: jest.fn() }, projectCostLedger: { create: jest.fn() },
+      accountsPayable: { count: jest.fn().mockResolvedValue(0), create: jest.fn() }, purchaseOrder: { update: jest.fn() },
+    };
+    (prisma.$transaction as jest.Mock).mockImplementation(callback => callback(tx));
+    const response = await post('/delivery-1/approve');
+    expect(response.status).toBe(200);
+    expect(tx.consolidatedBOQItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { deliveredQty: 5, actualCost: 60 } }));
+    expect(tx.projectCostLedger.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ grossAmount: 60, netAmount: 60 }) }));
+    expect(tx.accountsPayable.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ amount: 60 }) }));
+    expect(tx.purchaseOrder.update).toHaveBeenCalledWith({ where: { id: 'po-1' }, data: { status: 'PARTIALLY_DELIVERED' } });
+  });
 });

@@ -95,7 +95,10 @@ export default function ActiveProjectSelector({
                 Cost: ₱{(currentAssignment.project.contractAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
               <span style={{ fontSize: '0.7rem', color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                Duration: {currentAssignment.project.originalContractDuration || 0} Days
+                {/* An unset duration is "not set", not a zero-day contract. */}
+                Duration: {currentAssignment.project.originalContractDuration
+                  ? `${currentAssignment.project.originalContractDuration} ${currentAssignment.project.originalContractDuration === 1 ? 'Day' : 'Days'}`
+                  : 'Not set'}
               </span>
             </div>
           </div>

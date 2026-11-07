@@ -109,7 +109,7 @@ export default async function ProjectExpenseLedgerTab({ projectId }: { projectId
             </p>
           </div>
 
-          <Link href="/expenses/create" className="tech-button-red" style={{
+          <Link href="/expenses" className="tech-button-red" style={{
               marginTop: '10px', backgroundColor: '#ff6b6b', color: '#fff',
               padding: '14px 32px', borderRadius: '12px', fontWeight: '900',
               fontSize: '1.1rem', textDecoration: 'none', display: 'inline-flex',
@@ -182,7 +182,7 @@ export default async function ProjectExpenseLedgerTab({ projectId }: { projectId
           Project Expense Ledger
         </h2>
         <Link 
-          href="/expenses/create" 
+          href="/expenses" 
           className="header-button-red"
           style={{
             background: 'linear-gradient(135deg, #ff6b6b, #ff4757)',

@@ -87,7 +87,9 @@ export default function ProjectTimelineEditor({ projectId, initialStartDate, ini
           fontSize: '0.85rem',
           fontWeight: 'bold',
           transition: 'all 0.2s',
-          marginLeft: 'auto'
+          marginLeft: 'auto',
+          whiteSpace: 'nowrap',
+          flexShrink: 0
         }}
       >
         <Edit2 size={14} /> Edit Timeline

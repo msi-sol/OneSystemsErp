@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { generateObject } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { openAIModel } from '@/lib/ai/openai-model';
 import { z } from 'zod';
 
 // Core models that are most critical to scan to save API quota.
@@ -28,7 +28,7 @@ export async function runBulkSchemaScanner() {
     // 1. Ask AI for synonyms and ontology mapping
     try {
       const result = await generateObject({
-        model: openai('gpt-4o-mini'),
+        model: openAIModel(), // app-wide OpenAI model (gpt-6-luna by default)
         schema: z.object({
           businessMeaning: z.string().describe('Short explanation of what this model represents in an ERP.'),
           moduleCategory: z.string().describe('e.g., Procurement, HR, Finance, Project Management'),

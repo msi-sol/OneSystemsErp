@@ -6,7 +6,7 @@ import { getUserPermissions } from '@/lib/permissions';
 import { generateEmbedding, cosineSimilarity } from '@/lib/ai-indexer';
 import { detectIntents, expandKeywords } from '@/lib/rag-intelligence';
 import { evaluateComparison } from '@/lib/ai-comparison-engine';
-import { openai } from '@ai-sdk/openai';
+import { openAIModel } from '@/lib/ai/openai-model';
 import { streamText, tool, jsonSchema } from 'ai';
 import { z } from 'zod';
 import { logSecurityEvent } from '@/lib/securityEngine';
@@ -252,7 +252,7 @@ ${staticContext}
   // 5. Generate AI Response
   try {
     const result = await streamText({
-      model: openai('gpt-4o-mini'),
+      model: openAIModel(), // app-wide OpenAI model (gpt-6-luna by default)
       system: systemPrompt,
       messages,
       onFinish: async ({ text }) => {

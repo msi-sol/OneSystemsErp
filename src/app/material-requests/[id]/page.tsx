@@ -6,6 +6,8 @@ import Link from 'next/link';
 import MRWorkflowButtons from './MRWorkflowButtons';
 import { cookies } from 'next/headers';
 import { getUserPermissions } from '@/lib/permissions';
+import { materialQuantity } from '@/lib/procurement/material-values';
+import Decimal from 'decimal.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -127,7 +129,7 @@ export default async function MaterialRequestDetailsPage({ params }: { params: P
           <tbody>
             {mr.items.map((item, index) => {
               const boq = item.consolidatedBoqItem;
-              const balance = boq.quantity - boq.deliveredQty;
+              const balance = Decimal.max(0, new Decimal(String(materialQuantity(boq))).minus(String(boq.deliveredQty))).toNumber();
               return (
                 <React.Fragment key={item.id}>
                 <tr>
@@ -244,7 +246,11 @@ export default async function MaterialRequestDetailsPage({ params }: { params: P
           <tbody>
             {!mr.canvassForms || mr.canvassForms.length === 0 ? (
               <tr>
-                <td colSpan={4} className={styles.emptyState}>No canvass forms generated for this MR yet.</td>
+                <td colSpan={4} className={styles.emptyState}>
+                  No canvass forms generated for this MR yet.
+                  {/* The next flow step from an approved request; previously users had to find it under Procurement. */}
+                  {mr.status === 'APPROVED' && <> <Link href={`/procurement/canvassing/new?mrId=${encodeURIComponent(mr.id)}`} style={{ color: '#3b82f6', textDecoration: 'underline', fontWeight: 'bold' }}>Start canvassing for this request →</Link></>}
+                </td>
               </tr>
             ) : mr.canvassForms.map((cf: any) => (
               <tr key={cf.id}>

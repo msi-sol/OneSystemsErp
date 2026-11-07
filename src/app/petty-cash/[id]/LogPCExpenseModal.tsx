@@ -7,10 +7,13 @@ import { useRouter } from 'next/navigation';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 
+// Format in local time; toISOString() shifts to UTC and stores the previous day in UTC+8.
+const toLocalDateString = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 export default function LogPCExpenseModal({ account, users, onClose }: { account: any, users: any[], onClose: () => void }) {
   const router = useRouter();
   
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(() => toLocalDateString(new Date()));
   const [payee, setPayee] = useState('');
   const [purpose, setPurpose] = useState('');
   const [category, setCategory] = useState('MATERIALS');
@@ -155,7 +158,7 @@ export default function LogPCExpenseModal({ account, users, onClose }: { account
             <div style={{ position: 'relative' }}>
               <DatePicker 
                 selected={date ? new Date(date) : new Date()} 
-                onChange={(d: Date | null) => setDate(d ? d.toISOString().split('T')[0] : '')} 
+                onChange={(d: Date | null) => setDate(d ? toLocalDateString(d) : '')} 
                 dateFormat="MMMM d, yyyy"
                 wrapperClassName="date-picker-wrapper"
                 className="custom-datepicker-input"

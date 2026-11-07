@@ -9,20 +9,24 @@ import { isFullQuotationCoverage } from '@/lib/procurement/quotation-validation'
 
 export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any, suppliers: any[] }) {
   const router = useRouter();
+  const canEditQuotations = !['APPROVED', 'COMPLETED'].includes(canvass.status);
   const [activeTab, setActiveTab] = useState<'ITEMS' | 'QUOTATIONS' | 'AI_COMPARISON'>('ITEMS');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPO, setIsGeneratingPO] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isEndorsing, setIsEndorsing] = useState(false);
+  // Results and errors are shown on the page; browser alert() pop-ups were easy to miss and blocked the page.
+  const [notice, setNotice] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+  const say = (text: string | undefined | null, kind: 'error' | 'success' = 'error') => { setNotice({ kind, text: text || (kind === 'error' ? 'The action failed.' : 'Done.') }); };
 
   const handleEndorse = async () => {
     setIsEndorsing(true);
     const res = await endorseCanvassRecommendation(canvass.id);
     if (res.success) {
-      alert('AI Recommendation Endorsed!');
+      say('AI recommendation endorsed.', 'success');
       router.refresh();
     } else {
-      alert(res.error);
+      say(res.error);
     }
     setIsEndorsing(false);
   };
@@ -31,10 +35,10 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
     setIsApproving(true);
     const res = await approveCanvassRecommendation(canvass.id);
     if (res.success) {
-      alert('AI Recommendation Approved!');
+      say('AI recommendation approved.', 'success');
       router.refresh();
     } else {
-      alert(res.error);
+      say(res.error);
     }
     setIsApproving(false);
   };
@@ -67,18 +71,19 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
       });
       const data = await res.json();
       if (data.success) {
+        say('AI comparison updated. Review the ranking below.', 'success');
         router.refresh();
       } else {
-        alert(data.error);
+        say(data.error);
       }
-    } catch (e) {
-      alert('Error running AI comparison');
+    } catch {
+      say('The AI comparison could not be run. Check your connection and try again.');
     }
     setIsAnalyzing(false);
   };
 
   const handleSubmitQuotation = async () => {
-    if (!selectedSupplier) return alert('Select a supplier');
+    if (!selectedSupplier) return say('Select a supplier');
 
     let availableLineCount = 0;
     const items = [];
@@ -86,10 +91,10 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
       const quantityAvailable = quoteItems[item.id]?.quantityAvailable ?? item.quantityRequired;
       const unitCost = quoteItems[item.id]?.unitCost;
       if (!Number.isFinite(quantityAvailable) || quantityAvailable < 0 || quantityAvailable > item.quantityRequired) {
-        return alert(`Available quantity for ${item.consolidatedBoqItem.description} must be between 0 and ${item.quantityRequired}.`);
+        return say(`Available quantity for ${item.consolidatedBoqItem.description} must be between 0 and ${item.quantityRequired}.`);
       }
       if (quantityAvailable > 0 && (!Number.isFinite(unitCost) || unitCost! <= 0)) {
-        return alert(`Enter a positive unit cost for ${item.consolidatedBoqItem.description}, or set its available quantity to 0.`);
+        return say(`Enter a positive unit cost for ${item.consolidatedBoqItem.description}, or set its available quantity to 0.`);
       }
       if (quantityAvailable > 0) availableLineCount++;
       items.push({
@@ -98,11 +103,12 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
         quantityAvailable,
       });
     }
-    if (availableLineCount === 0) return alert('At least one quoted item must have a positive available quantity and price.');
+    if (availableLineCount === 0) return say('At least one quoted item must have a positive available quantity and price.');
 
-    const res = editQuotationId 
-      ? await updateSupplierQuotation(canvass.id, editQuotationId, selectedSupplier, items)
-      : await addSupplierQuotation(canvass.id, selectedSupplier, items);
+    const res = await (editQuotationId
+      ? updateSupplierQuotation(canvass.id, editQuotationId, selectedSupplier, items)
+      : addSupplierQuotation(canvass.id, selectedSupplier, items)
+    ).catch((error: Error) => ({ success: false, error: error.message || 'Failed to save the quotation.' }));
 
     if (res.success) {
       setShowAddQuote(false);
@@ -111,7 +117,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
       setSelectedSupplier('');
       router.refresh();
     } else {
-      alert(res.error);
+      say(res.error);
     }
   };
 
@@ -133,21 +139,21 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
   };
 
   const handleSendEmail = async () => {
-    if (emailSelectedSuppliers.length === 0) return alert('Please select at least one supplier to email.');
+    if (emailSelectedSuppliers.length === 0) return say('Please select at least one supplier to email.');
     setIsSendingEmail(true);
     const res = await sendCanvassEmail(canvass.id, emailSelectedSuppliers);
     if (res.success) {
-      alert(res.message);
+      say(res.message, 'success');
       setShowEmailModal(false);
       setEmailSelectedSuppliers([]);
     } else {
-      alert(res.error);
+      say(res.error);
     }
     setIsSendingEmail(false);
   };
 
   const handleUploadAI = async () => {
-    if (uploadAIFiles.length === 0) return alert('Please select quotation files to upload.');
+    if (uploadAIFiles.length === 0) return say('Please select quotation files to upload.');
 
     setIsUploadingAI(true);
     setUploadAIResults(null);
@@ -159,26 +165,30 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
       setUploadAIResults(res.results as any || []);
       router.refresh(); 
     } else {
-      alert(res.error);
+      say(res.error);
     }
     setIsUploadingAI(false);
   };
 
   const handleGeneratePO = async () => {
-    if (!canvass.recommendedSupplierId) return alert('No recommended supplier selected');
+    if (!canvass.recommendedSupplierId) return say('No recommended supplier selected');
     setIsGeneratingPO(true);
     const res = await autoGeneratePOFromCanvass(canvass.id, canvass.recommendedSupplierId);
     if (res.success) {
-      alert('Purchase Order Draft Generated Successfully!');
+      say('Purchase order draft generated. Opening it…', 'success');
       router.push(`/procurement/purchase-orders/${res.poId}`);
     } else {
-      alert(res.error);
+      say(res.error);
       setIsGeneratingPO(false);
     }
   };
 
   return (
     <div className="glass-card" style={{ marginTop: '20px' }}>
+      {notice && <div role={notice.kind === 'error' ? 'alert' : 'status'} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: notice.kind === 'error' ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)', border: `1px solid ${notice.kind === 'error' ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'}`, color: notice.kind === 'error' ? '#fca5a5' : '#6ee7b7' }}>
+        <span>{notice.text}</span>
+        <button type="button" aria-label="Dismiss message" onClick={() => setNotice(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1rem' }}>×</button>
+      </div>}
       {showPrint && <PrintableCanvass canvass={canvass} onClose={() => setShowPrint(false)} />}
       
       {showEmailModal && (
@@ -403,7 +413,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
       {activeTab === 'QUOTATIONS' && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '15px', gap: '10px' }}>
-            {canvass.status !== 'COMPLETED' && (
+            {canEditQuotations && (
               <>
                 <button 
                   onClick={() => setShowUploadAIModal(true)}
@@ -430,13 +440,15 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
             )}
           </div>
 
-          {showAddQuote && (
+          {!canEditQuotations && <p role="status" style={{ color: 'var(--text-secondary)' }}>Approved quotations are locked to preserve the purchase-order records.</p>}
+          {showAddQuote && canEditQuotations && (
             <div style={{ background: 'rgba(0,0,0,0.3)', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '1px solid var(--glass-border)' }}>
               <h4 style={{ margin: '0 0 15px 0', color: 'var(--accent-color)' }}>
                 {editQuotationId ? 'Edit Supplier Quotation' : 'New Supplier Quotation'}
               </h4>
-              <select 
-                value={selectedSupplier} 
+              <select
+                aria-label="Supplier"
+                value={selectedSupplier}
                 onChange={e => setSelectedSupplier(e.target.value)}
                 style={{ width: '100%', padding: '10px', marginBottom: '15px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px' }}>
                 <option value="">Select Supplier...</option>
@@ -460,6 +472,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                       <td style={{ padding: '8px' }}>
                         <input
                           type="number"
+                          aria-label={`Available quantity for ${item.consolidatedBoqItem.description}`}
                           min="0"
                           max={item.quantityRequired}
                           step="any"
@@ -472,8 +485,9 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                         />
                       </td>
                       <td style={{ padding: '8px' }}>
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
+                          aria-label={`Unit cost for ${item.consolidatedBoqItem.description}`}
                           min="0.01"
                           step="any"
                           required={(quoteItems[item.id]?.quantityAvailable ?? item.quantityRequired) > 0}
@@ -526,7 +540,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                     ) : (
                       <span></span>
                     )}
-                    {canvass.status !== 'COMPLETED' && (
+                    {canEditQuotations && (
                       <button 
                         onClick={() => handleEditQuotation(q)}
                         style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem' }}>
@@ -550,14 +564,14 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
             </p>
             <button 
               onClick={handleRunAI} 
-              disabled={isAnalyzing || canvass.quotations.length === 0}
+              disabled={!canEditQuotations || isAnalyzing || canvass.quotations.length === 0}
               style={{
                 background: 'linear-gradient(45deg, #a855f7, #ec4899)',
                 color: '#fff',
                 padding: '10px 20px',
                 borderRadius: '8px',
                 border: 'none',
-                cursor: canvass.quotations.length === 0 ? 'not-allowed' : 'pointer',
+                cursor: !canEditQuotations || canvass.quotations.length === 0 ? 'not-allowed' : 'pointer',
                 fontWeight: 'bold',
                 fontSize: '0.9rem',
                 display: 'flex', alignItems: 'center', gap: '8px'
@@ -576,7 +590,11 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
               lineHeight: '1.6',
               color: '#e9d5ff'
             }}>
-              {canvass.aiSummary}
+              {/* The summary uses **bold** and *italic* markers; render them instead of showing the asterisks. */}
+              {String(canvass.aiSummary).split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*)/g).map((part: string, index: number) =>
+                part.startsWith('**') && part.endsWith('**') && part.length > 4 ? <strong key={index} style={{ color: '#fff' }}>{part.slice(2, -2)}</strong>
+                  : part.startsWith('*') && part.endsWith('*') && part.length > 2 ? <em key={index}>{part.slice(1, -1)}</em>
+                  : part)}
             </div>
           )}
         </div>

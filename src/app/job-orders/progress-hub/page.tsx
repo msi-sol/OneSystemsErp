@@ -18,7 +18,9 @@ export default async function JobOrderProgressHubMasterListPage() {
     );
   }
 
-  const jobOrders = await getJobOrders(activeProjectId);
+  const jobOrdersResult: any = await getJobOrders(activeProjectId);
+  // On a backend error the action returns { success: false } instead of an array.
+  const jobOrders: any[] = Array.isArray(jobOrdersResult) ? jobOrdersResult : [];
 
   return (
     <div className={styles.dashboardContainer} style={{ maxWidth: '1200px' }}>

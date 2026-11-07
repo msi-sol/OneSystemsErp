@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateObject } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { openAIModel } from '@/lib/ai/openai-model';
 import { z } from 'zod';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -169,7 +169,7 @@ ${JSON.stringify(payload, null, 2)}`;
           let result;
           try {
             const { object } = await generateObject({
-              model: openai('gpt-4o-mini'),
+              model: openAIModel(), // app-wide OpenAI model (gpt-6-luna by default)
               schema: schema,
               prompt: prompt,
             });
@@ -417,12 +417,12 @@ ${JSON.stringify(payload, null, 2)}`;
       console.error('Failed to rollback schedule on error:', cleanupError);
     }
     
-    // Check if the error is a Gemini API error
+    // Translate AI provider errors (schedule generation runs on OpenAI) into user-facing messages.
     let errorMessage = error.message || 'Internal Server Error';
-    if (errorMessage.includes('429') || errorMessage.includes('Quota')) {
-      errorMessage = 'Google AI API Quota Exceeded (Free Tier). Please wait about 1 minute before generating the schedule again.';
+    if (errorMessage.includes('429') || /quota/i.test(errorMessage)) {
+      errorMessage = 'The OpenAI API quota or rate limit was reached. Please wait about a minute before generating the schedule again, or ask your administrator to check API billing.';
     } else if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
-      errorMessage = 'Google AI API is currently overloaded. Please try again in a few moments.';
+      errorMessage = 'The OpenAI API is currently overloaded. Please try again in a few moments.';
     } else if (typeof errorMessage === 'string' && errorMessage.startsWith('{')) {
       try {
         const parsed = JSON.parse(errorMessage);

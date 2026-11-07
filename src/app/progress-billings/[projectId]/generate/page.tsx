@@ -2,9 +2,17 @@ import React from "react";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import ProgressBillingGenerator from "./ProgressBillingGenerator";
+import { notFound, redirect } from "next/navigation";
+import { verifySession } from "@/lib/dal/auth";
+import { checkSchedulingAccess } from "@/lib/scheduling/authUtils";
 
 export default async function GenerateProgressBillingPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
+
+  const actor = await verifySession();
+  if (!actor) redirect("/login");
+  const access = await checkSchedulingAccess(actor.id, actor.role, projectId, "canView");
+  if (!access.allowed) notFound();
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -21,36 +29,18 @@ export default async function GenerateProgressBillingPage({ params }: { params: 
     return <div className="p-6 text-gray-500">Project not found.</div>;
   }
 
-  // Find all approved accomplishments that are NOT YET billed
+  // Approved accomplishments not yet billed (billing moves them to BILLED).
+  // No placeholder rows: billing fake amounts would produce real receivables.
   const unbilledAccomplishments = await prisma.accomplishment.findMany({
-    where: {
-      projectId,
-      status: "APPROVED", // Assuming an approval workflow happened
-      // We could also filter by checking if it exists in Billing Items, but keeping it simple for prototype
-    },
+    where: { projectId, status: "APPROVED" },
     select: {
       id: true,
       billingPeriod: true,
       accomplishmentDate: true,
       approvedAmount: true,
-    }
-  });
-
-  // Mocking data since we might not have seeded accomplishments
-  const mockUnbilled = unbilledAccomplishments.length > 0 ? unbilledAccomplishments : [
-    {
-      id: "mock-1",
-      billingPeriod: "Month 1 (June)",
-      accomplishmentDate: new Date(),
-      approvedAmount: 500000,
     },
-    {
-      id: "mock-2",
-      billingPeriod: "Month 2 (July)",
-      accomplishmentDate: new Date(),
-      approvedAmount: 350000,
-    }
-  ];
+    orderBy: { accomplishmentDate: "asc" },
+  });
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -59,7 +49,7 @@ export default async function GenerateProgressBillingPage({ params }: { params: 
           <div className="flex items-center space-x-2 text-sm text-gray-500 mb-2">
             <Link href="/progress-billings" className="hover:text-blue-600">Progress Billings</Link>
             <span>/</span>
-            <span className="text-gray-900">{project.name}</span>
+            <span className="text-gray-200">{project.name}</span>
           </div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Generate Progress Billing</h1>
         </div>
@@ -67,7 +57,7 @@ export default async function GenerateProgressBillingPage({ params }: { params: 
 
       <ProgressBillingGenerator 
         projectId={projectId} 
-        unbilledAccomplishments={mockUnbilled} 
+        unbilledAccomplishments={unbilledAccomplishments}
         projectInfo={project}
       />
     </div>

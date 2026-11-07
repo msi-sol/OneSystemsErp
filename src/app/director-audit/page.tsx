@@ -8,11 +8,11 @@ import { redirect } from 'next/navigation';
 export default async function DirectorAuditPage() {
   const cookieStore = await cookies();
   const __session = await verifySession();
-  const sessionId = __session?.id || '';
-  const currentUserId = sessionId || 'demo-user-id';
-
-  // Basic check - would normally use real RBAC matrix, but for now we assume anyone here is acting as Director
-  // Or we can just let it through for the demo
+  if (!__session) redirect('/login');
+  // Only directors/administrators decide AI overrides (the server actions enforce the same rule).
+  if (!['PROJECT_DIRECTOR', 'DIRECTORS', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(__session.role)) redirect('/');
+  const sessionId = __session.id;
+  const currentUserId = sessionId;
 
   const pendingOverrides = await prisma.aIValidationOverride.findMany({
     where: {

@@ -9,7 +9,8 @@ const router = Router();
 router.post('/getLiveFleetLocations', async (req, res) => {
   try {
     // Extract userId from the request body, sent by the Next.js Server Action
-    const { userId } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized: userId missing.' });

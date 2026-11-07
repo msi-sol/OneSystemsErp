@@ -118,12 +118,13 @@ async function loadReading(input: { actor: Actor; projectId: string; versionId: 
   const selectedSheet = input.selectedSheet ?? document.source.selectedSheet;
   if (!selectedSheet) fail('Choose a workbook sheet.', 400);
   let documentExtraction: unknown;
+  let trustedReadingMethod: 'builtin' | 'openai-assisted' | undefined;
   if (/\.(pdf|docx)$/i.test(upload.originalFilename)) {
-    try { documentExtraction = JSON.parse(upload.metadataJson || '{}').documentExtraction; } catch { /* explicit failure below */ }
+    try { const metadata = JSON.parse(upload.metadataJson || '{}'); documentExtraction = metadata.documentExtraction; trustedReadingMethod = metadata.readingMethod === 'builtin' ? 'builtin' : 'openai-assisted'; } catch { /* explicit failure below */ }
     if (!documentExtraction) fail('The preserved document reading is unavailable. Use reasoned BOQ line corrections or upload a corrected source.', 409);
     if (JSON.stringify(mapping) !== JSON.stringify(normalizeWorkspaceMapping(document.source.mapping))) fail('Document columns are fixed. Correct the BOQ lines, or upload a corrected source document.', 409);
   }
-  const parsed = await parseWorkspaceWorkbook({ buffer, fileName: upload.originalFilename, selectedSheet, mapping, breakdownMapping: breakdownMapping ?? {}, trustedDocumentExtraction: documentExtraction });
+  const parsed = await parseWorkspaceWorkbook({ buffer, fileName: upload.originalFilename, selectedSheet, mapping, breakdownMapping: breakdownMapping ?? {}, trustedDocumentExtraction: documentExtraction, trustedReadingMethod });
   if (parsed.analysis.fileHash !== upload.fileHash) fail('The preserved original workbook failed its hash check.', 409);
   if (parsed.analysis.errors.length || parsed.items.length === 0) fail('Correct the mapping errors before applying this reading.', 400);
   const lines = await prisma.awardedBOQItem.findMany({ where: { projectId: input.projectId }, orderBy: [{ itemCode: 'asc' }, { id: 'asc' }] }) as Line[];

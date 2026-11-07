@@ -93,7 +93,7 @@ export default async function PayrollPaymentDashboard() {
         <div style={{ background: 'var(--bg-secondary)', borderRadius: '16px', border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
           <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.2)' }}>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#fff' }}>Recent API Batches</h2>
-            <Link href="/payroll-payments/batches" style={{ fontSize: '0.9rem', color: '#3498db', textDecoration: 'none', fontWeight: 'bold' }}>View All</Link>
+            <Link href="/finance/payment-batches" style={{ fontSize: '0.9rem', color: '#3498db', textDecoration: 'none', fontWeight: 'bold' }}>View All</Link>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', color: '#fff' }}>

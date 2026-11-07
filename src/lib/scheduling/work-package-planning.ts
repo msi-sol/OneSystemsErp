@@ -4,6 +4,7 @@ import { buildDraftBOQChecksum } from '@/lib/boq/draft-workflow';
 import { readWorkPackagePlanDetails } from './work-package-details-types';
 import { estimatePhPublicWorksBudget } from './work-package-budget';
 import { packageDurationDays, procurementLeadDays, laborCrew } from './work-package-suggestions';
+import { groupSectionsIntoPackages } from './package-grouping';
 import { randomUUID } from 'node:crypto';
 import { assertWorkPackageExecutedScope } from './work-package-execution';
 import {parseBOQReviewDocument,getBOQSectionIdentityByItemId}from'@/lib/boq/review-state';
@@ -138,6 +139,133 @@ async function audit(tx: Prisma.TransactionClient, actor: Actor, actionType: str
   } });
 }
 
+type ApprovedBoq = Awaited<ReturnType<typeof approvedBoq>>;
+type BoqItem = ApprovedBoq['items'][number];
+type ScheduleRow = { id: string; workflowStatus: string; description: string | null };
+type PackageGroup = { name: string; description: string; items: BoqItem[] };
+
+/** Approved BOQ sections in order, keyed by their stable section identity (same keys the AI Check uses). */
+export function boqSections(boq: Pick<ApprovedBoq, 'items' | 'sectionIdentity'>) {
+  const sections = new Map<string, { key: string; name: string; items: BoqItem[]; order: number }>();
+  for (const item of boq.items) {
+    const identity = boq.sectionIdentity[item.id], key = identity?.id || `legacy:${item.category || 'General works'}`;
+    const existing = sections.get(key);
+    sections.set(key, { key, name: identity?.name || item.category || 'General works', items: [...(existing?.items || []), item], order: identity?.order || 0 });
+  }
+  return new Map([...sections.entries()].sort(([, left], [, right]) => left.order - right.order));
+}
+
+/**
+ * A planner may only replace packages of an unreviewed draft with no execution, procurement or preserved
+ * DUPA evidence. Removing suggested packages one by one was effectively impossible (each first needs its
+ * system-suggested budget lines removed), so a planner who disagreed with the suggestions had no way back.
+ */
+export type DraftClearBlocker = 'CLEAR_ONLY_BEFORE_REVIEW' | 'PACKAGE_HAS_EXECUTION_HISTORY' | 'PACKAGE_HAS_PRESERVED_BREAKDOWN_EVIDENCE' | 'PACKAGE_HAS_PROCUREMENT_HISTORY';
+
+/** Read-only form of the clear guard, so callers such as AI Check can say up front why packages cannot be replaced. */
+export async function draftPackagesClearBlocker(db: Prisma.TransactionClient, schedule: Pick<ScheduleRow, 'id' | 'workflowStatus' | 'description'>) {
+  const details = readWorkPackagePlanDetails(schedule.description);
+  if (schedule.workflowStatus !== ProjectScheduleWorkflowStatus.AI_GENERATED_DRAFT && schedule.workflowStatus !== ProjectScheduleWorkflowStatus.INVALID_GENERATED_DRAFT) return { blocker: 'CLEAR_ONLY_BEFORE_REVIEW' as DraftClearBlocker, ids: [] as string[], details };
+  const activities = await db.scheduleActivity.findMany({ where: { scheduleId: schedule.id }, select: { id: true, actualQuantity: true, actualProgressPercent: true, actualStartDate: true } });
+  const ids = activities.map((activity) => activity.id);
+  if (!ids.length) return { blocker: null, ids, details };
+  const [progress, delays, mappings] = await Promise.all([
+    db.scheduleProgressUpdate.count({ where: { activityId: { in: ids } } }),
+    db.scheduleDelayRecord.count({ where: { activityId: { in: ids } } }),
+    db.schedulePOWMapping.count({ where: { activityId: { in: ids } } }),
+  ]);
+  if (progress || delays || mappings || activities.some((activity) => activity.actualQuantity > 0 || activity.actualProgressPercent > 0 || activity.actualStartDate)) return { blocker: 'PACKAGE_HAS_EXECUTION_HISTORY' as DraftClearBlocker, ids, details };
+  if (details.breakdownUploads?.some((row) => ids.includes(row.activityId))) return { blocker: 'PACKAGE_HAS_PRESERVED_BREAKDOWN_EVIDENCE' as DraftClearBlocker, ids, details };
+  const sourcePackageIds = ids.map((id) => details.packageIdentities?.[id] || id);
+  const procurement = await db.auditLog.count({ where: { actionType: 'WPS_PROCUREMENT_RECORD_LINKED', OR: sourcePackageIds.map((id) => ({ newValue: { contains: `"sourcePackageId":"${id}"` } })) } });
+  if (procurement) return { blocker: 'PACKAGE_HAS_PROCUREMENT_HISTORY' as DraftClearBlocker, ids, details };
+  return { blocker: null, ids, details };
+}
+
+async function assertDraftPackagesClearable(tx: Prisma.TransactionClient, schedule: ScheduleRow) {
+  const { blocker, ids, details } = await draftPackagesClearBlocker(tx, schedule);
+  if (blocker) conflict(blocker);
+  return { ids, details };
+}
+
+/** Deletes the given draft packages with their allocations and links; returns plan details without their references. */
+async function clearDraftPackages(tx: Prisma.TransactionClient, schedule: { id: string }, ids: string[], details: ReturnType<typeof readWorkPackagePlanDetails>) {
+  await tx.scheduleDependency.deleteMany({ where: { OR: [{ predecessorId: { in: ids } }, { successorId: { in: ids } }] } });
+  await tx.scheduleBOQAllocation.deleteMany({ where: { scheduleId: schedule.id, activityId: { in: ids } } });
+  await tx.scheduleActivity.deleteMany({ where: { scheduleId: schedule.id, id: { in: ids } } });
+  return {
+    ...details,
+    resources: details.resources.filter((row) => !row.activityId || !ids.includes(row.activityId)),
+    constraints: details.constraints.filter((row) => !row.activityId || !ids.includes(row.activityId)),
+    allocationLocations: {}, packageIdentities: {}, packageAssumptions: {}, resourcesReviewNeeded: {},
+  };
+}
+
+/**
+ * Creates one package per group with its BOQ allocations, completion weight, suggested offset/duration/crew
+ * and system-suggested allowances (mutates `details`). Shared by the built-in suggestion and an accepted
+ * AI Check grouping so both produce identical, reviewable drafts.
+ */
+async function createPackagesFromGroups(tx: Prisma.TransactionClient, target: { projectId: string; scheduleId: string; wbsId: string; contractAmount: Prisma.Decimal }, details: ReturnType<typeof readWorkPackagePlanDetails>, groups: PackageGroup[]) {
+  const created: { activityId: string; boqItemId: string; allocatedQuantity: string; allocatedAmount: string }[] = [];
+  let index = 0, startDay = 1, accumulatedWeight = new Prisma.Decimal(0);
+  for (const { name: packageName, description: packageDescription, items } of groups) {
+    const amount = items.reduce((sum, item) => sum.plus(String(item.totalCost)), new Prisma.Decimal(0));
+    const weight = index === groups.length - 1 ? new Prisma.Decimal(1).minus(accumulatedWeight) : amount.div(target.contractAmount).toDecimalPlaces(6);
+    accumulatedWeight = accumulatedWeight.plus(weight);
+    const duration = packageDurationDays(packageDescription, weight.mul(100).toNumber());
+    const activity = await tx.scheduleActivity.create({ data: {
+      scheduleId: target.scheduleId, wbsId: target.wbsId, activityCode: `WP-${String(++index).padStart(2, '0')}`,
+      // Activity names have a 191-character storage limit; the full description is kept in the LongText field.
+      name: Array.from(packageName).slice(0, 191).join(''), description: packageDescription,
+      plannedQuantity: 0, unit: null, plannedDuration: duration,
+      plannedWeight: weight.toNumber(),
+      allocatedAmount: amount, status: 'NOT_STARTED',
+    } });
+    details.packageIdentities = { ...details.packageIdentities, [activity.id]: activity.id };
+    details.packageAssumptions = { ...details.packageAssumptions, [activity.id]: { plannedStartDay: startDay, procurementLeadDays: procurementLeadDays(packageDescription), laborCrew: laborCrew(packageDescription) } };
+    startDay += duration;
+    const budget = estimatePhPublicWorksBudget(amount.toNumber(), packageDescription);
+    for (const [kind, value] of [['MATERIAL', budget.materials], ['LABOR', budget.labor], ['EQUIPMENT', budget.equipment]] as const) {
+      const cost = new Prisma.Decimal(value).toDecimalPlaces(2).toFixed(2);
+      details.resources.push({ id: randomUUID(), activityId: activity.id, kind, description: `System suggested ${kind.toLowerCase()} allowance`, quantity: '1', unit: 'allowance', unitCost: cost, amount: cost, isSystemSuggested: true });
+    }
+    for (const item of items) {
+      const q = decimal(item.quantity, 'BOQ_ITEM_QUANTITY_INVALID'), itemAmount = decimal(item.totalCost, 'BOQ_ITEM_AMOUNT_INVALID');
+      if (q.isNegative() || itemAmount.isNegative() || (q.isZero() && !itemAmount.isZero())) conflict('BOQ_ITEM_VALUE_INVALID');
+      await tx.scheduleBOQAllocation.create({ data: {
+        scheduleId: target.scheduleId, projectId: target.projectId, activityId: activity.id, awardedBoqItemId: item.id,
+        allocationMode: q.isZero() ? 'REFERENCE_ONLY' : 'SINGLE', mappedQuantity: q.toNumber(), allocatedQuantity: q, allocatedPercentage: q.isZero() ? 0 : 100,
+        awardedQuantity: q, awardedAmount: itemAmount, allocatedAmount: itemAmount,
+      } });
+      created.push({ activityId: activity.id, boqItemId: item.id, allocatedQuantity: q.toString(), allocatedAmount: money(itemAmount).toFixed(2) });
+    }
+  }
+  return created;
+}
+
+/** Validates an accepted grouping: named groups that together cover every approved BOQ section exactly once. */
+function parseGroupingBody(value: unknown, sections: ReturnType<typeof boqSections>): (PackageGroup & { sections: string[] })[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 200) fail('INVALID_GROUPING');
+  const seen = new Set<string>();
+  const groups = value.map((raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('INVALID_GROUPING');
+    const group = raw as Record<string, unknown>;
+    const name = typeof group.name === 'string' ? group.name.trim() : '';
+    if (name.length < 3 || name.length > 180) fail('INVALID_PACKAGE_NAME');
+    if (!Array.isArray(group.sectionKeys) || !group.sectionKeys.length) fail('GROUP_NEEDS_SECTIONS');
+    const members = group.sectionKeys.map((key) => {
+      if (typeof key !== 'string' || !sections.has(key)) fail('UNKNOWN_BOQ_SECTION');
+      if (seen.has(key)) fail('SECTION_IN_TWO_PACKAGES');
+      seen.add(key);
+      return sections.get(key)!;
+    });
+    return { name, description: `${name}. Includes BOQ sections: ${members.map((member) => member.name).join('; ')}`, sections: members.map((member) => member.name), items: members.flatMap((member) => member.items) };
+  });
+  if (seen.size !== sections.size) fail('EVERY_BOQ_SECTION_NEEDS_A_PACKAGE');
+  return groups;
+}
+
 async function enforceExecutedFloor(tx:Prisma.TransactionClient,projectId:string,scheduleId:string){
   const current=await tx.projectSchedule.findFirst({where:{id:scheduleId,projectId},include:{activities:{include:{boqAllocations:true}}}});
   if(current)await assertWorkPackageExecutedScope(tx,projectId,current);
@@ -223,6 +351,10 @@ export async function runWorkPackagePlanningCommand(args: { projectId: string; a
   const action = body.action;
   if (action === 'start') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion']);
   else if (action === 'suggest') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion']);
+  else if (action === 'clear-packages') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion']);
+  else if (action === 'apply-suggested-dates') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'startDate']);
+  else if (action === 'locate-unlocated') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'locationId']);
+  else if (action === 'apply-grouping') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'groups']);
   else if (action === 'create') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'name', 'activityCode', 'description', 'unit', 'plannedQuantity', 'plannedWeight', 'plannedStartDate', 'plannedFinishDate', 'plannedDuration']);
   else if (action === 'allocate') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'boqItemId', 'activityId', 'allocatedQuantity','allocationId','locationId']);
   else if (action === 'remove-allocation') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'allocationId']);
@@ -274,46 +406,89 @@ export async function runWorkPackagePlanningCommand(args: { projectId: string; a
     const wbs = await tx.scheduleWBS.findFirst({ where: { scheduleId: schedule.id }, orderBy: [{ orderIndex: 'asc' }, { createdAt: 'asc' }] });
     if (!wbs) conflict('SCHEDULE_WBS_REQUIRED');
 
+    if (action === 'locate-unlocated') {
+      // Assign one location to every BOQ scope line that has none. Locations were only settable line by line
+      // (326 assignments for the PGH BOQ), which is unworkable for single-site projects. Lines that already
+      // have a location keep it.
+      const details = readWorkPackagePlanDetails(schedule.description);
+      const locationId = text(body.locationId, 'LOCATION_REQUIRED');
+      if (!details.locations.some((row) => row.id === locationId && row.isActive !== false)) fail('ACTIVE_LOCATION_REQUIRED');
+      const allocations = await tx.scheduleBOQAllocation.findMany({ where: { scheduleId: schedule.id }, select: { id: true } });
+      const unlocated = allocations.filter((row) => !details.allocationLocations[row.id]);
+      if (!unlocated.length) conflict('ALL_SCOPE_ALREADY_LOCATED');
+      await bump(tx, schedule, expected);
+      for (const row of unlocated) details.allocationLocations[row.id] = locationId;
+      await tx.projectSchedule.updateMany({ where: { id: schedule.id, rowVersion: expected + 1 }, data: { description: JSON.stringify(details) } });
+      await audit(tx, args.actor, 'BOQ_WPS_SCOPE_LOCATED', schedule.id, null, { locationId, allocationIds: unlocated.map((row) => row.id), rowVersion: expected + 1 });
+      return { scheduleId: schedule.id, rowVersion: expected + 1, located: unlocated.length };
+    }
+
+    if (action === 'apply-suggested-dates') {
+      // Fill planned dates for every package that has none, from one project start date plus each package's
+      // suggested start offset and duration (already computed when the packages were suggested). Planners
+      // previously had to open each package and type both dates by hand. Existing dates are never changed.
+      const startDate = parseDate(body.startDate, 'INVALID_START_DATE');
+      if (!startDate) fail('START_DATE_REQUIRED');
+      const activities = await tx.scheduleActivity.findMany({ where: { scheduleId: schedule.id }, orderBy: [{ activityCode: 'asc' }, { createdAt: 'asc' }], select: { id: true, plannedStartDate: true, plannedFinishDate: true, plannedDuration: true } });
+      const details = readWorkPackagePlanDetails(schedule.description);
+      const missing = activities.filter((activity) => !activity.plannedStartDate || !activity.plannedFinishDate);
+      if (!missing.length) conflict('ALL_PACKAGES_ALREADY_DATED');
+      await bump(tx, schedule, expected);
+      const dayMs = 86_400_000;
+      let runningDay = 1;
+      const applied: { activityId: string; start: string; finish: string }[] = [];
+      for (const activity of activities) {
+        const duration = Math.max(1, Math.round(activity.plannedDuration || 1));
+        const offsetDay = details.packageAssumptions?.[activity.id]?.plannedStartDay ?? runningDay;
+        runningDay = Math.max(runningDay, offsetDay + duration);
+        if (activity.plannedStartDate && activity.plannedFinishDate) continue;
+        const start = activity.plannedStartDate ?? new Date(startDate.getTime() + (offsetDay - 1) * dayMs);
+        const finish = activity.plannedFinishDate ?? new Date(start.getTime() + (duration - 1) * dayMs);
+        if (finish.getTime() < start.getTime()) conflict('FINISH_BEFORE_START');
+        await tx.scheduleActivity.update({ where: { id: activity.id }, data: { plannedStartDate: start, plannedFinishDate: finish } });
+        applied.push({ activityId: activity.id, start: start.toISOString().slice(0, 10), finish: finish.toISOString().slice(0, 10) });
+      }
+      await audit(tx, args.actor, 'BOQ_WPS_SUGGESTED_DATES_APPLIED', schedule.id, null, { startDate: startDate.toISOString().slice(0, 10), applied, rowVersion: expected + 1 });
+      return { scheduleId: schedule.id, rowVersion: expected + 1, applied: applied.length };
+    }
+
+    if (action === 'clear-packages') {
+      // Start the package plan over (see clearDraftPackages). The BOQ itself is never touched.
+      const { ids, details } = await assertDraftPackagesClearable(tx, schedule);
+      if (!ids.length) conflict('NO_PACKAGES_TO_CLEAR');
+      await bump(tx, schedule, expected);
+      const cleared = await clearDraftPackages(tx, schedule, ids, details);
+      const awarded = decimal(schedule.awardedContractAmount, 'SCHEDULE_AWARDED_AMOUNT_INVALID');
+      await tx.projectSchedule.updateMany({ where: { id: schedule.id, rowVersion: expected + 1 }, data: { scheduledAmount: 0, differenceAmount: awarded, description: JSON.stringify(cleared) } });
+      await audit(tx, args.actor, 'BOQ_WPS_PACKAGES_CLEARED', schedule.id, { packageIds: ids }, { cleared: ids.length, rowVersion: expected + 1 });
+      return { scheduleId: schedule.id, rowVersion: expected + 1, cleared: ids.length };
+    }
+
+    if (action === 'apply-grouping') {
+      // Accept (possibly edited) package grouping from the optional AI Check: every approved BOQ section goes
+      // into exactly one named package. Replaces the packages of an unreviewed draft under the same guards as
+      // clearing; BOQ scope and values are never changed, only how sections are grouped.
+      const sections = boqSections(boq);
+      const groups = parseGroupingBody(body.groups, sections);
+      const { ids, details } = await assertDraftPackagesClearable(tx, schedule);
+      await bump(tx, schedule, expected);
+      const cleared = ids.length ? await clearDraftPackages(tx, schedule, ids, details) : details;
+      const created = await createPackagesFromGroups(tx, { projectId: args.projectId, scheduleId: schedule.id, wbsId: wbs.id, contractAmount: boq.contractAmount }, cleared, groups);
+      const scheduledAmount = created.reduce((sum, row) => sum.plus(row.allocatedAmount), new Prisma.Decimal(0));
+      await tx.projectSchedule.updateMany({ where: { id: schedule.id, rowVersion: expected + 1 }, data: { scheduledAmount, differenceAmount: boq.contractAmount.minus(scheduledAmount), description: JSON.stringify(cleared) } });
+      await audit(tx, args.actor, 'BOQ_WPS_GROUPING_APPLIED', schedule.id, ids.length ? { packageIds: ids } : null, { groups: groups.map((group) => ({ name: group.name, sections: group.sections })), rowVersion: expected + 1 });
+      return { scheduleId: schedule.id, rowVersion: expected + 1, packages: groups.length, activities: created };
+    }
+
     if (action === 'suggest') {
       const existing = await tx.scheduleActivity.count({ where: { scheduleId: schedule.id } });
       if (existing) conflict('SUGGEST_REQUIRES_EMPTY_DRAFT');
       await bump(tx, schedule, expected);
-      const created = [];
       const details=readWorkPackagePlanDetails(schedule.description);
-      const sections=new Map<string,{name:string;items:typeof boq.items;order:number}>();
-      for(const item of boq.items){const identity=boq.sectionIdentity[item.id],key=identity?.id||`legacy:${item.category||'General works'}`;const existing=sections.get(key);sections.set(key,{name:identity?.name||item.category||'General works',items:[...(existing?.items||[]),item],order:identity?.order||0});}
-      let index=0,startDay=1,accumulatedWeight=new Prisma.Decimal(0);
-      for (const {name:section,items} of [...sections.values()].sort((left,right)=>left.order-right.order)) {
-        const amount=items.reduce((sum,item)=>sum.plus(String(item.totalCost)),new Prisma.Decimal(0));
-        const weight=index===sections.size-1?new Prisma.Decimal(1).minus(accumulatedWeight):amount.div(boq.contractAmount).toDecimalPlaces(6);
-        accumulatedWeight=accumulatedWeight.plus(weight);
-        const fullDescription=section;
-        const duration=packageDurationDays(section,weight.mul(100).toNumber());
-        const activity = await tx.scheduleActivity.create({ data: {
-          scheduleId: schedule.id, wbsId: wbs.id, activityCode: `WP-${String(++index).padStart(2,'0')}`,
-          // Activity names have a 191-character storage limit; retain the full
-          // authoritative BOQ description in the separate LongText field.
-          name: Array.from(fullDescription).slice(0, 191).join(''), description: fullDescription,
-          plannedQuantity: 0, unit: null, plannedDuration: duration,
-          plannedWeight: weight.toNumber(),
-          allocatedAmount: amount, status: 'NOT_STARTED',
-        } });
-        details.packageIdentities={...details.packageIdentities,[activity.id]:activity.id};
-        details.packageAssumptions={...details.packageAssumptions,[activity.id]:{plannedStartDay:startDay,procurementLeadDays:procurementLeadDays(section),laborCrew:laborCrew(section)}};
-        startDay+=duration;
-        const budget=estimatePhPublicWorksBudget(amount.toNumber(),section);
-        for(const[kind,value]of [['MATERIAL',budget.materials],['LABOR',budget.labor],['EQUIPMENT',budget.equipment]]as const){const cost=new Prisma.Decimal(value).toDecimalPlaces(2).toFixed(2);details.resources.push({id:randomUUID(),activityId:activity.id,kind,description:`System suggested ${kind.toLowerCase()} allowance`,quantity:'1',unit:'allowance',unitCost:cost,amount:cost,isSystemSuggested:true});}
-        for(const item of items){
-          const q=decimal(item.quantity,'BOQ_ITEM_QUANTITY_INVALID'),itemAmount=decimal(item.totalCost,'BOQ_ITEM_AMOUNT_INVALID');
-          if(q.isNegative()||itemAmount.isNegative()||(q.isZero()&&!itemAmount.isZero()))conflict('BOQ_ITEM_VALUE_INVALID');
-          await tx.scheduleBOQAllocation.create({ data: {
-          scheduleId: schedule.id, projectId: args.projectId, activityId: activity.id, awardedBoqItemId: item.id,
-          allocationMode: q.isZero() ? 'REFERENCE_ONLY' : 'SINGLE', mappedQuantity: q.toNumber(), allocatedQuantity: q, allocatedPercentage: q.isZero() ? 0 : 100,
-          awardedQuantity: q, awardedAmount: itemAmount, allocatedAmount: itemAmount,
-        } });
-          created.push({ activityId: activity.id, boqItemId: item.id, allocatedQuantity: q.toString(), allocatedAmount: money(itemAmount).toFixed(2) });
-        }
-      }
+      // Related sections are grouped under their major heading (see package-grouping.ts) instead of one
+      // package per section, which split e.g. the PGH VRF BOQ into 70 fragments.
+      const packageGroups=groupSectionsIntoPackages([...boqSections(boq).values()]);
+      const created = await createPackagesFromGroups(tx, { projectId: args.projectId, scheduleId: schedule.id, wbsId: wbs.id, contractAmount: boq.contractAmount }, details, packageGroups);
       const scheduledAmount = created.reduce((sum, row) => sum.plus(row.allocatedAmount), new Prisma.Decimal(0));
       const differenceAmount = boq.contractAmount.minus(scheduledAmount);
       await tx.projectSchedule.updateMany({ where: { id: schedule.id, rowVersion: expected + 1 }, data: { scheduledAmount, differenceAmount,description:JSON.stringify(details) } });

@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { openAIModelName } from '@/lib/ai/openai-model';
 
 const apiKey = process.env.OPENAI_API_KEY;
 
@@ -33,7 +34,9 @@ export async function getOrCreateAssistant() {
       assistant = await openaiAdmin.beta.assistants.create({
         name: KNOWLEDGE_CENTER_ASSISTANT_NAME,
         instructions: "You are the official ERP Assistant for OneSystems ERP. Answer questions based on your vector store and the context provided to you. Never invent ERP policies.",
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        // App-wide OpenAI model (gpt-6-luna by default). Only used when the assistant is first created;
+        // an existing assistant (found by name above) keeps the model it was created with.
+        model: openAIModelName(),
         tools: [{ type: "file_search" }],
       });
     }

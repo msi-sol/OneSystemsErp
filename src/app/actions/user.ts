@@ -4,9 +4,30 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { validatePasswordPolicy } from '@/lib/passwordPolicy';
-import { requirePermission } from '@/lib/permissions';
+import { hasPermission } from '@/lib/permissions';
 import { verifySession } from '@/lib/dal/auth';
 import { signOut } from '@/auth';
+
+const USER_ADMIN_ROLES = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'PROJECT_DIRECTOR'];
+const PRIVILEGED_ROLES = ['SUPER_ADMIN', 'SYSTEM_ADMIN'];
+// Default first-login password for accounts created from the Users screen (same default as systemResetActions);
+// the user is forced to change it on first login.
+const DEFAULT_NEW_USER_PASSWORD = 'admin001';
+
+type UserAdminAction = 'canCreate' | 'canEditDraft' | 'canDeleteDraft';
+
+// User and role management must be restricted to administrators; the proxy only checks that a session exists.
+async function authorizeUserAdmin(action: UserAdminAction, requestedRole?: string) {
+  const actor = await verifySession();
+  if (!actor) return { ok: false as const, error: 'Unauthorized: No session found.' };
+  const allowed = USER_ADMIN_ROLES.includes(actor.role) || await hasPermission(actor.id, 'SYSTEM_ROLES', action);
+  if (!allowed) return { ok: false as const, error: 'Unauthorized: You do not have permission to manage users or roles.' };
+  const normalizedRole = requestedRole?.toUpperCase().replace(/\s+/g, '_').trim();
+  if (normalizedRole && PRIVILEGED_ROLES.includes(normalizedRole) && !PRIVILEGED_ROLES.includes(actor.role)) {
+    return { ok: false as const, error: 'Unauthorized: Only system administrators can assign administrator roles.' };
+  }
+  return { ok: true as const, actor };
+}
 
 // Internal helper to avoid code duplication
 async function _internalCreateSystemRole(roleName: string) {
@@ -78,6 +99,8 @@ export async function getSystemRoles() {
 export async function deleteSystemRole(roleName: string) {
   try {
     if (!roleName) return { success: false, error: 'roleName is required.' };
+    const authz = await authorizeUserAdmin('canDeleteDraft', roleName);
+    if (!authz.ok) return { success: false, error: authz.error };
 
     await prisma.systemRole.delete({
       where: { name: roleName }
@@ -105,6 +128,8 @@ export async function deleteSystemRole(roleName: string) {
 export async function updateSystemRole(oldName: string, newName: string) {
   try {
     if (!oldName || !newName) return { success: false, error: 'oldName and newName are required.' };
+    const authz = await authorizeUserAdmin('canEditDraft', oldName);
+    if (!authz.ok) return { success: false, error: authz.error };
 
     const normalizedNew = newName.toUpperCase().trim();
     if (!normalizedNew) return { success: false, error: "Role name cannot be empty" };
@@ -144,6 +169,8 @@ export async function updateSystemRole(oldName: string, newName: string) {
 export async function createSystemRole(roleName: string) {
   try {
     if (!roleName) return { success: false, error: 'roleName is required.' };
+    const authz = await authorizeUserAdmin('canCreate', roleName);
+    if (!authz.ok) return { success: false, error: authz.error };
 
     const result = await _internalCreateSystemRole(roleName);
     revalidatePath('/users');
@@ -158,6 +185,8 @@ export async function createUser(data: { name: string, email: string, role: stri
     if (!data.name || !data.email || !data.role) {
       return { success: false, error: 'All fields are required.' };
     }
+    const authz = await authorizeUserAdmin('canCreate', data.role);
+    if (!authz.ok) return { success: false, error: authz.error };
 
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email }
@@ -176,7 +205,10 @@ export async function createUser(data: { name: string, email: string, role: stri
         name: data.name,
         email: data.email,
         role: finalRole.name!,
-        password: 'admin001',
+        // Login only checks passwordHash, so the default must be hashed (a plaintext value could never log in).
+        passwordHash: await bcrypt.hash(DEFAULT_NEW_USER_PASSWORD, 10),
+        password: null,
+        mustChangePassword: true,
       }
     });
 
@@ -191,6 +223,12 @@ export async function updateUser(id: string, data: { name: string, email: string
   try {
     if (!id || !data || !data.name || !data.email || !data.role) {
       return { success: false, error: 'User ID, Name, Email, and Role are required.' };
+    }
+    const authz = await authorizeUserAdmin('canEditDraft', data.role);
+    if (!authz.ok) return { success: false, error: authz.error };
+    const targetUser = await prisma.user.findUnique({ where: { id }, select: { role: true } });
+    if (targetUser && PRIVILEGED_ROLES.includes(targetUser.role) && !PRIVILEGED_ROLES.includes(authz.actor.role)) {
+      return { success: false, error: 'Unauthorized: Only system administrators can modify administrator accounts.' };
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -212,7 +250,15 @@ export async function updateUser(id: string, data: { name: string, email: string
     };
 
     if (data.password && data.password.trim() !== '') {
-      updateData.password = data.password;
+      // Store a bcrypt hash (login compares passwordHash only) and never keep the plaintext.
+      const policyResult = validatePasswordPolicy(data.password, data.email);
+      if (!policyResult.valid) {
+        return { success: false, error: policyResult.error };
+      }
+      updateData.passwordHash = await bcrypt.hash(data.password, 10);
+      updateData.password = null;
+      updateData.mustChangePassword = true;
+      updateData.sessionVersion = { increment: 1 };
     }
 
     await prisma.user.update({
@@ -231,7 +277,14 @@ export async function updateUser(id: string, data: { name: string, email: string
 export async function deleteUser(id: string) {
   try {
     if (!id) return { success: false, error: 'User ID is required' };
-    
+    const authz = await authorizeUserAdmin('canDeleteDraft');
+    if (!authz.ok) return { success: false, error: authz.error };
+    if (authz.actor.id === id) return { success: false, error: 'You cannot delete your own account.' };
+    const targetUser = await prisma.user.findUnique({ where: { id }, select: { role: true } });
+    if (targetUser && PRIVILEGED_ROLES.includes(targetUser.role) && !PRIVILEGED_ROLES.includes(authz.actor.role)) {
+      return { success: false, error: 'Unauthorized: Only system administrators can delete administrator accounts.' };
+    }
+
     await prisma.user.delete({
       where: { id }
     });

@@ -3,14 +3,11 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { generateText } from 'ai';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { uploadToS3 } from '../../../../src/lib/s3';
+// AI runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default); previously Gemini.
+import { openAIModel, generateOpenAIText } from '../../../../src/lib/ai/openai-model';
 
 const router = Router();
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
 
 router.post('/validate', async (req, res) => {
   try {
@@ -58,7 +55,7 @@ router.post('/validate', async (req, res) => {
       }
     }
 
-    // 3. Prompt Gemini
+    // 3. Prompt the AI model (OpenAI)
     const prompt = `Act as an ERP System Validator.
 You are evaluating a transaction in the "${moduleName}" module.
 You must check if the transaction violates any of the mandatory company policies provided below.
@@ -85,7 +82,7 @@ Otherwise, return PASSED.
 `;
 
     const result = await generateText({
-      model: google('gemini-2.5-flash'),
+      model: openAIModel(),
       prompt
     });
 
@@ -165,20 +162,10 @@ Return EXACTLY the following JSON format:
   "findings": "Explanation of the matches or the specific mismatches found."
 }`;
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-    const result = await model.generateContent([
+    const responseText = await generateOpenAIText({
       prompt,
-      {
-        inlineData: {
-          data: fileBase64,
-          mimeType: mimeType
-        }
-      }
-    ]);
-
-    const responseText = result.response.text();
+      file: { base64: fileBase64, mediaType: mimeType, filename: 'delivery-receipt' },
+    });
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
        res.json(JSON.parse(jsonMatch[0]));
@@ -203,6 +190,9 @@ router.post('/quotations', async (req, res) => {
     });
 
     if (!canvass) throw new Error('Canvass not found');
+    if (['APPROVED', 'COMPLETED'].includes(canvass.status)) {
+      return res.status(409).json({ success: false, error: 'Quotations cannot be changed after the canvass is approved or completed.' });
+    }
 
     const allSuppliers = await prisma.supplier.findMany();
     const expectedSuppliersText = allSuppliers.map(s => `- ID: ${s.id}, Name: ${s.name}`).join('\n');
@@ -247,20 +237,10 @@ Return EXACTLY the following JSON format. Do not use markdown blocks. Just the r
   ]
 }`;
 
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-        const result = await model.generateContent([
+        const responseText = await generateOpenAIText({
           prompt,
-          {
-            inlineData: {
-              data: file.base64,
-              mimeType: file.type
-            }
-          }
-        ]);
-
-        const responseText = result.response.text();
+          file: { base64: file.base64, mediaType: file.type, filename: file.name },
+        });
         const jsonMatch = responseText.match(/\{[\s\S]*\}/);
         
         if (!jsonMatch) {
@@ -300,17 +280,32 @@ Return EXACTLY the following JSON format. Do not use markdown blocks. Just the r
             return { fileName: file.name, success: false, error: `Quotation already encoded.` };
         }
 
-        await prisma.supplierQuotation.create({
-          data: {
-            canvassFormId: canvassId,
-            supplierId: aiData.supplierId,
-            status: 'RECEIVED_AI_EXTRACTED',
-            totalAmount: totalAmount,
-            deliveryPeriod: aiData.deliveryPeriod || 'N/A',
-            paymentTerms: aiData.paymentTerms || 'N/A',
-            fileUrl: fileUrl,
-            items: { create: itemsData }
-          }
+        await prisma.$transaction(async (tx) => {
+          const unlocked = await tx.canvassForm.updateMany({
+            where: { id: canvassId, status: { notIn: ['APPROVED', 'COMPLETED'] }, updatedAt: canvass.updatedAt },
+            data: {
+              aiSummary: null,
+              recommendedSupplierId: null,
+              status: canvass.status === 'ENDORSED' ? 'DRAFT' : canvass.status,
+            },
+          });
+          if (unlocked.count !== 1) throw new Error('Quotations cannot be changed after the canvass is approved or completed.');
+          await tx.supplierQuotation.updateMany({
+            where: { canvassFormId: canvassId },
+            data: { isRecommended: false, aiRank: null, aiRationale: null },
+          });
+          await tx.supplierQuotation.create({
+            data: {
+              canvassFormId: canvassId,
+              supplierId: aiData.supplierId,
+              status: 'RECEIVED_AI_EXTRACTED',
+              totalAmount: totalAmount,
+              deliveryPeriod: aiData.deliveryPeriod || 'N/A',
+              paymentTerms: aiData.paymentTerms || 'N/A',
+              fileUrl: fileUrl,
+              items: { create: itemsData }
+            }
+          });
         });
 
         const supplierObj = allSuppliers.find(s => s.id === aiData.supplierId);

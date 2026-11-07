@@ -1,4 +1,5 @@
 'use client';
+import { materialStock } from '@/lib/procurement/material-values';
 import styles from './issuance.module.css';
 import { returnableMaterials } from '@/lib/procurement/material-returns';
 
@@ -33,7 +34,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
     // Validate
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const available = item.consolidatedBoqItem.deliveredQty - item.consolidatedBoqItem.consumedQty;
+      const available = materialStock(item.consolidatedBoqItem);
       if (item.releasedQty > available) {
         setError(`Cannot process: ${item.consolidatedBoqItem.description} has only ${available} available.`);
         return;
@@ -202,10 +203,10 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
                 <tbody>
                   {items.map((item: any, index: number) => {
                     const boq = item.consolidatedBoqItem;
-                    const available = boq.deliveredQty - boq.consumedQty;
+                    const available = materialStock(boq);
                     return (
                       <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'} onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
-                        <td style={{ padding: '15px' }}>[{boq.category || 'N/A'}] {boq.description}</td>
+                        <td style={{ padding: '15px' }}>{boq.category ? `[${boq.category}] ` : ''}{boq.description}</td>
                         <td style={{ padding: '15px', color: 'var(--text-secondary)' }}>{boq.unit}</td>
                         <td style={{ padding: '15px', color: available < item.requestedQty ? '#ff6b6b' : '#00ffa3', fontWeight: 'bold' }}>{available}</td>
                         <td style={{ padding: '15px', fontWeight: 'bold' }}>{item.requestedQty}</td>

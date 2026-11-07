@@ -1,19 +1,28 @@
 import { NextResponse } from 'next/server';
-import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { PaymentReconciliationService } from '@/services/paymentReconciliationService';
+import { configuredSecret, verifyHmacSignature } from '@/lib/integration-auth';
 
+// Public (no user session) so the bank can reach it; only signed requests are accepted.
 export async function POST(req: Request) {
   try {
-    const bodyText = await req.text();
-    const headersList = req.headers;
-    const signature = headersList.get('X-Signature');
+    const secret = configuredSecret('UNIONBANK_WEBHOOK_SECRET');
+    if (!secret) {
+      console.error('UnionBank webhook rejected: UNIONBANK_WEBHOOK_SECRET is not configured.');
+      return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+    }
 
-    // In a real application, you would load the signing secret from env or provider config
-    // and verify the signature using crypto.createHmac.
-    
-    // Parse the payload
-    const payload = JSON.parse(bodyText);
+    const bodyText = await req.text();
+    if (!verifyHmacSignature(bodyText, req.headers.get('X-Signature'), secret)) {
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+    }
+
+    let payload: any;
+    try {
+      payload = JSON.parse(bodyText);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+    }
     const { senderReferenceId, status, errorCode, errorMessage, transactionReference } = payload;
 
     if (!senderReferenceId) {

@@ -4,7 +4,8 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { requirePermission } from '../lib/permissions';
 import { generateText } from 'ai';
-import { google } from '@ai-sdk/google';
+// AI runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default); previously Gemini.
+import { openAIModel } from '../../../../src/lib/ai/openai-model';
 
 const router = Router();
 function getPbacContext(req: any) {
@@ -52,9 +53,9 @@ Output exactly a JSON array of objects with the following schema, and NO markdow
 `;
 
     const { text } = await generateText({
-      model: google('gemini-2.5-flash'),
+      model: openAIModel(),
       prompt: prompt,
-      temperature: 0.1,
+      // No temperature: the configured OpenAI model may be a reasoning model that rejects it (the upload helper omits it too).
     });
 
     let cleanedText = text.trim();

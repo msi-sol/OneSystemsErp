@@ -262,7 +262,7 @@ router.post('/:id/dates', async (req, res) => {
       }
     });
 
-    res.json({ success: true, hasSchedule: !!project.projectSchedule });
+    res.json({ success: true, hasSchedule: project.projectSchedule.length > 0 });
   } catch (error: any) {
     console.error('Error updating project dates:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to update project dates' });

@@ -10,11 +10,8 @@ import path from 'path';
 const pdfParse = require('pdf-parse');
 import * as xlsx from 'xlsx';
 import { generateText } from 'ai';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
+// AI runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default); previously Gemini.
+import { openAIModel } from '@/lib/ai/openai-model';
 
 export async function uploadReferenceFile(formData: FormData) {
   try {
@@ -92,7 +89,7 @@ Document Text:
 ${extractedText.substring(0, 15000)}
 `;
         const result = await generateText({
-          model: google('gemini-2.5-flash'),
+          model: openAIModel(),
           prompt
         });
 

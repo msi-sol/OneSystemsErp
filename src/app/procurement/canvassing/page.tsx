@@ -15,8 +15,13 @@ export default async function CanvassingDashboard() {
   if (sessionId) {
     const user = await prisma.user.findUnique({ where: { id: sessionId } });
     if (user) {
-      const role = simulatedRole || user.role;
-      isSuperAdmin = role === 'SUPER_ADMIN';
+      // Same rule as lib/permissions: only real admins may simulate, and only a real system admin
+      // can simulate an admin role. Previously any user could set the cookie to SUPER_ADMIN.
+      const isRealSystemAdmin = user.role === 'SUPER_ADMIN' || user.role === 'SYSTEM_ADMIN';
+      const canSimulate = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN', 'PROJECT_DIRECTOR', 'DIRECTORS'].includes(user.role);
+      const simulatesAdmin = simulatedRole === 'SUPER_ADMIN' || simulatedRole === 'SYSTEM_ADMIN';
+      const role = simulatedRole && canSimulate && (!simulatesAdmin || isRealSystemAdmin) ? simulatedRole : user.role;
+      isSuperAdmin = role === 'SUPER_ADMIN' || role === 'SYSTEM_ADMIN';
     }
   }
   let activeProjectId = cookieStore.get('activeProjectId')?.value || null;

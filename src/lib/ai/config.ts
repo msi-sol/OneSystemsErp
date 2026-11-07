@@ -3,12 +3,15 @@
  * Centralizes model selection, limits, and rules for the Universal Scheduling Engine.
  */
 
+import { openAIModelName } from './openai-model';
+
 export const AI_CONFIG = {
-  // Model Configurations
+  // Model Configurations: default to the app-wide OpenAI model (gpt-6-luna unless OPENAI_MODEL /
+  // OPENAI_UPLOAD_MODEL say otherwise). AI_*_MODEL still override a single role when set.
   models: {
-    primaryPlanning: process.env.AI_PRIMARY_MODEL || 'gpt-4o',
-    secondaryClassification: process.env.AI_SECONDARY_MODEL || 'gpt-4o-mini',
-    fallback: process.env.AI_FALLBACK_MODEL || 'gpt-3.5-turbo',
+    primaryPlanning: process.env.AI_PRIMARY_MODEL || openAIModelName(),
+    secondaryClassification: process.env.AI_SECONDARY_MODEL || openAIModelName(),
+    fallback: process.env.AI_FALLBACK_MODEL || openAIModelName(),
   },
   
   // Execution Limits

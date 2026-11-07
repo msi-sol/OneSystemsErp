@@ -333,8 +333,8 @@ export default function PayrollPeriodClient({ period, workers, boqItems = [], ba
                             ⚠️ AI FLAGGED
                           </span>
                         ) : (
-                          <span style={{ color: period.status === 'LOCKED' ? '#2ecc71' : 'var(--text-secondary)', fontWeight: period.status === 'LOCKED' ? 'bold' : 'normal' }}>
-                            {period.status === 'LOCKED' ? 'COMPLETED' : 'OK'}
+                          <span style={{ color: period.isLocked ? '#2ecc71' : 'var(--text-secondary)', fontWeight: period.isLocked ? 'bold' : 'normal' }}>
+                            {period.isLocked ? 'COMPLETED' : 'OK'}
                           </span>
                         )}
                       </td>
@@ -371,7 +371,7 @@ export default function PayrollPeriodClient({ period, workers, boqItems = [], ba
                                       )}
                                     </td>
                                     <td style={{ padding: '10px 8px', textAlign: 'right' }}>
-                                      {period.status !== 'LOCKED' && (
+                                      {!period.isLocked && (
                                         <button 
                                           onClick={(e) => {
                                             e.stopPropagation();

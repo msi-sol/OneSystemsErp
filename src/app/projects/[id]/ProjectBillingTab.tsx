@@ -5,8 +5,18 @@ import { Landmark, ArrowRightCircle, CircleDollarSign, CheckCircle } from 'lucid
 export default async function ProjectBillingTab({ projectId }: { projectId: string }) {
   const billings = await prisma.billing.findMany({
     where: { projectId },
-    orderBy: { billingDate: 'desc' }
+    orderBy: { billingDate: 'desc' },
+    include: { payments: { select: { amountPaid: true } }, deductions: { select: { netAmountDue: true } } }
   });
+
+  const generateHref = `/progress-billings/${projectId}/generate`;
+  const peso = (value: number) => `₱ ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const collectedFor = (b: (typeof billings)[number]) => b.payments.reduce((sum, p) => sum + (p.amountPaid || 0), 0);
+  // Collections are recorded against the net amount due (after retention/EWT/recoupment), same as the collections module.
+  const netDueFor = (b: (typeof billings)[number]) => b.deductions[0]?.netAmountDue ?? b.currentBillingAmount ?? 0;
+  const totalBilled = billings.reduce((sum, b) => sum + (b.currentBillingAmount || 0), 0);
+  const totalNetDue = billings.reduce((sum, b) => sum + netDueFor(b), 0);
+  const totalCollected = billings.reduce((sum, b) => sum + collectedFor(b), 0);
 
   if (billings.length === 0) {
     return (
@@ -52,7 +62,7 @@ export default async function ProjectBillingTab({ projectId }: { projectId: stri
               No project billings or payment collections have been processed yet.
             </p>
           </div>
-          <Link href="/finance/billing" className="tech-button-blue" style={{
+          <Link href={generateHref} className="tech-button-blue" style={{
               marginTop: '10px', backgroundColor: '#3b82f6', color: '#fff', padding: '14px 32px', borderRadius: '12px', fontWeight: '900',
               fontSize: '1.1rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '10px', textTransform: 'uppercase',
               letterSpacing: '1px', transform: 'translateZ(50px)'
@@ -76,12 +86,70 @@ export default async function ProjectBillingTab({ projectId }: { projectId: stri
           </div>
           Billing & Collection
         </h2>
-        <Link href="/finance/billing" className="header-button-blue" style={{
-            background: 'linear-gradient(135deg, #3b82f6, #60a5fa)', color: '#fff', padding: '10px 24px', borderRadius: '8px', fontWeight: 'bold',
-            textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 15px rgba(59,130,246,0.3)', transition: 'transform 0.2s'
-          }}>
-          <ArrowRightCircle size={18} /> Manage Billings
-        </Link>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <Link href="/collections" className="header-button-blue" style={{
+              background: 'rgba(59,130,246,0.1)', color: '#60a5fa', padding: '10px 18px', borderRadius: '8px', fontWeight: 'bold',
+              textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid rgba(59,130,246,0.3)', transition: 'transform 0.2s'
+            }}>
+            <CheckCircle size={18} /> Collections
+          </Link>
+          <Link href={generateHref} className="header-button-blue" style={{
+              background: 'linear-gradient(135deg, #3b82f6, #60a5fa)', color: '#fff', padding: '10px 24px', borderRadius: '8px', fontWeight: 'bold',
+              textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 15px rgba(59,130,246,0.3)', transition: 'transform 0.2s'
+            }}>
+            <ArrowRightCircle size={18} /> Generate Billing
+          </Link>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        {[
+          { label: 'Total Billed', value: peso(totalBilled), Icon: CircleDollarSign },
+          { label: 'Total Collected', value: peso(totalCollected), Icon: CheckCircle },
+          { label: 'Uncollected (Net Due)', value: peso(Math.max(totalNetDue - totalCollected, 0)), Icon: Landmark },
+        ].map(({ label, value, Icon }) => (
+          <div key={label} style={{ background: 'rgba(10, 15, 30, 0.7)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: '16px', padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255,255,255,0.6)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <Icon size={16} color="#3b82f6" /> {label}
+            </div>
+            <div style={{ marginTop: '10px', fontSize: '1.5rem', fontWeight: 800, color: '#fff' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ background: 'rgba(10, 15, 30, 0.7)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', color: '#fff', fontSize: '0.9rem' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: 'rgba(255,255,255,0.6)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+              <th style={{ padding: '14px 16px' }}>Billing No.</th>
+              <th style={{ padding: '14px 16px' }}>Period</th>
+              <th style={{ padding: '14px 16px' }}>Status</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Billed</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Net Due</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Collected</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {billings.map((b) => {
+              const collected = collectedFor(b);
+              const fmt = (d: Date) => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+              return (
+                <tr key={b.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <td style={{ padding: '12px 16px', fontWeight: 600 }}>
+                    <Link href="/collections" style={{ color: '#60a5fa', textDecoration: 'none' }}>{b.billingNumber}</Link>
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>{fmt(b.billingPeriodFrom)} – {fmt(b.billingPeriodTo)}</td>
+                  <td style={{ padding: '12px 16px' }}>{b.status.replace(/_/g, ' ')}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'right' }}>{peso(b.currentBillingAmount || 0)}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'right' }}>{peso(netDueFor(b))}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'right' }}>{peso(collected)}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'right' }}>{peso(Math.max(netDueFor(b) - collected, 0))}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );

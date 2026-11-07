@@ -8,13 +8,14 @@ import { createWorkPackageSnapshot, hashWorkPackageSnapshot } from '@/lib/schedu
 import { readWorkPackagePlanDetails } from '@/lib/scheduling/work-package-details-types';
 import { getWorkPackageExecutionData,WorkPackageExecutionError } from '@/lib/scheduling/work-package-execution';
 import PlanningModuleShell from '../planning/PlanningModuleShell';
+import styles from '../planning/planning.module.css';
 import WorkPackageModuleClient from './WorkPackageModuleClient';
 import type { ModuleSchedule, WorkPackageModuleProps } from './module-types';
 
 export const dynamic = 'force-dynamic';
 const editable = new Set<string>(['AI_GENERATED_DRAFT','INVALID_GENERATED_DRAFT','TECHNICAL_REVISIONS_REQUIRED']);
 
-export default async function WorkPackagesModulePage({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{view?:string;package?:string;activity?:string;baseline?:string}>}) {
+export default async function WorkPackagesModulePage({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{view?:string;package?:string;activity?:string;baseline?:string;tab?:string}>}) {
   const {id}=await params, query=await searchParams;
   const actor=await getSessionActor().catch(()=>null);
   if(!actor)redirect('/login');
@@ -74,7 +75,10 @@ export default async function WorkPackagesModulePage({params,searchParams}:{para
       }
     }
   }
-  return <PlanningModuleShell project={project} active="work-packages"><WorkPackageModuleClient key={`${selected?.id||'empty'}:${query.package||query.view||'schedule'}:${query.activity||''}`} projectId={id} projectStartDate={project.startDate?.toISOString()||null}
+  const viewLabels:Record<string,string>={scope:'Scope',sequence:'Dates & sequence',locations:'Locations & constraints',constraints:'Locations & constraints',resources:'Resources & DUPA',review:'Review & approve','look-ahead':'Look-ahead',weekly:'Weekly commitments','site-logs':'Daily site logs','operational-constraints':'Site constraints'};
+  const openPackage=query.package?selected?.activities.find(activity=>activity.id===query.package):undefined;
+  const trail=openPackage?[{label:`${openPackage.activityCode?`${openPackage.activityCode} · `:''}${openPackage.name}`}]:query.view&&viewLabels[query.view]?[{label:viewLabels[query.view]}]:[];
+  return <PlanningModuleShell project={project} active="work-packages" trail={trail}><WorkPackageModuleClient key={`${selected?.id||'empty'}:${query.package||query.view||'schedule'}:${query.activity||''}`} projectId={id} projectStartDate={project.startDate?.toISOString()||null}
     approvedBOQ={project.boqLocked&&!!version&&['APPROVED','LOCKED'].includes(version.status)} boqItems={project.awardedBoqItems} schedule={schedule} summary={summary} capacity={{canEdit:capacity.canEditPlan,canEngineerReview:capacity.canReviewPlan,canApprove:capacity.canApprovePlan,canRecordSiteLogs:capacity.canRecordSiteLogs,canManageWeekly:capacity.canManageWeekly}}
-    members={project.userAssignments.map(assignment=>({id:assignment.user.id,name:assignment.user.name||'Project member'}))} initialView={query.view} initialPackage={query.package} revisionComparison={revisionComparison} executionWarning={executionWarning} executionActivityId={query.activity} hasOpenDraft={!!draft}/>{activeBaseline && <p style={{margin:'24px 0 0',lineHeight:1.7,color:'var(--text-secondary)'}}>Next: review the procurement budget, then generate package-linked materials. <Link href={`/projects/${id}/benchmark`} style={{color:'var(--accent-color)',textDecoration:'underline'}}>Open procurement benchmark review →</Link></p>}</PlanningModuleShell>;
+    members={project.userAssignments.map(assignment=>({id:assignment.user.id,name:assignment.user.name||'Project member'}))} initialView={query.view} initialPackage={query.package} initialPackageTab={query.tab} revisionComparison={revisionComparison} executionWarning={executionWarning} executionActivityId={query.activity} hasOpenDraft={!!draft}/>{activeBaseline && <p className={styles.muted} style={{marginTop:24}}>After the baseline: review the procurement budget, then generate package-linked materials. <Link className={styles.link} href={`/projects/${id}/benchmark`}>Open procurement benchmark review →</Link></p>}</PlanningModuleShell>;
 }

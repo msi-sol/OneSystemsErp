@@ -56,7 +56,7 @@ export default async function HRPage() {
                   </span>
                 </td>
                 <td>
-                  <Link href={`/hr/${payroll.id}`} className={styles.actionLink}>View Payslip</Link>
+                  <Link href={`/payroll/${payroll.payrollPeriodId}`} className={styles.actionLink}>View Payslip</Link>
                 </td>
               </tr>
             ))}

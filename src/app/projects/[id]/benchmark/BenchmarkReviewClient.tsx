@@ -143,7 +143,7 @@ export default function BenchmarkReviewClient({ projectId }: { projectId: string
 
   const mayApprove = !!data?.canApprove && review?.status === 'DRAFT' && unresolved.length === 0 && missingPackage.length === 0 && unclassified.length === 0 && additional.every(line => acknowledged.includes(line.id));
 
-  const rateMismatches = lines.filter(line => { try { return !line.description.trim() || !line.unit.trim() || new Decimal(line.quantity).lte(0) || new Decimal(line.quantity).decimalPlaces() > 6 || !new Decimal(line.quantity).times(line.unitCost).toDecimalPlaces(2).eq(line.amount) || new Decimal(line.unitCost).decimalPlaces() > 2 || new Decimal(line.amount).decimalPlaces() > 2; } catch { return true; } });
+  const rateMismatches = lines.filter(line => { try { return !line.description.trim() || !line.unit.trim() || new Decimal(line.quantity).lte(0) || new Decimal(line.quantity).decimalPlaces() > 6 || !new Decimal(line.quantity).times(line.unitCost).toDecimalPlaces(2).eq(line.amount) || new Decimal(line.unitCost).decimalPlaces() > 6 || new Decimal(line.amount).decimalPlaces() > 2; } catch { return true; } });
 
   const approvalReady = mayApprove && !!data?.approvedScheduleId && data.project.boqLocked && rateMismatches.length === 0 && !hasUnsavedChanges;
 
@@ -303,7 +303,13 @@ export default function BenchmarkReviewClient({ projectId }: { projectId: string
 
       const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not suggest matches.');
 
-      setData(result as Data); setLines(result.review?.lines || []); setNotice('Suggestions applied as unapproved matches. Review every suggested mapping before approval.');
+      const stats = result.aiMatching as { rowsUpdated?: number; batchesFailed?: number; ratesReconciled?: number } | undefined;
+      setData(result as Data); setLines(result.review?.lines || []);
+      setNotice([
+        `Suggestions applied as unapproved matches${stats ? ` (${stats.rowsUpdated ?? 0} row(s) updated)` : ''}. Review every suggested mapping before approval.`,
+        stats?.ratesReconciled ? `${stats.ratesReconciled} rate(s) differed from their amount only by display rounding and now use the precise rate (amount ÷ quantity). Stated amounts are unchanged; the stated rate stays under “Original values”.` : '',
+        stats?.batchesFailed ? `${stats.batchesFailed} AI batch(es) failed; run Suggest again for the remaining rows.` : '',
+      ].filter(Boolean).join(' '));
 
     } catch (caught) { setError(readable(caught)); }
 

@@ -184,9 +184,10 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
               <Calendar size={24} color="#a855f7" />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Project Timeline</h3>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Project Timeline</h3>
               <p style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', color: '#a855f7' }}>
-                {daysElapsed} / {totalDays} Days
+                {/* Without both dates there is no timeline; "0 / 0 Days" read like a real zero-day schedule. */}
+                {startDate && endDate ? `${daysElapsed} / ${totalDays} ${totalDays === 1 ? 'Day' : 'Days'}` : 'Not scheduled'}
               </p>
             </div>
             <ProjectTimelineEditor 

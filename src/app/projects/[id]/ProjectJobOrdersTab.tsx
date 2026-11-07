@@ -12,9 +12,10 @@ export default async function ProjectJobOrdersTab({ projectId }: { projectId: st
   });
 
   const totalJO = jobOrders.length;
-  const inProgress = jobOrders.filter((jo: any) => jo.status === 'IN_PROGRESS').length;
-  const pending = jobOrders.filter((jo: any) => jo.status === 'PENDING').length;
-  const completed = jobOrders.filter((jo: any) => jo.status === 'COMPLETED' || jo.status === 'APPROVED').length;
+  // Map cards onto the real JobOrderStatus enum (DRAFT, FOR_*_REVIEW, APPROVED, ISSUED, CANCELLED).
+  const inProgress = jobOrders.filter((jo) => jo.status === 'ISSUED').length;
+  const pending = jobOrders.filter((jo) => jo.status === 'DRAFT' || jo.status.startsWith('FOR_')).length;
+  const completed = jobOrders.filter((jo) => jo.status === 'APPROVED').length;
 
   if (jobOrders.length === 0) {
     return (
@@ -123,9 +124,10 @@ export default async function ProjectJobOrdersTab({ projectId }: { projectId: st
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'DRAFT': return '#9e9e9e';
-      case 'PENDING': return '#facc15';
-      case 'IN_PROGRESS': return '#3b82f6';
-      case 'COMPLETED': return '#4caf50';
+      case 'FOR_REVIEW':
+      case 'FOR_FINANCIAL_REVIEW':
+      case 'FOR_TECHNICAL_REVIEW': return '#facc15';
+      case 'ISSUED': return '#3b82f6';
       case 'APPROVED': return '#22c55e';
       case 'CANCELLED': return '#ef4444';
       default: return '#9e9e9e';
@@ -233,7 +235,7 @@ export default async function ProjectJobOrdersTab({ projectId }: { projectId: st
         
         <div className="card-yellow">
           <div style={{ fontSize: '0.85rem', color: '#22c55e', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <CheckCircle size={16} /> Completed
+            <CheckCircle size={16} /> Approved
           </div>
           <div style={{ fontSize: '1.6rem', fontWeight: '900', color: '#22c55e' }}>
             {completed}
@@ -271,7 +273,7 @@ export default async function ProjectJobOrdersTab({ projectId }: { projectId: st
                     textDecoration: 'none', 
                     fontWeight: 'bold',
                   }}>
-                    {jo.joNumber}
+                    {jo.jobNumber}
                   </Link>
                 </td>
                 <td style={{ padding: '16px', color: '#fff', fontWeight: 'bold' }}>
@@ -307,7 +309,7 @@ export default async function ProjectJobOrdersTab({ projectId }: { projectId: st
                   borderTopRightRadius: '8px', 
                   borderBottomRightRadius: '8px' 
                 }}>
-                  ₱ {(jo.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  ₱ {(jo.contractAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>
               </tr>
             ))}

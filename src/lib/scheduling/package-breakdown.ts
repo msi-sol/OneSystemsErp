@@ -28,10 +28,13 @@ export function buildBreakdownResources(rows: WorkspaceItem[], categories: unkno
     if (!RESOURCE_KINDS.includes(kind as BreakdownKind)) throw new PackageBreakdownError(`Choose a resource category for row ${row.sourceRowNumber}.`);
     if (row.quantityDefaulted || row.unitDefaulted) throw new PackageBreakdownError(`Row ${row.sourceRowNumber}: provide an explicit quantity and unit before adding resource costs.`);
     const quantity = new Decimal(row.quantity);
-    const rate = new Decimal(row.sourceUnitCost ?? row.unitCost);
+    // Excel rates often carry many decimals (e.g. 545104.5199…) that the "at most two decimals" rule could never
+    // accept; the stated rate is used, rounded to centavos (as it is stored), and must still reproduce the amount.
+    const sourceRate = new Decimal(row.sourceUnitCost ?? row.unitCost);
+    const rate = sourceRate.isFinite() ? sourceRate.toDecimalPlaces(2) : sourceRate;
     const amount = new Decimal(row.amount);
     if (!quantity.isFinite() || !rate.isFinite() || !amount.isFinite() || quantity.lt(0) || rate.lt(0) || amount.lt(0)
-      || rate.decimalPlaces() > 2 || !quantity.times(rate).toDecimalPlaces(2).equals(amount)) {
+      || !quantity.times(rate).toDecimalPlaces(2).equals(amount)) {
       throw new PackageBreakdownError(`Row ${row.sourceRowNumber}: quantity × unit rate must match the amount, with a rate of at most two decimal places. Correct the workbook or retain it as evidence only.`);
     }
     return { kind: kind as BreakdownKind, description: row.description, unit: row.unit,

@@ -144,22 +144,22 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>AI Overrides Pending Approval</h3>
             <p className={styles.statValue} style={{ color: stats.pendingAIOverrides > 0 ? '#ff6b6b' : '#22c55e' }}>{stats.pendingAIOverrides}</p>
-            <Link href="/director-audit" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Audit Queue ➔</Link>
+            <Link href="/director-audit" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Audit Queue ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Total Active Projects</h3>
             <p className={styles.statValue}>{stats.totalProjects}</p>
-            <Link href="/projects" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Projects ➔</Link>
+            <Link href="/projects" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Projects ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Total Contract Budget</h3>
             <p className={styles.statValue}>₱ {stats.totalBudget.toLocaleString()}</p>
-            <Link href="/reports" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Financial Reports ➔</Link>
+            <Link href="/reports" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Financial Reports ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Outstanding Liabilities</h3>
             <p className={styles.statValue} style={{ color: '#f97316' }}>₱ {stats.totalPayables.toLocaleString()}</p>
-            <Link href="/supplier-payables" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Liabilities ➔</Link>
+            <Link href="/supplier-payables" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Liabilities ➔</Link>
           </div>
         </div>
       )}
@@ -170,17 +170,17 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>Active BOQ & Consolidations</h3>
             <p className={styles.statValue} style={{ color: '#3498db' }}>{stats.totalProjects}</p>
-            <Link href="/projects/boq-consolidation" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Consolidations ➔</Link>
+            <Link href="/projects/boq-consolidation" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Consolidations ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Accomplishments Tracked</h3>
             <p className={styles.statValue}>{stats.totalAccomplishments ?? 0}</p>
-            <Link href="/progress-billings" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Accomplishments ➔</Link>
+            <Link href="/progress-billings" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Accomplishments ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Site Requisitions (MRF)</h3>
             <p className={styles.statValue} style={{ color: '#f97316' }}>{stats.pendingMRFs}</p>
-            <Link href="/material-requests/create" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Request Materials ➔</Link>
+            <Link href="/material-requests/create" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Request Materials ➔</Link>
           </div>
         </div>
       )}
@@ -191,17 +191,17 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>Unpaid Payables</h3>
             <p className={styles.statValue} style={{ color: '#ef4444' }}>₱ {stats.totalPayables.toLocaleString()}</p>
-            <Link href="/supplier-payables" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Process Payments ➔</Link>
+            <Link href="/supplier-payables" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Process Payments ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Petty Cash Low Balance</h3>
             <p className={styles.statValue} style={{ color: stats.pendingPettyCash > 0 ? '#f97316' : '#22c55e' }}>{stats.pendingPettyCash} Accts</p>
-            <Link href="/petty-cash" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Review Replenishments ➔</Link>
+            <Link href="/petty-cash" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Review Replenishments ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Active Payroll Periods</h3>
             <p className={styles.statValue}>{stats.activePayrollPeriods}</p>
-            <Link href="/payroll" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Process Payroll ➔</Link>
+            <Link href="/payroll" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Process Payroll ➔</Link>
           </div>
         </div>
       )}
@@ -213,22 +213,22 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
             <div className={styles.statCard}>
               <h3>Pending MRFs to Source</h3>
               <p className={styles.statValue} style={{ color: '#f97316' }}>{stats.pendingMRFs ?? 0}</p>
-              <Link href="/material-requests" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Requests ➔</Link>
+              <Link href="/material-requests" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Requests ➔</Link>
             </div>
             <div className={styles.statCard}>
               <h3>Open Canvassing Requests</h3>
               <p className={styles.statValue}>{stats.openCanvassing ?? 0}</p>
-              <Link href="#" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Canvassing ➔</Link>
+              <Link href="#" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Canvassing ➔</Link>
             </div>
             <div className={styles.statCard}>
               <h3>Active Purchase Orders</h3>
               <p className={styles.statValue}>{stats.activePurchaseOrders ?? 0}</p>
-              <Link href="/procurement/purchase-orders" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage POs ➔</Link>
+              <Link href="/procurement/purchase-orders" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage POs ➔</Link>
             </div>
             <div className={styles.statCard}>
               <h3>Pending Supplier Deliveries</h3>
               <p className={styles.statValue} style={{ color: '#22c55e' }}>{stats.expectedDeliveries ?? 0}</p>
-              <Link href="/deliveries" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Track Deliveries ➔</Link>
+              <Link href="/deliveries" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Track Deliveries ➔</Link>
             </div>
           </div>
           
@@ -262,17 +262,17 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>Expected Deliveries</h3>
             <p className={styles.statValue} style={{ color: '#22c55e' }}>{stats.expectedDeliveries ?? 0} POs</p>
-            <Link href="/deliveries/new" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Log New Delivery ➔</Link>
+            <Link href="/deliveries/new" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Log New Delivery ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Material Issuances</h3>
             <p className={styles.statValue}>{stats.totalIssuances ?? 0}</p>
-            <Link href="/material-issuance" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Issue Materials ➔</Link>
+            <Link href="/material-issuance" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Issue Materials ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Suppliers</h3>
             <p className={styles.statValue}>{stats.totalSuppliers ?? 0}</p>
-            <Link href="/inventory" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Check Stocks ➔</Link>
+            <Link href="/inventory" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Check Stocks ➔</Link>
           </div>
         </div>
       )}
@@ -283,17 +283,17 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>Active Payroll Periods</h3>
             <p className={styles.statValue} style={{ color: '#3498db' }}>{stats.activePayrollPeriods}</p>
-            <Link href="/payroll" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Payrolls ➔</Link>
+            <Link href="/payroll" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Payrolls ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Workers Database</h3>
             <p className={styles.statValue}>{stats.totalWorkers ?? 0}</p>
-            <Link href="/workers" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Workers ➔</Link>
+            <Link href="/workers" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Manage Workers ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>System Users</h3>
             <p className={styles.statValue}>{stats.totalUsers ?? 0}</p>
-            <Link href="/users" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>User Directory ➔</Link>
+            <Link href="/users" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>User Directory ➔</Link>
           </div>
         </div>
       )}
@@ -304,12 +304,12 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>System Audit Logs</h3>
             <p className={styles.statValue} style={{ color: '#9b59b6' }}>{stats.totalAuditLogs ?? 0}</p>
-            <Link href="/system-audit" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Audit Trail ➔</Link>
+            <Link href="/system-audit" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>View Audit Trail ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>AI Validations</h3>
             <p className={styles.statValue}>{stats.pendingAIOverrides}</p>
-            <Link href="/director-audit" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Review Anomalies ➔</Link>
+            <Link href="/director-audit" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Review Anomalies ➔</Link>
           </div>
         </div>
       )}
@@ -320,12 +320,12 @@ export default function RoleDashboardClient({ stats, isSystemAdmin, initialRole 
           <div className={styles.statCard}>
             <h3>Daily Time Records</h3>
             <p className={styles.statValue} style={{ color: '#27ae60' }}>{stats.totalDailyLogs ?? 0}</p>
-            <Link href="/progress-billings" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Update Accomplishments ➔</Link>
+            <Link href="/progress-billings" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Update Accomplishments ➔</Link>
           </div>
           <div className={styles.statCard}>
             <h3>Active Job Orders</h3>
             <p className={styles.statValue}>{stats.totalJobOrders ?? 0}</p>
-            <Link href="/reports" style={{ color: 'var(--accent-color)', fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Open Reports ➔</Link>
+            <Link href="/reports" style={{ color: '#0e7490', fontWeight: 600, fontSize: '0.85rem', marginTop: '10px', display: 'inline-block' }}>Open Reports ➔</Link>
           </div>
         </div>
       )}

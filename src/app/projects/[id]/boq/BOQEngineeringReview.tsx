@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import Decimal from 'decimal.js';
 import type { BOQReviewDocument } from '@/lib/boq/review-state';
 import styles from '../planning/planning.module.css';
+import BOQFindingsReview from './BOQFindingsReview';
 
 type Review = { current: boolean; reviewerName: string; comments: string; decidedAt: string } | null;
 const money = (value: string) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(value));
@@ -30,7 +31,6 @@ export default function BOQEngineeringReview({ projectId, versionId, checksum, c
   const [approvalNote, setApprovalNote] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [decisionReasons, setDecisionReasons] = useState<Record<string, string>>({});
   const [contractReason, setContractReason] = useState('');
   const [revisedContract, setRevisedContract] = useState('');
   const [setAsideReason, setSetAsideReason] = useState('');
@@ -38,8 +38,8 @@ export default function BOQEngineeringReview({ projectId, versionId, checksum, c
   const openFindings = reviewState?.findings.filter(finding => finding.status === 'OPEN' && !finding.invalidatedAt) || [];
   const proposedDifference = /^\d+(?:\.\d{1,2})?$/.test(revisedContract) && new Decimal(revisedContract).gt(0)
     ? new Decimal(revisedContract).minus(reconciliation.boqTotal).abs().toFixed(2) : null;
-  async function action(value: 'review' | 'approve' | 'finding-decision' | 'verify-contract' | 'revise-contract', extra: Record<string, unknown> = {}) {
-    if (pending) return;
+  async function action(value: 'review' | 'approve' | 'finding-decision' | 'verify-contract' | 'revise-contract', extra: Record<string, unknown> = {}): Promise<boolean> {
+    if (pending) return false;
     setBusy(true); setError(''); setMessage('');
     try {
       const response = await fetch(`/api/projects/${projectId}/boq-review`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -49,7 +49,8 @@ export default function BOQEngineeringReview({ projectId, versionId, checksum, c
       setMessage(value === 'review' ? 'Engineering review recorded for the current BOQ.' : value === 'approve' ? 'BOQ approved and locked.' : value === 'revise-contract' ? 'Contract revision recorded. Verify the revised value before approval.' : value === 'verify-contract' ? data.reconciliation?.reconciles === false ? `Contract check recorded. The ${money(data.reconciliation.difference)} difference remains; approval stays blocked until reconciliation.` : 'Contract value verified. The BOQ and contract amounts reconcile.' : 'BOQ review updated.');
       if (value === 'revise-contract') setRevisedContract('');
       setComments(''); setConfirmApproval(false); startRefresh(() => router.refresh());
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'The review could not be saved.'); }
+      return true;
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'The review could not be saved.'); return false; }
     finally { setBusy(false); }
   }
   return <section className={styles.panel} aria-labelledby="boq-approval-heading"><h3 id="boq-approval-heading">BOQ review and approval</h3>
@@ -64,7 +65,7 @@ export default function BOQEngineeringReview({ projectId, versionId, checksum, c
     {review && <div className={styles.status}><strong>{review.current ? 'Engineering review is current' : 'BOQ changed — a new engineering review is required'}</strong><p>{review.reviewerName} · {new Date(review.decidedAt).toLocaleString('en-PH')}</p><p>{review.comments}</p></div>}
     {reviewState && <>
       {!reviewState.firstReadAvailable && <div className={styles.status}><strong>Legacy canonical snapshot</strong><p>No original workbook or first reading was preserved. Findings and source comparisons are limited to this saved BOQ.</p></div>}
-      <div className={styles.status}>
+      <div className={styles.status} id="boq-contract-check">
         <strong>Signed contract value {reviewState.contract.verified ? 'verified' : 'needs verification'}</strong>
         <dl className={styles.reconciliationFacts}><div><dt>Recorded contract value</dt><dd>{money(reconciliation.contractAmount)}</dd></div><div><dt>BOQ item total</dt><dd>{money(reconciliation.boqTotal)}</dd></div><div><dt>Difference to resolve</dt><dd>{money(reconciliation.difference)}</dd></div></dl>
         {reviewState.contract.verified && <p>{reviewState.contract.verifiedBy} · {reviewState.contract.verificationReason}</p>}
@@ -75,7 +76,8 @@ export default function BOQEngineeringReview({ projectId, versionId, checksum, c
         {proposedDifference !== null && <div className={styles.status}><strong>Proposed contract revision · not saved</strong><p>Current {money(reconciliation.contractAmount)} → proposed {money(revisedContract)} · difference to BOQ {money(proposedDifference)}</p><p>The BOQ items stay unchanged. The revision and its reason are recorded in history.</p></div>}
         <div className={styles.actions}><button type="button" className={styles.secondary} disabled={pending || contractReason.trim().length < 5} onClick={() => void action('verify-contract', { reason: contractReason })}>Verify signed contract value</button><button type="button" className={styles.secondary} disabled={pending || contractReason.trim().length < 5 || proposedDifference === null} onClick={() => void action('revise-contract', { reason: contractReason, contractAmount: revisedContract })}>Record contract revision</button></div>
       </div>}
-      {reviewState.findings.length > 0 && <div className={styles.status}><h4>Workbook findings and review decisions</h4><ul>{reviewState.findings.map(finding => <li key={finding.id} style={{ marginTop: 12 }}><strong>{finding.field} · {finding.severity}{finding.invalidatedAt ? ' · superseded by later reading' : ''}</strong><p>{finding.message}</p>{finding.invalidatedAt && <p>{finding.invalidationReason || 'This evidence was superseded; its original decision remains in history.'}</p>}{finding.status === 'OPEN' && !finding.invalidatedAt && canReview && <><label htmlFor={`finding-reason-${finding.id}`}>Decision reason (required for set-aside or defer)</label><input id={`finding-reason-${finding.id}`} value={decisionReasons[finding.id] || ''} onChange={event => setDecisionReasons({ ...decisionReasons, [finding.id]: event.target.value })} maxLength={300}/><div className={styles.actions}><button type="button" className={styles.secondary} disabled={pending} onClick={() => void action('finding-decision', { findingId: finding.id, decision: 'CONFIRMED' })}>Confirm as read</button><button type="button" className={styles.secondary} disabled={pending || (decisionReasons[finding.id] || '').trim().length < 5} onClick={() => void action('finding-decision', { findingId: finding.id, decision: 'SET_ASIDE', reason: decisionReasons[finding.id] })}>Set aside</button>{finding.severity !== 'BLOCKING' && <button type="button" className={styles.secondary} disabled={pending || (decisionReasons[finding.id] || '').trim().length < 5} onClick={() => void action('finding-decision', { findingId: finding.id, decision: 'DEFERRED', reason: decisionReasons[finding.id] })}>Defer</button>}</div></>}{finding.status !== 'OPEN' && <p>Decision: {finding.status}{finding.reason ? ` · ${finding.reason}` : ''}</p>}</li>)}</ul></div>}
+      <BOQFindingsReview projectId={projectId} findings={reviewState.findings} canReview={canReview} pending={pending}
+        onDecide={(findingId, decision, reason) => action('finding-decision', reason === undefined ? { findingId, decision } : { findingId, decision, reason })} />
       {reviewState.findings.some(finding => finding.status === 'SET_ASIDE') && <div className={styles.fields}><label><input type="checkbox" checked={acknowledgeSetAside} onChange={event => setAcknowledgeSetAside(event.target.checked)}/> I acknowledge the source rows intentionally set aside.</label><input aria-label="Acknowledgement reason" maxLength={300} value={setAsideReason} onChange={event => setSetAsideReason(event.target.value)} placeholder="Reason for acknowledging set-aside rows"/></div>}
       <details className={styles.history}><summary>Source, correction and reading history</summary><ul>{reviewState.revisions.map(revision => <li key={revision.id}>{revision.action} · {revision.reason} · {new Date(revision.createdAt).toLocaleString('en-PH')}</li>)}{reviewState.readingHistory.map(reading => <li key={reading.id}>Reading {reading.fileName} · {reading.selectedSheet} · {reading.appliedAt ? 'applied' : 'preview only'} · {reading.comparison.length} compared rows<ReadingConflictHistory reading={reading}/></li>)}{reviewState.correctedSources.map(source => <li key={source.versionId}>Corrected source {source.fileName} · {source.status} · {source.assessment.length} assessed rows</li>)}</ul></details>
     </>}

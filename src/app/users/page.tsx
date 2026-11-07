@@ -7,10 +7,20 @@ import AddUserButton from './AddUserButton';
 import ManageRolesButton from './ManageRolesButton';
 import DeleteUserButton from './DeleteUserButton';
 import { getSystemRoles } from '@/app/actions/user';
+import { verifySession } from '@/lib/dal/auth';
+import { hasPermission } from '@/lib/permissions';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
 export default async function UsersPage() {
+  // The sidebar hides this page for non-admins, but the URL itself must be protected too.
+  const actor = await verifySession();
+  if (!actor) redirect('/login');
+  if (!['SUPER_ADMIN', 'SYSTEM_ADMIN', 'PROJECT_DIRECTOR'].includes(actor.role) && !(await hasPermission(actor.id, 'SYSTEM_ROLES', 'canView'))) {
+    redirect('/');
+  }
+
   const users = await prisma.user.findMany({
     orderBy: { createdAt: 'desc' },
   });
@@ -59,7 +69,13 @@ export default async function UsersPage() {
                   <span className={styles.roleBadge}>{user.role}</span>
                 </td>
                 <td>
-                  <span className={`${styles.badge} ${styles.badgeActive}`}>Active</span>
+                  {(user.status || 'ACTIVE') === 'ACTIVE' ? (
+                    <span className={`${styles.badge} ${styles.badgeActive}`}>Active</span>
+                  ) : (
+                    <span className={styles.badge} style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+                      {String(user.status).charAt(0) + String(user.status).slice(1).toLowerCase().replace(/_/g, ' ')}
+                    </span>
+                  )}
                 </td>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center' }}>

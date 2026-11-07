@@ -1,0 +1,22 @@
+.card { margin: 0 0 24px; padding: 22px; border: 1px solid rgba(79, 191, 154, .35); border-radius: 12px; background: linear-gradient(180deg, rgba(79, 191, 154, .06), transparent 60%), var(--bg-secondary); min-width: 0; }
+.header { margin-bottom: 18px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(79, 191, 154, .14); color: #91dfc1; font-size: .75rem; font-weight: 650; }
+.header h3 { margin: 10px 0 4px; font-size: 1.1rem; }
+.header p { margin: 0; color: var(--text-secondary); font-size: .875rem; line-height: 1.6; max-width: 75ch; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 24px; margin: 0; }
+.facts dt { color: var(--text-secondary); font-size: .78rem; }
+.facts dd { margin: 4px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.facts small { display: block; margin-top: 2px; color: var(--text-muted); font-size: .76rem; font-weight: 400; }
+.ok { color: #91dfc1; font-size: .8rem; font-weight: 500; }
+.file { font-weight: 500; }
+.note { margin: 18px 0 0; padding: 12px 14px; border-radius: 8px; background: var(--bg-tertiary); color: var(--text-secondary); font-size: .85rem; line-height: 1.6; }
+.note strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: .78rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.primary, .secondary { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 9px 16px; border-radius: 8px; font-size: .85rem; text-decoration: none; }
+.primary { background: var(--accent-color); color: #061117; font-weight: 650; }
+.primary:hover { background: var(--accent-hover); }
+.secondary { border: 1px solid #526373; color: var(--text-primary); }
+.secondary:hover { border-color: var(--accent-color); color: var(--accent-color); }
+.card :is(a):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
+@media (max-width: 800px) { .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .card { padding: 16px; } .facts { grid-template-columns: minmax(0, 1fr); } .primary, .secondary { flex: 1 1 100%; justify-content: center; } }

@@ -4,6 +4,8 @@ import { notFound } from 'next/navigation';
 import POWorkflowButtons from '../../[id]/POWorkflowButtons';
 import { verifySession } from '@/lib/dal/auth';
 import { getUserPermissions } from '@/lib/permissions';
+import { RECEIVABLE_PO_STATUSES } from '@/lib/procurement/receivable-purchase-order';
+import PrintPOButton from './PrintPOButton';
 
 export default async function PurchaseOrderDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -101,11 +103,14 @@ export default async function PurchaseOrderDetailsPage({ params }: { params: Pro
         </table>
 
         <div style={{ marginTop: '40px', display: 'flex', justifyContent: 'flex-end', gap: '15px' }}>
-          <button style={{
-            background: 'transparent', border: '1px solid var(--text-secondary)', color: 'var(--text-primary)',
-            padding: '10px 20px', borderRadius: '4px', cursor: 'pointer'
-          }}>Print PO</button>
-          
+          <PrintPOButton />
+          {/* Next flow step once the PO can be received; previously users had to find it under Deliveries. */}
+          {(RECEIVABLE_PO_STATUSES as readonly string[]).includes(po.status) && (
+            <Link href={`/deliveries/new?poId=${encodeURIComponent(po.id)}`} className="no-print" style={{
+              background: 'var(--accent-color)', color: '#000', padding: '10px 20px', borderRadius: '4px', fontWeight: 'bold', textDecoration: 'none'
+            }}>Receive delivery →</Link>
+          )}
+
           {/* Action buttons */}
           <POWorkflowButtons poId={po.id} status={po.status} currentUser={currentUser} permissions={permissions} />
         </div>

@@ -107,7 +107,7 @@ export default async function ProjectMaterialsControlTab({ projectId }: { projec
             </p>
           </div>
 
-          <Link href="/inventory/material-issuance" className="tech-button-orange" style={{
+          <Link href="/material-issuance" className="tech-button-orange" style={{
               marginTop: '10px', backgroundColor: '#ff9800', color: '#000',
               padding: '14px 32px', borderRadius: '12px', fontWeight: '900',
               fontSize: '1.1rem', textDecoration: 'none', display: 'inline-flex',
@@ -181,7 +181,7 @@ export default async function ProjectMaterialsControlTab({ projectId }: { projec
           Materials Control
         </h2>
         <Link 
-          href="/inventory/material-issuance" 
+          href="/material-issuance" 
           className="header-button-orange"
           style={{
             background: 'linear-gradient(135deg, #ff9800, #ffb74d)',
@@ -266,7 +266,7 @@ export default async function ProjectMaterialsControlTab({ projectId }: { projec
             {issuances.map((i: any) => (
               <tr key={i.id} className="row-hover-orange" style={{ background: 'rgba(255,255,255,0.02)' }}>
                 <td style={{ padding: '16px', borderTopLeftRadius: '8px', borderBottomLeftRadius: '8px' }}>
-                  <Link href={`/inventory/material-issuance/${i.id}`} style={{ 
+                  <Link href="/material-issuance" style={{ 
                     color: '#ff9800', 
                     textDecoration: 'none', 
                     fontWeight: 'bold',

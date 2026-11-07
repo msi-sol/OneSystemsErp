@@ -21,6 +21,16 @@ Analysis creates no records. Confirmation preserves the original and creates a
 canonical draft BOQ. Workflow, compatibility and storage requirements are owned
 by the [scheduling architecture](docs/architecture/universal-project-intake-and-scheduling.md#11-boq-workspace-intake).
 
+BOQ, DUPA and benchmark uploads use the built-in reader first. Recognizable Excel
+columns and Word/PDF tables do not require an AI call. If the layout cannot be
+recognized, the server uses OpenAI as a helper when `OPENAI_API_KEY` is configured
+in `.env`; `OPENAI_UPLOAD_MODEL` can optionally override `gpt-6-luna`.
+For unfamiliar Excel layouts, AI suggests column indexes while the system reads
+every original row and validates its values. Unsupported document layouts use
+an explicitly marked, reviewable AI extraction. Financial validation errors,
+unsafe files and ambiguous worksheet choices still require correction. AI never
+approves an import, fills missing prices, or bypasses the approval workflow.
+
 For the practice draft and the complete manual flow, follow the
 [local walkthrough](docs/architecture/universal-project-intake-and-scheduling.md#manual-local-walkthrough).
 

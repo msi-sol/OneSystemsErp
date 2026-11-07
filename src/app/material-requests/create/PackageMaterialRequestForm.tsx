@@ -14,7 +14,7 @@ type Requirement = {
 type PackageMaterials = { requirements: Requirement[]; canCreate: boolean; benchmarkMaterialBudget: string | null; projectMaterialLimits: Awaited<ReturnType<typeof readMaterialAllowanceUsage>> };
 
 export default function PackageMaterialRequestForm({ projectId, packages }: {
-  projectId: string; packages: { id: string; name: string }[];
+  projectId: string; packages: { id: string; name: string; activityCode?: string | null }[];
 }) {
   const router = useRouter();
   const [activityId, setActivityId] = useState('');
@@ -63,7 +63,8 @@ export default function PackageMaterialRequestForm({ projectId, packages }: {
         setActivityId(event.target.value); setData(null); setQuantities({}); setError(''); setLoading(!!event.target.value);
       }} style={{ width: '100%', marginTop: 8 }}>
         <option value="">Select an approved work package</option>
-        {packages.map(pkg => <option key={pkg.id} value={pkg.id}>{pkg.name}</option>)}
+        {/* The package code tells apart packages with the same name (e.g. "for ground:" under each system). */}
+        {packages.map(pkg => <option key={pkg.id} value={pkg.id}>{pkg.activityCode ? `${pkg.activityCode} · ${pkg.name}` : pkg.name}</option>)}
       </select>
       <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>Materials and remaining quantities come from this package’s approved benchmark and live requests, orders and stock. The draft stays linked to the selected package.</p>
       {!packages.length && <Link href={`/projects/${projectId}/work-packages`} className={styles.actionLink}>Complete Work Package approval</Link>}
@@ -71,7 +72,8 @@ export default function PackageMaterialRequestForm({ projectId, packages }: {
     {loading && <p role="status">Loading package materials and remaining quantities…</p>}
     {error && <p role="alert" style={{ color: '#fca5a5', overflowWrap: 'anywhere' }}>{error.replaceAll('_', ' ')}</p>}
     {data && <>
-      <MaterialAllowanceSummary rows={data.projectMaterialLimits ?? []} />
+      {/* Only this package's materials: the full project list (often 80+ rows) pushed the request table off screen. */}
+      <MaterialAllowanceSummary rows={(data.projectMaterialLimits ?? []).filter(row => data.requirements.some(requirement => requirement.materialId === row.materialId))} />
       {data.benchmarkMaterialBudget !== null && <p>Approved package material budget: {new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(data.benchmarkMaterialBudget))}</p>}
       <div className={styles.tableContainer}><table className={styles.table}>
         <thead><tr><th>Material</th><th>Allowance</th><th>Issued</th><th>Pending requests</th><th>Open POs</th><th>Remaining shortage</th><th>Request quantity</th></tr></thead>

@@ -1,7 +1,13 @@
+import Decimal from 'decimal.js';
+
 type MaterialValues = {
   quantity: number; totalCost?: number; revisedQuantity?: number | null; revisedTotalCost?: number | null;
   voAdditiveQty?: number; voDeductiveQty?: number; voAdditiveCost?: number; voDeductiveCost?: number; isVariationItem?: boolean;
 };
+
+export function materialStock(item: { deliveredQty: number; consumedQty: number }): number {
+  return new Decimal(String(item.deliveredQty)).minus(String(item.consumedQty)).toNumber();
+}
 
 // Legacy rows use zero as an uninitialized revision. A documented variation,
 // however, may legitimately reduce the quantity or value all the way to zero.

@@ -6,7 +6,9 @@ const router = Router();
 
 router.post('/createFundingRequest', async (req, res) => {
   try {
-    const { accountId, amount, reason, userId, periodId } = req.body; // Extract arguments from req.body
+    const { accountId, amount, reason, periodId } = req.body; // Extract arguments from req.body
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     const reqNumber = `FR-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
     

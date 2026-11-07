@@ -6,6 +6,11 @@ import { validateQuotationLines } from '../../../../src/lib/procurement/quotatio
 import { CanvassPurchaseOrderError, generateCanvassPurchaseOrder } from '../services/canvass-purchase-order';
 
 const router = Router();
+const IMMUTABLE_QUOTATION_CANVASS_STATUSES = ['APPROVED', 'COMPLETED'];
+const IMMUTABLE_QUOTATION_ERROR = 'Supplier quotations cannot be changed after the canvass recommendation is approved or a purchase order is generated.';
+
+class CanvassQuotationLockedError extends Error {}
+
 function getPbacContext(req: any) {
   return {
     userId: req.headers['x-user-session'] as string | undefined,
@@ -15,14 +20,26 @@ function getPbacContext(req: any) {
 }
 
 async function invalidateCanvassComparison(tx: any, canvassId: string) {
+  await tx.canvassForm.updateMany({
+    where: { id: canvassId, status: 'ENDORSED' },
+    data: { status: 'DRAFT' },
+  });
+  const editable = await tx.canvassForm.updateMany({
+    where: { id: canvassId, status: { notIn: IMMUTABLE_QUOTATION_CANVASS_STATUSES } },
+    data: { aiSummary: null, recommendedSupplierId: null },
+  });
+  if (editable.count !== 1) throw new CanvassQuotationLockedError(IMMUTABLE_QUOTATION_ERROR);
+
   await tx.supplierQuotation.updateMany({
     where: { canvassFormId: canvassId },
     data: { isRecommended: false, aiRank: null, aiRationale: null },
   });
-  await tx.canvassForm.update({
-    where: { id: canvassId },
-    data: { aiSummary: null, recommendedSupplierId: null },
-  });
+}
+
+function rejectLockedCanvass(res: any, status: string) {
+  if (!IMMUTABLE_QUOTATION_CANVASS_STATUSES.includes(status)) return false;
+  res.status(409).json({ success: false, error: IMMUTABLE_QUOTATION_ERROR });
+  return true;
 }
 
 // Create Canvass Form
@@ -105,6 +122,7 @@ router.post('/:id/quotations', async (req, res) => {
       include: { items: { select: { id: true, quantityRequired: true } } },
     });
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
+    if (rejectLockedCanvass(res, canvass.status)) return;
 
     let validatedItems;
     try {
@@ -118,6 +136,7 @@ router.post('/:id/quotations', async (req, res) => {
     }
 
     const quotation = await prisma.$transaction(async tx => {
+      await invalidateCanvassComparison(tx, id);
       const created = await tx.supplierQuotation.create({
         data: {
           canvassFormId: id,
@@ -136,12 +155,12 @@ router.post('/:id/quotations', async (req, res) => {
           }
         }
       });
-      await invalidateCanvassComparison(tx, id);
       return created;
     });
 
     res.json({ success: true, quotationId: quotation.id });
   } catch (error: any) {
+    if (error instanceof CanvassQuotationLockedError) return res.status(409).json({ success: false, error: error.message });
     console.error('Error adding quotation:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to add quotation' });
   }
@@ -166,6 +185,7 @@ router.put('/:id/quotations/:quotationId', async (req, res) => {
     ]);
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
     if (!existingQuotation) return res.status(404).json({ success: false, error: 'Quotation not found in this canvass' });
+    if (rejectLockedCanvass(res, canvass.status)) return;
 
     let validatedItems;
     try {
@@ -179,6 +199,7 @@ router.put('/:id/quotations/:quotationId', async (req, res) => {
     }
 
     await prisma.$transaction(async tx => {
+      await invalidateCanvassComparison(tx, id);
       await tx.quotationItem.deleteMany({ where: { quotationId } });
       await tx.supplierQuotation.update({
         where: { id: quotationId },
@@ -197,11 +218,11 @@ router.put('/:id/quotations/:quotationId', async (req, res) => {
           }
         }
       });
-      await invalidateCanvassComparison(tx, id);
     });
 
     res.json({ success: true });
   } catch (error: any) {
+    if (error instanceof CanvassQuotationLockedError) return res.status(409).json({ success: false, error: error.message });
     console.error('Error updating quotation:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to update quotation' });
   }
@@ -276,11 +297,15 @@ router.post('/:id/approve', async (req, res) => {
 
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
     if (!canvass.recommendedSupplierId) return res.status(400).json({ success: false, error: 'No recommended supplier to approve.' });
+    if (canvass.status !== 'ENDORSED') {
+      return res.status(409).json({ success: false, error: 'Only an endorsed canvass recommendation can be approved.' });
+    }
 
-    await prisma.canvassForm.update({
-      where: { id },
+    const approved = await prisma.canvassForm.updateMany({
+      where: { id, status: 'ENDORSED' },
       data: { status: 'APPROVED' }
     });
+    if (approved.count !== 1) return res.status(409).json({ success: false, error: 'The canvass status changed. Refresh and try again.' });
 
     res.json({ success: true, message: 'AI Recommendation Approved successfully.' });
   } catch (error: any) {
@@ -301,11 +326,15 @@ router.post('/:id/endorse', async (req, res) => {
 
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
     if (!canvass.recommendedSupplierId) return res.status(400).json({ success: false, error: 'No recommended supplier to endorse.' });
+    if (!['DRAFT', 'RETURNED'].includes(canvass.status)) {
+      return res.status(409).json({ success: false, error: 'Only a draft or returned canvass recommendation can be endorsed.' });
+    }
 
-    await prisma.canvassForm.update({
-      where: { id },
+    const endorsed = await prisma.canvassForm.updateMany({
+      where: { id, status: { in: ['DRAFT', 'RETURNED'] } },
       data: { status: 'ENDORSED' }
     });
+    if (endorsed.count !== 1) return res.status(409).json({ success: false, error: 'The canvass status changed. Refresh and try again.' });
 
     res.json({ success: true, message: 'AI Recommendation Endorsed successfully.' });
   } catch (error: any) {

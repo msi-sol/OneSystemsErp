@@ -56,8 +56,14 @@ export function createRequireAuth(store: UserStore) {
       if (claims.activeProjectId) req.headers['x-active-project-id'] = claims.activeProjectId;
       if (simulatedRole) req.headers['x-simulated-role'] = simulatedRole;
       if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
-        req.body.sessionId = user.id;
-        req.body.simulatedRole = simulatedRole;
+        // Non-enumerable: routes still read req.body.sessionId, but routes that pass req.body
+        // (or a spread of it) to Prisma no longer send these keys, which Prisma rejects as
+        // "Unknown argument `sessionId`". Any client-sent values are overwritten.
+        const define = (key: string, value: unknown) => Object.defineProperty(req.body, key, {
+          value, enumerable: false, writable: true, configurable: true,
+        });
+        define('sessionId', user.id);
+        define('simulatedRole', simulatedRole);
       }
       req.user = user;
       req.pbacContext = { activeProjectId: claims.activeProjectId, simulatedRole };

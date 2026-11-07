@@ -10,7 +10,7 @@ export type WorkPackageModuleProps = {
   schedule: ModuleSchedule | null; summary: WorkPackageSummaryResult | null;
   capacity: {canEdit:boolean;canEngineerReview:boolean;canApprove:boolean;canRecordSiteLogs:boolean;canManageWeekly:boolean};
   members:{id:string;name:string}[];
-  initialView?:string; initialPackage?:string; revisionComparison?:{name:string;before:string;after:string}[];
+  initialView?:string; initialPackage?:string; initialPackageTab?:string; revisionComparison?:{name:string;before:string;after:string}[];
   executionWarning?:string;
   executionActivityId?:string;hasOpenDraft?:boolean;
 };

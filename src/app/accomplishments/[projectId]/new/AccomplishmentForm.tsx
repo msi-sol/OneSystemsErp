@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { toast } from "sonner";
 import { FiSave, FiAlertTriangle } from "react-icons/fi";
+import { submitProjectAccomplishment } from "@/app/actions/projectAccomplishmentActions";
 
 export default function AccomplishmentForm({ projectId, boqItems }: { projectId: string, boqItems: any[] }) {
   const [billingPeriod, setBillingPeriod] = useState("");
@@ -39,11 +40,17 @@ export default function AccomplishmentForm({ projectId, boqItems }: { projectId:
 
     if (hasError) return;
 
+    const claimList = Object.entries(claims)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([boqItemId, quantity]) => ({ boqItemId, quantity }));
+    if (claimList.length === 0) return toast.error("Enter a quantity for at least one BOQ item");
+
     setIsSubmitting(true);
     try {
-      // Call server action here (we will simulate passing to service for now)
-      toast.success("Accomplishment report submitted to AI Validation!");
-      setTimeout(() => window.location.href = "/accomplishments", 1500);
+      const res = await submitProjectAccomplishment({ projectId, billingPeriod, accomplishmentDate, claims: claimList });
+      if (!res.success) throw new Error(res.error);
+      toast.success("Accomplishment submitted for review.");
+      setTimeout(() => window.location.href = `/projects/${projectId}?tab=accomplishment`, 1200);
     } catch (e: any) {
       toast.error(e.message || "Failed to submit");
     } finally {
@@ -143,7 +150,7 @@ export default function AccomplishmentForm({ projectId, boqItems }: { projectId:
           className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
         >
           <FiSave className="mr-2 -ml-1 h-5 w-5" aria-hidden="true" />
-          Save & Run AI Validation
+          {isSubmitting ? "Saving..." : "Submit for Review"}
         </button>
       </div>
     </div>

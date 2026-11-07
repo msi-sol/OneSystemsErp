@@ -149,7 +149,8 @@ export default async function UnifiedPayablesPage() {
                   <td>{payable.delivery.receiptNumber || 'N/A'}</td>
                   <td>{new Date(payable.delivery.createdAt).toLocaleDateString()}</td>
                   <td style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>
-                    {payable.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {/* Amount still due: partial payments reduce the balance (matches the detail page). */}
+                    {Math.max((payable.amount || 0) - (payable.paidAmount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td style={{ color: isOverdue ? '#ef4444' : 'inherit', fontWeight: isOverdue ? 'bold' : 'normal' }}>
                     {new Date(payable.dueDate).toLocaleDateString()}

@@ -63,6 +63,7 @@ export type WorkspaceSectionSummary = {
 };
 
 export type WorkspaceAnalysis = {
+  readingMethod?: 'builtin' | 'openai-assisted';
   documentToken?: string;
   documentKind?: 'pdf' | 'docx';
   extractedProjectName?: string | null;

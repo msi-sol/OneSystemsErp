@@ -26,7 +26,9 @@ async function verifyAccess(userId: string, simulatedRole: string | undefined) {
 
 router.post('/processExecutiveQuery', async (req, res) => {
   try {
-    const { query, userId, simulatedRole, executive_projectId } = req.body; // Extract all necessary data from req.body
+    const { query, simulatedRole, executive_projectId } = req.body; // Extract all necessary data from req.body
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     // Perform access verification using the data from the proxy
     await verifyAccess(userId, simulatedRole);

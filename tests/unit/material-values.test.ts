@@ -1,6 +1,10 @@
-import { materialQuantity, materialTotalCost } from '@/lib/procurement/material-values';
+import { materialQuantity, materialTotalCost, materialStock } from '@/lib/procurement/material-values';
 
 describe('material quantities and values after variations', () => {
+  it('keeps the complete fractional stock balance available for issuance', () => {
+    expect(materialStock({ deliveredQty: 0.3, consumedQty: 0.1 })).toBe(0.2);
+    expect(materialStock({ deliveredQty: 0.3, consumedQty: 0.3 })).toBe(0);
+  });
   const original = { quantity: 10, totalCost: 100, revisedQuantity: 0, revisedTotalCost: 0 };
   it('keeps original values for historical rows whose revision fields were never initialized', () => {
     expect(materialQuantity(original)).toBe(10);

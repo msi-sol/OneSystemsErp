@@ -90,7 +90,10 @@ export async function requestPasswordReset(email: string) {
              remarks: 'Failed to generate token because email provider is not configured.',
          }
       });
-      return { success: false, code: 'SUPER_ADMIN_RECOVERY_EMAIL_PROVIDER_CONFIGURATION_REQUIRED' };
+      // Same response as for unknown emails, so the form cannot be used to discover which accounts exist.
+      // Operators see the problem in the audit log and server log instead.
+      console.error('Password recovery requested but the email provider is not configured (PASSWORD_RECOVERY_EMAIL_CONFIGURATION_MISSING).');
+      return genericResponse;
     }
 
     // 4. Revoke existing tokens

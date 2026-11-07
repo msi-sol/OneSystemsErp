@@ -81,8 +81,6 @@ export default async function ExecutiveHomePage() {
           title="Active Projects" 
           value={data.activeProjectsCount.toString()} 
           icon="🏗️" 
-          trend="+2 this month" 
-          trendPositive={true} 
         />
         <KpiCard 
           title="Revised Contract Amount" 
@@ -161,7 +159,7 @@ export default async function ExecutiveHomePage() {
                <span>Review AI Validations</span>
                <span>→</span>
              </Link>
-             <Link href="/executive/approvals" style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', textDecoration: 'none', color: '#334155', fontWeight: 500, border: '1px solid #e2e8f0' }}>
+             <Link href="/director-audit" style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', textDecoration: 'none', color: '#334155', fontWeight: 500, border: '1px solid #e2e8f0' }}>
                <span>Pending Approvals</span>
                <span>→</span>
              </Link>

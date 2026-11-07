@@ -12,7 +12,9 @@ export default async function ProjectSubcontractingTab({ projectId }: { projectI
   });
 
   const totalPackages = packages.length;
-  const activePackages = packages.filter((p: any) => p.status === 'AWARDED' || p.status === 'ONGOING').length;
+  // "Active / Awarded" = awarded through execution, before billing/closure (see PackageStatus enum).
+  const ACTIVE_PACKAGE_STATUSES = ['APPROVED', 'AGREEMENT_ISSUED', 'JOB_ORDER_ISSUED', 'ONGOING', 'FOR_INSPECTION', 'PARTIALLY_ACCOMPLISHED'];
+  const activePackages = packages.filter((p: any) => ACTIVE_PACKAGE_STATUSES.includes(p.status)).length;
   const totalValue = packages.reduce((sum: number, p: any) => sum + (p.contractAmount || 0), 0);
 
   if (packages.length === 0) {
@@ -266,7 +268,7 @@ export default async function ProjectSubcontractingTab({ projectId }: { projectI
                   {p.subcontractor?.name || 'Unassigned'}
                 </td>
                 <td style={{ padding: '16px', color: 'rgba(255,255,255,0.7)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {p.description}
+                  {p.scopeOfWork}
                 </td>
                 <td style={{ padding: '16px', textAlign: 'center' }}>
                   <span style={{

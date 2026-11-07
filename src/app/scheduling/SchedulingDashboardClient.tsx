@@ -9,7 +9,9 @@ export default function SchedulingDashboardClient({ projects }: { projects: any[
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState('');
 
-  const projectsWithoutSchedule = projects.filter(p => !p.projectSchedule);
+  // projectSchedule is a one-to-many relation (array), latest first.
+  const latestSchedule = (p: any) => (Array.isArray(p.projectSchedule) ? p.projectSchedule[0] : p.projectSchedule) || null;
+  const projectsWithoutSchedule = projects.filter(p => !latestSchedule(p));
 
   const handleCreateSchedule = () => {
     if (selectedProjectId) {
@@ -47,9 +49,9 @@ export default function SchedulingDashboardClient({ projects }: { projects: any[
                 <span style={{ 
                   fontSize: '0.85rem', 
                   fontWeight: 'bold',
-                  color: project.projectSchedule ? 'var(--accent-color)' : '#f59e0b'
+                  color: latestSchedule(project) ? 'var(--accent-color)' : '#f59e0b'
                 }}>
-                  {project.projectSchedule ? project.projectSchedule.status : 'NO SCHEDULE'}
+                  {latestSchedule(project)?.status || 'NO SCHEDULE'}
                 </span>
               </div>
             </div>

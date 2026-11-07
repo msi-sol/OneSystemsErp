@@ -31,6 +31,8 @@ export default async function SchedulingDashboard() {
       contractAmount: true, 
       status: true,
       projectSchedule: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
         select: {
           status: true,
           currentFinishDate: true

@@ -9,8 +9,8 @@ const joModules = [
   { name: 'Dashboard', href: '/job-orders/dashboard', icon: '📊', description: 'Overview and KPIs' },
   { name: 'Create Job Order', href: '/job-orders/create', icon: '⚡', description: 'New short-form JO' },
   { name: 'Progress & Payments Hub', href: '/job-orders/progress-hub', icon: '📈', description: 'Unified Accomplishments, Billings & Payments for JOs' },
-  { name: 'Reports', href: '/job-orders/reports', icon: '📈', description: 'Generate reports' },
-  { name: 'Settings', href: '/job-orders/settings', icon: '⚙️', description: 'Module settings' }
+  // "Reports" and "Settings" tiles removed: /job-orders/reports and /job-orders/settings have no pages
+  // (they matched /job-orders/[id] and showed "Job Order Not Found").
 ];
 
 import { cookies } from 'next/headers';
@@ -34,7 +34,9 @@ export default async function JobOrderDashboard() {
     );
   }
 
-  let jobOrders = await getJobOrders(activeProjectId);
+  const jobOrdersResult: any = await getJobOrders(activeProjectId);
+  // On a backend error the action returns { success: false } instead of an array.
+  const jobOrders: any[] = Array.isArray(jobOrdersResult) ? jobOrdersResult : [];
 
   // Basic KPI calculations
   const activeCount = jobOrders.length;
@@ -57,7 +59,7 @@ export default async function JobOrderDashboard() {
         </div>
         <div className={styles.statCard}>
           <h3>Pending Approvals</h3>
-          <div className={styles.statValue}>{jobOrders.filter((jo: any) => jo.status === 'PENDING' || jo.status === 'FOR_APPROVAL').length}</div>
+          <div className={styles.statValue}>{jobOrders.filter((jo: any) => typeof jo.status === 'string' && jo.status.startsWith('FOR_')).length}</div>
         </div>
         <div className={styles.statCard}>
           <h3>Total Billed Amount</h3>

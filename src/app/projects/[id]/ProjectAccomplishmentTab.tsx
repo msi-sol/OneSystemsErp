@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import Link from 'next/link';
 import { Target, TrendingUp, CalendarCheck, FileCheck, ArrowRightCircle } from 'lucide-react';
+import AccomplishmentReviewButtons from './AccomplishmentReviewButtons';
 
 export default async function ProjectAccomplishmentTab({ projectId }: { projectId: string }) {
   const accomplishments = await prisma.accomplishment.findMany({
@@ -9,8 +10,12 @@ export default async function ProjectAccomplishmentTab({ projectId }: { projectI
   });
 
   const totalLogs = accomplishments.length;
-  const approvedAccomplishments = accomplishments.filter((a: any) => a.status === 'APPROVED').length;
+  // Billed accomplishments were approved first, so they count as approved earned value too.
+  const approvedAccomplishments = accomplishments.filter((a: any) => a.status === 'APPROVED' || a.status === 'BILLED').length;
   const totalValue = accomplishments.reduce((sum: number, a: any) => sum + (a.approvedAmount || 0), 0);
+  const recordHref = `/accomplishments/${projectId}/new`;
+  const peso = (value: number) => `₱ ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const statusColor = (status: string) => status === 'APPROVED' ? '#10b981' : status === 'BILLED' ? '#3b82f6' : status === 'REJECTED' ? '#ef4444' : '#f59e0b';
 
   if (accomplishments.length === 0) {
     return (
@@ -56,7 +61,7 @@ export default async function ProjectAccomplishmentTab({ projectId }: { projectI
               No physical accomplishment or earned value logs have been recorded yet.
             </p>
           </div>
-          <Link href="/accomplishments/log" className="tech-button-emerald" style={{
+          <Link href={recordHref} className="tech-button-emerald" style={{
               marginTop: '10px', backgroundColor: '#10b981', color: '#fff', padding: '14px 32px', borderRadius: '12px', fontWeight: '900',
               fontSize: '1.1rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '10px', textTransform: 'uppercase',
               letterSpacing: '1px', transform: 'translateZ(50px)'
@@ -85,12 +90,58 @@ export default async function ProjectAccomplishmentTab({ projectId }: { projectI
           </div>
           Accomplishment & Earned Value
         </h2>
-        <Link href="/accomplishments/log" className="header-button-emerald" style={{
+        <Link href={recordHref} className="header-button-emerald" style={{
             background: 'linear-gradient(135deg, #10b981, #34d399)', color: '#fff', padding: '10px 24px', borderRadius: '8px', fontWeight: 'bold',
             textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 15px rgba(16,185,129,0.3)', transition: 'transform 0.2s'
           }}>
           <ArrowRightCircle size={18} /> Record Progress
         </Link>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        {[
+          { label: 'Accomplishment Logs', value: totalLogs.toLocaleString(), Icon: FileCheck },
+          { label: 'Approved Logs', value: `${approvedAccomplishments.toLocaleString()} of ${totalLogs.toLocaleString()}`, Icon: CalendarCheck },
+          { label: 'Approved Earned Value', value: peso(totalValue), Icon: TrendingUp },
+        ].map(({ label, value, Icon }) => (
+          <div key={label} className="card-emerald">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255,255,255,0.6)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <Icon size={16} color="#10b981" /> {label}
+            </div>
+            <div style={{ marginTop: '10px', fontSize: '1.5rem', fontWeight: 800, color: '#fff' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="card-emerald" style={{ padding: 0, overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', color: '#fff', fontSize: '0.9rem' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: 'rgba(255,255,255,0.6)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+              <th style={{ padding: '14px 16px' }}>Billing Period</th>
+              <th style={{ padding: '14px 16px' }}>Accomplishment Date</th>
+              <th style={{ padding: '14px 16px' }}>Status</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Approved Amount</th>
+              <th style={{ padding: '14px 16px', textAlign: 'right' }}>Review</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accomplishments.map((a) => (
+              <tr key={a.id} className="row-hover-emerald" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <td style={{ padding: '12px 16px', fontWeight: 600 }}>{a.billingPeriod}</td>
+                <td style={{ padding: '12px 16px' }}>{new Date(a.accomplishmentDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</td>
+                <td style={{ padding: '12px 16px' }}>
+                  <span style={{ color: statusColor(a.status), border: `1px solid ${statusColor(a.status)}`, borderRadius: '999px', padding: '2px 10px', fontSize: '0.75rem', fontWeight: 700 }}>
+                    {a.status.replace(/_/g, ' ')}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 16px', textAlign: 'right' }}>{a.approvedAmount != null ? peso(a.approvedAmount) : '—'}</td>
+                <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                  {a.status === 'FOR_REVIEW' ? <AccomplishmentReviewButtons accomplishmentId={a.id} /> : <span style={{ color: 'rgba(255,255,255,0.4)' }}>—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

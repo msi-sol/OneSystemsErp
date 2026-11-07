@@ -4,13 +4,16 @@ import WorkerDeleteButton from './WorkerDeleteButton';
 import ExportWorkersButton from './ExportWorkersButton';
 import PermissionGuard from '@/components/PermissionGuard';
 import { getUserPermissions } from '@/lib/permissions';
+import { verifySession } from '@/lib/dal/auth';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
 export default async function WorkersDirectoryPage() {
-  // Mock current user, replace with real session logic
-  const currentUser = await prisma.user.findFirst() || { id: 'mock-id' };
-  const permissions = await getUserPermissions(currentUser.id);
+  // Use the signed-in user's permissions (previously the first user in the DB, usually the admin).
+  const session = await verifySession();
+  if (!session) redirect('/login');
+  const permissions = await getUserPermissions(session.id);
 
   const workers = await prisma.worker.findMany({
     orderBy: { createdAt: 'desc' }

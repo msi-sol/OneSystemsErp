@@ -85,7 +85,7 @@ export default function ApprovedPayslipsClient({ payslips }: { payslips: any[] }
               return (
                 <tr key={ps.id} style={{ borderBottom: '1px solid var(--glass-border)', background: rowColor }}>
                   <td style={{ padding: '12px 8px' }}>{ps.payslipNumber || ps.id.substring(0,8)}</td>
-                  <td style={{ padding: '12px 8px' }}>{ps.payrollPeriod?.batchId || 'N/A'}</td>
+                  <td style={{ padding: '12px 8px' }}>{ps.payrollPeriod?.payrollBatchNumber || 'N/A'}</td>
                   <td style={{ padding: '12px 8px' }}>
                     <Link href={`/workers/${w.id}`} style={{ color: '#3498db', textDecoration: 'none' }}>
                       {w.firstName} {w.lastName}

@@ -9,6 +9,7 @@ import { uploadFileToS3 } from '../services/s3.service';
 import { privateUploadUrl } from '../../../../src/lib/s3';
 import { randomUUID } from 'node:crypto';
 import { calculatePoReceiptProgress } from '../../../../src/lib/procurement/po-receipt-progress';
+import { calculatePoReceiptCosts } from '../../../../src/lib/procurement/po-receipt-cost';
 import { canReceivePurchaseOrder } from '../../../../src/lib/procurement/receivable-purchase-order';
 
 const router = Router();
@@ -213,21 +214,32 @@ router.post('/:id/approve', async (req, res) => {
       });
       if (claimed.count !== 1) throw new DeliveryApprovalConflict('Another approver processed this delivery. Refresh before retrying.');
 
-      for (const item of delivery.items) {
+      const priorDeliveries = await tx.delivery.findMany({
+        where: { poId: delivery.poId, id: { not: id }, status: { in: ['APPROVED', 'COMPLETED'] } },
+        include: { items: true },
+      });
+      const costs = calculatePoReceiptCosts(delivery.po.items, priorDeliveries, delivery.items);
+      const balances = new Map<string, { delivered: Prisma.Decimal; cost: Prisma.Decimal }>();
+      for (const [index, item] of delivery.items.entries()) {
         const poItem = delivery.po.items.find(i => i.consolidatedBoqItemId === item.consolidatedBoqItemId);
         if (!poItem || item.consolidatedBoqItem.projectId !== delivery.po.mr.projectId ||
             !Number.isFinite(item.quantity) || item.quantity <= 0 ||
             (item.drQuantity !== null && (!Number.isFinite(item.drQuantity) || item.drQuantity <= 0))) {
           throw new DeliveryApprovalConflict('A delivery line no longer matches a valid positive purchase-order item. No receipt quantities or costs were applied.');
         }
-        const unitCost = poItem ? poItem.unitCost : item.consolidatedBoqItem.unitCost;
-        const actualLineCost = item.quantity * unitCost;
+        const actualLineCost = costs.lineCosts[index];
+        const prior = balances.get(item.consolidatedBoqItemId) || {
+          delivered: new Prisma.Decimal(String(item.consolidatedBoqItem.deliveredQty)),
+          cost: new Prisma.Decimal(String(item.consolidatedBoqItem.actualCost)),
+        };
+        const next = { delivered: prior.delivered.plus(String(item.quantity)), cost: prior.cost.plus(String(actualLineCost)) };
+        balances.set(item.consolidatedBoqItemId, next);
 
         await tx.consolidatedBOQItem.update({
           where: { id: item.consolidatedBoqItemId },
           data: {
-            deliveredQty: { increment: item.quantity },
-            actualCost: { increment: actualLineCost }
+            deliveredQty: next.delivered.toNumber(),
+            actualCost: next.cost.toNumber()
           }
         });
 
@@ -250,11 +262,7 @@ router.post('/:id/approve', async (req, res) => {
         }
       }
 
-      const totalAmount = delivery.items.reduce((sum, item) => {
-        const poItem = delivery.po.items.find(i => i.consolidatedBoqItemId === item.consolidatedBoqItemId);
-        const unitCost = poItem ? poItem.unitCost : item.consolidatedBoqItem.unitCost;
-        return sum + (item.quantity * unitCost);
-      }, 0);
+      const totalAmount = costs.totalAmount;
 
       let termDays = 0;
       if (delivery.po.supplier.paymentTerms) {

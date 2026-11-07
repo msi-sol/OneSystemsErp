@@ -75,6 +75,8 @@ function makeHarness(options: {
     awardedBOQItem: { findMany: async () => state.boqItems.map(item => ({ ...item })) },
     projectSchedule: { findFirst: async () => state.schedule ? { ...state.schedule, lockedBOQVersionId: 'boq-version-1', lockedBOQChecksum: 'checksum-1', activities: state.schedule.activities.map(item => ({ ...item })) } : null },
     projectBOQVersion: { findFirst: async () => ({ id: 'boq-version-1', status: 'APPROVED', checksum: 'checksum-1' }) },
+    scheduleBOQAllocation: { findMany: async () => [] },
+    scheduleActivity: { findMany: async () => (state.schedule?.activities || []).map((item: { id: string; name: string }) => ({ id: item.id, description: item.name })) },
     procurementBenchmarkItem: {
       count: async () => state.legacyCount,
       create: async ({ data }: { data: Record<string, unknown> }) => { const item = { id: `benchmark-item-${state.benchmarkItems.length + 1}`, ...data }; state.benchmarkItems.push(item); return item; },

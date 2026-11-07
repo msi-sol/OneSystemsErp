@@ -1,4 +1,6 @@
 import { getAIAuditLogs, getAIAuditMetrics, getChatbotAuditLogs } from '../actions/aiAuditActions';
+import { redirect } from 'next/navigation';
+import { getAuditViewer } from '@/lib/audit-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +9,7 @@ export default async function AiAuditPage({
 }: {
   searchParams: Promise<{ filter?: string; tab?: string }>;
 }) {
+  if (!(await getAuditViewer())) redirect('/');
   const query = await searchParams;
   const filter = query.filter || 'ALL';
   const tab = query.tab || 'transactions';

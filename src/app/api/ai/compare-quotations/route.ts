@@ -22,6 +22,9 @@ export async function POST(req: Request) {
     if (!canvass) {
       return NextResponse.json({ success: false, error: 'Canvass not found' }, { status: 404 });
     }
+    if (['APPROVED', 'COMPLETED'].includes(canvass.status)) {
+      return NextResponse.json({ success: false, error: 'Quotation recommendations cannot be changed after the canvass is approved or completed.' }, { status: 409 });
+    }
 
     if (canvass.quotations.length === 0) {
       return NextResponse.json({ success: false, error: 'No quotations found to compare' }, { status: 400 });
@@ -99,13 +102,18 @@ export async function POST(req: Request) {
     const recommendedQuotation = scoredQuotations[0];
 
     // Build Rationale for each
+    // Missing terms are scored neutrally (50); say so instead of describing them as "standard" terms or printing "null".
+    const termsText = (q: { deliveryPeriod: string | null; paymentTerms: string | null }) => {
+      if (!q.deliveryPeriod && !q.paymentTerms) return 'delivery and payment terms were not stated (scored as neutral)';
+      return `${q.deliveryPeriod ? `${q.deliveryPeriod} delivery` : 'delivery not stated'} and ${q.paymentTerms ? `${q.paymentTerms} payment terms` : 'payment terms not stated'}`;
+    };
     const rankedFullQuotes = scoredQuotations.map((q, index) => {
       let rationale = "";
       if (index === 0) {
         if (q.priceScore === 100) {
-          rationale = `Rank 1: Chosen for the lowest comparable price for the full requested quantities (₱${q.comparableTotal.toLocaleString()}) combined with solid ${q.deliveryPeriod || 'standard'} delivery and ${q.paymentTerms || 'standard'} payment terms.`;
+          rationale = `Rank 1: Chosen for the lowest comparable price for the full requested quantities (₱${q.comparableTotal.toLocaleString()}); ${termsText(q)}.`;
         } else {
-          rationale = `Rank 1: Despite not having the lowest comparable price for the full requested quantities, the superior ${q.deliveryPeriod || 'standard'} delivery and ${q.paymentTerms || 'standard'} terms make it the most competitive overall.`;
+          rationale = `Rank 1: Despite not having the lowest comparable price for the full requested quantities, its terms (${termsText(q)}) make it the most competitive overall.`;
         }
       } else {
         rationale = `Rank ${index + 1}: Not recommended. `;
@@ -128,7 +136,7 @@ export async function POST(req: Request) {
     summary += `Source-document verification is separate from this comparison; the comparison uses recorded quantities, prices, and terms.\n\n`;
     summary += `**Rankings:**\n`;
     rankedFullQuotes.forEach(q => {
-      summary += `${q.aiRank}. **${q.supplier.name}** - Comparable requested-scope price: ₱${q.comparableTotal.toLocaleString()} | Delivery: ${q.deliveryPeriod} | Payment: ${q.paymentTerms}\n`;
+      summary += `${q.aiRank}. **${q.supplier.name}** - Comparable requested-scope price: ₱${q.comparableTotal.toLocaleString()} | Delivery: ${q.deliveryPeriod || 'Not stated'} | Payment: ${q.paymentTerms || 'Not stated'}\n`;
       summary += `   Quoted available-quantity subtotal: ₱${q.totalAmount.toLocaleString()}\n`;
       summary += `   *Rationale:* ${q.aiRationale}\n\n`;
     });
@@ -140,28 +148,31 @@ export async function POST(req: Request) {
     summary += `I recommend proceeding with **${recommendedQuotation.supplier.name}** as they offer the highest overall competitiveness score.`;
 
     // Update DB
-    const transactionOperations = rankedQuotations.map(q => 
-      prisma.supplierQuotation.update({
-        where: { id: q.id },
-        data: { 
-          isRecommended: q.id === recommendedQuotation.id,
-          aiRank: q.aiRank,
-          aiRationale: q.aiRationale
-        }
-      })
-    );
-
-    transactionOperations.push(
-      prisma.canvassForm.update({
-        where: { id: canvassId },
-        data: { 
+    await prisma.$transaction(async (tx) => {
+      const unlocked = await tx.canvassForm.updateMany({
+        where: {
+          id: canvassId,
+          status: { notIn: ['APPROVED', 'COMPLETED'] },
+          updatedAt: canvass.updatedAt,
+        },
+        data: {
           aiSummary: summary,
-          recommendedSupplierId: recommendedQuotation.supplierId
-        }
-      }) as any
-    );
-
-    await prisma.$transaction(transactionOperations);
+          recommendedSupplierId: recommendedQuotation.supplierId,
+          status: canvass.status === 'ENDORSED' ? 'DRAFT' : canvass.status,
+        },
+      });
+      if (unlocked.count !== 1) throw new Error('Quotation recommendations changed while comparison was running, or the canvass is approved or completed. Refresh and retry.');
+      for (const q of rankedQuotations) {
+        await tx.supplierQuotation.update({
+          where: { id: q.id },
+          data: {
+            isRecommended: q.id === recommendedQuotation.id,
+            aiRank: q.aiRank,
+            aiRationale: q.aiRationale,
+          },
+        });
+      }
+    });
 
     return NextResponse.json({
       success: true,
@@ -171,8 +182,12 @@ export async function POST(req: Request) {
         reason,
       })),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error comparing quotations:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to analyze quotations' }, { status: 500 });
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('cannot be changed after the canvass is approved or completed') || message.includes('changed while comparison was running')) {
+      return NextResponse.json({ success: false, error: message }, { status: 409 });
+    }
+    return NextResponse.json({ success: false, error: message || 'Failed to analyze quotations' }, { status: 500 });
   }
 }

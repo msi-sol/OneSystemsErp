@@ -112,7 +112,9 @@ async function aggregateProjectValidationScoreLogic(projectId: string) {
  */
 router.post('/getProjectBillings', async (req, res) => {
   try {
-    const { projectId, userId, simulatedRole } = req.body;
+    const { projectId, simulatedRole } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     if (!projectId || !userId) {
       return res.status(400).json({ success: false, error: 'projectId and userId are required.' });
     }
@@ -143,7 +145,9 @@ router.post('/getProjectBillings', async (req, res) => {
  */
 router.post('/getBillingValidationMatrix', async (req, res) => {
   try {
-    const { projectId, billingId, userId, simulatedRole } = req.body;
+    const { projectId, billingId, simulatedRole } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     if (!projectId || !billingId || !userId) {
       return res.status(400).json({ success: false, error: 'projectId, billingId, and userId are required.' });
     }
@@ -186,7 +190,9 @@ router.post('/getBillingValidationMatrix', async (req, res) => {
  */
 router.post('/runAIEvidenceEngine', async (req, res) => {
   try {
-    const { projectId, evidenceType, fileUrl, moduleSource, userId, simulatedRole } = req.body;
+    const { projectId, evidenceType, fileUrl, moduleSource, simulatedRole } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     if (!projectId || !evidenceType || !fileUrl || !moduleSource || !userId) {
       return res.status(400).json({ success: false, error: 'projectId, evidenceType, fileUrl, moduleSource, and userId are required.' });
     }
@@ -288,7 +294,9 @@ router.post('/runAIEvidenceEngine', async (req, res) => {
  */
 router.post('/aggregateProjectValidationScore', async (req, res) => {
   try {
-    const { projectId, userId, simulatedRole } = req.body;
+    const { projectId, simulatedRole } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     if (!projectId || !userId) {
       return res.status(400).json({ success: false, error: 'projectId and userId are required.' });
     }

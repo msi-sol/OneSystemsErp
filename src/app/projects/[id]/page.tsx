@@ -122,6 +122,10 @@ export default async function ProjectDetailsPage({
   });
   const revisedContractAmount = (project.contractAmount || 0) + approvedAdditive - approvedDeductive;
 
+  const daysAfterNtp = project.startDate && project.noticeToProceedDate
+    ? Math.round((new Date(project.startDate).getTime() - new Date(project.noticeToProceedDate).getTime()) / 86_400_000)
+    : null;
+
   let originalFileUrl = '';
   if (project.description && project.description.includes('BOQ File Uploaded: ')) {
     originalFileUrl = project.description.split('BOQ File Uploaded: ')[1].trim();
@@ -247,8 +251,8 @@ export default async function ProjectDetailsPage({
           </div>
           <ProjectStatusOverride projectId={project.id} currentStatus={project.status} />
           <div style={{ color: 'var(--text-secondary)' }}>Location: {project.location || 'N/A'}</div>
-          {project.startDate && <div style={{ color: 'var(--text-secondary)' }}>Date Started: {new Date(project.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} (15 Days post-NTP)</div>}
-          {project.originalCompletionDate && <div style={{ color: 'var(--text-secondary)' }}>Target Completion: {new Date(project.originalCompletionDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} (180 Calendar Days)</div>}
+          {project.startDate && <div style={{ color: 'var(--text-secondary)' }}>Date Started: {new Date(project.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}{daysAfterNtp !== null ? ` (${daysAfterNtp} ${daysAfterNtp === 1 ? 'Day' : 'Days'} post-NTP)` : ''}</div>}
+          {project.originalCompletionDate && <div style={{ color: 'var(--text-secondary)' }}>Target Completion: {new Date(project.originalCompletionDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}{project.originalContractDuration ? ` (${project.originalContractDuration} Calendar Days)` : ''}</div>}
         </div>
       </header>
 

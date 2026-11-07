@@ -6,7 +6,8 @@ import { RECEIVABLE_PO_STATUSES } from '@/lib/procurement/receivable-purchase-or
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewDeliveryPage() {
+export default async function NewDeliveryPage({ searchParams }: { searchParams: Promise<{ poId?: string }> }) {
+  const { poId } = await searchParams;
   const purchaseOrders = await prisma.purchaseOrder.findMany({
     where: { status: { in: [...RECEIVABLE_PO_STATUSES] } },
     include: {
@@ -34,7 +35,7 @@ export default async function NewDeliveryPage() {
         </div>
       </header>
 
-      {purchaseOrders.length > 0 ? <LogDeliveryForm purchaseOrders={purchaseOrders} /> : (
+      {purchaseOrders.length > 0 ? <LogDeliveryForm purchaseOrders={purchaseOrders} initialPoId={purchaseOrders.some(po => po.id === poId) ? poId : ''} /> : (
         <div className={styles.tableContainer} style={{ padding: '24px' }}>
           <h2>No purchase orders available</h2>
           <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>Complete the purchase-order workflow before recording a delivery.</p>

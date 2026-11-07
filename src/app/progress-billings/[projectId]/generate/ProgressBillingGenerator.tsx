@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { toast } from "sonner";
 import { FiFileText, FiDownload, FiCheckCircle } from "react-icons/fi";
+import { generateProjectProgressBilling } from "@/app/actions/projectAccomplishmentActions";
 
 export default function ProgressBillingGenerator({ projectId, unbilledAccomplishments, projectInfo }: any) {
   const [selectedAccs, setSelectedAccs] = useState<string[]>([]);
@@ -18,16 +19,14 @@ export default function ProgressBillingGenerator({ projectId, unbilledAccomplish
     if (selectedAccs.length === 0) return toast.error("Please select at least one accomplishment to bill.");
     
     setIsGenerating(true);
-    toast.info("AI checking billing limits and calculating deductions...");
 
     try {
-      // Simulate server logic
-      await new Promise(res => setTimeout(res, 2000));
-      
-      toast.success("Progress Billing successfully generated!");
-      setTimeout(() => window.location.href = `/progress-billings`, 1500);
+      const res = await generateProjectProgressBilling(projectId, selectedAccs);
+      if (!res.success) throw new Error(res.error);
+      toast.success(`Progress Billing ${res.data?.billingNumber ?? ""} generated.`);
+      setTimeout(() => window.location.href = `/projects/${projectId}?tab=billing`, 1200);
     } catch (e: any) {
-      toast.error("Failed to generate billing");
+      toast.error(e?.message || "Failed to generate billing");
     } finally {
       setIsGenerating(false);
     }

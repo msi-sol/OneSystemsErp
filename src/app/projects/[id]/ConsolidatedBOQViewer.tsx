@@ -270,7 +270,8 @@ export default function ConsolidatedBOQViewer({
               color: isFullscreen ? '#000' : 'var(--accent-color)',
               borderColor: 'var(--accent-color)',
               fontWeight: 'bold',
-              zIndex: 10000
+              // Raised only over the full-screen overlay; otherwise it floated above the app header's Sign Off when scrolling.
+              zIndex: isFullscreen ? 10000 : undefined
             }}
           >
             {isFullscreen ? 'Exit Full Screen' : '⛶ Maximize'}
@@ -326,7 +327,8 @@ export default function ConsolidatedBOQViewer({
         </div>
       )}
 
-      <div className="table-scroll-container" style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
+      {/* No vertical padding: rows scrolled under the sticky header/footer would otherwise show through the padding strip. */}
+      <div className="table-scroll-container" style={{ backgroundColor: '#fff', padding: '0 15px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
         <style dangerouslySetInnerHTML={{__html: `
           .fullscreen-wrapper {
             width: 100vw;
@@ -366,6 +368,13 @@ export default function ConsolidatedBOQViewer({
           }
           .consolidation-table td {
             border-bottom: 1px solid #eaeaea;
+          }
+          /* Codes, quantities, units and peso amounts never break across lines ("BM-" / "0064", "₱" / "248,940.63"). */
+          .consolidation-table .nowrap {
+            white-space: nowrap;
+          }
+          .consolidation-table td.description {
+            min-width: 220px;
           }
           .consolidation-table td:first-child, .consolidation-table th:first-child {
             position: sticky;
@@ -419,9 +428,9 @@ export default function ConsolidatedBOQViewer({
               )}
               <th>Unit</th>
               <th style={{ textAlign: 'right' }}>Unit Cost</th>
-              <th style={{ textAlign: 'right' }}>Orig Value</th>
+              <th style={{ textAlign: 'right', paddingRight: showRevised && hasAnyVOImpact ? undefined : 72 }}>Orig Value</th>
               {showRevised && hasAnyVOImpact && (
-                <th style={{ textAlign: 'right', fontWeight: 'bold' }}>Revised Value</th>
+                <th style={{ textAlign: 'right', fontWeight: 'bold', paddingRight: 72 }}>Revised Value</th>
               )}
             </tr>
           </thead>
@@ -441,7 +450,7 @@ export default function ConsolidatedBOQViewer({
                       />
                     </td>
                   )}
-                  <td style={{ fontWeight: 'bold' }}>
+                  <td className="nowrap" style={{ fontWeight: 'bold' }}>
                     {item.itemCode}
                     {item.isVariationItem && (
                       <span className="vo-badge" style={{ marginLeft: '6px' }}>
@@ -449,8 +458,8 @@ export default function ConsolidatedBOQViewer({
                       </span>
                     )}
                   </td>
-                  <td>{item.description}</td>
-                  <td style={{ textAlign: 'center' }}>
+                  <td className="description">{item.description}</td>
+                  <td className="nowrap" style={{ textAlign: 'center' }}>
                     {item.isVariationItem || hasVOImpact ? (
                       <span style={{
                         display: 'inline-flex',
@@ -482,7 +491,7 @@ export default function ConsolidatedBOQViewer({
                       </span>
                     )}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 'bold' }}>
+                  <td className="nowrap" style={{ textAlign: 'right', fontWeight: 'bold' }}>
                     {item.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                   </td>
                   {showRevised && hasAnyVOImpact && (
@@ -498,15 +507,15 @@ export default function ConsolidatedBOQViewer({
                       </td>
                     </>
                   )}
-                  <td>{item.unit}</td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td className="nowrap">{item.unit}</td>
+                  <td className="nowrap" style={{ textAlign: 'right' }}>
                     ₱ {item.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td className="nowrap" style={{ textAlign: 'right', paddingRight: showRevised && hasAnyVOImpact ? undefined : 72 }}>
                     ₱ {item.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   {showRevised && hasAnyVOImpact && (
-                    <td style={{ textAlign: 'right', fontWeight: 'bold', color: materialTotalCost(item) !== item.totalCost ? 'var(--accent-color)' : '#000' }}>
+                    <td className="nowrap" style={{ textAlign: 'right', paddingRight: 72, fontWeight: 'bold', color: materialTotalCost(item) !== item.totalCost ? 'var(--accent-color)' : '#000' }}>
                       ₱ {materialTotalCost(item).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   )}
@@ -516,7 +525,8 @@ export default function ConsolidatedBOQViewer({
           </tbody>
           <tfoot>
             <tr>
-              <th colSpan={showRevised && hasAnyVOImpact ? (isLocked ? 11 : 10) : (isLocked ? 8 : 7)} style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.05rem', padding: '15px 10px', backgroundColor: '#e0e0e0', position: 'sticky', bottom: 0, zIndex: 10, borderTop: '2px solid #ccc' }}>
+              {/* Every column except the last value column: 6 base (+1 checkbox, +4 with VO columns). */}
+              <th colSpan={(showRevised && hasAnyVOImpact ? 10 : 6) + (isLocked ? 1 : 0)} style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.05rem', padding: '15px 10px', backgroundColor: '#e0e0e0', position: 'sticky', bottom: 0, zIndex: 10, borderTop: '2px solid #ccc', borderBottom: 'none' }}>
                 {showRevised && hasAnyVOImpact ? (
                   <span>
                     Original: ₱ {totalOriginalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -529,7 +539,8 @@ export default function ConsolidatedBOQViewer({
                   'GRAND TOTAL:'
                 )}
               </th>
-              <th style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.05rem', padding: '15px 10px', color: 'var(--accent-color)', backgroundColor: '#e0e0e0', position: 'sticky', bottom: 0, zIndex: 10, borderTop: '2px solid #ccc' }}>
+              {/* Dark teal stays readable on the light footer; extra right padding keeps the total clear of the floating AI button. */}
+              <th style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.05rem', padding: '15px 72px 15px 10px', color: '#0f766e', backgroundColor: '#e0e0e0', position: 'sticky', bottom: 0, zIndex: 10, borderTop: '2px solid #ccc', borderBottom: 'none', whiteSpace: 'nowrap' }}>
                 ₱ {(showRevised && hasAnyVOImpact ? totalRevisedValue : totalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </th>
             </tr>

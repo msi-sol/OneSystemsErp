@@ -32,7 +32,8 @@ export async function recordCollection(
 
   if (!billing) throw new Error("Billing not found");
 
-  const netAmountDue = billing.deductions[0]?.netAmountDue || billing.currentBillingAmount;
+  // `??`, not `||`: a legitimate ₱0 net amount must not fall back to the gross billing.
+  const netAmountDue = billing.deductions[0]?.netAmountDue ?? billing.currentBillingAmount;
   const currentTotalPaid = billing.payments.reduce((sum, p) => sum + p.amountPaid, 0);
 
   // 2. Validate payment amount

@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { validateTransactionWithAI } from '../lib/aiValidation';
 import { prepareIssuance, validateIssuanceDraft } from '../services/material-issuance';
+import { materialStock } from '../../../../src/lib/procurement/material-values';
 
 const router = Router();
 function getPbacContext(req: any) {
@@ -129,7 +130,7 @@ router.post('/:id/approve', async (req, res) => {
         if (!boqItem) throw new Error('BOQ Item not found');
         if(boqItem.projectId!==slip.projectId)throw Error('Issuance material must belong to the same project.');
 
-        const available = boqItem.deliveredQty - boqItem.consumedQty;
+        const available = materialStock(boqItem);
         if (item.releasedQty > available) {
           throw new Error(`Not enough inventory for ${boqItem.description}. Available: ${available}, Requested: ${item.releasedQty}`);
         }
@@ -139,7 +140,7 @@ router.post('/:id/approve', async (req, res) => {
         await tx.consolidatedBOQItem.update({
           where: { id: boqItem.id },
           data: {
-            consumedQty: { increment: Number(item.releasedQty) }
+            consumedQty: new Prisma.Decimal(String(boqItem.consumedQty)).plus(String(item.releasedQty)).toNumber()
           }
         });
       }

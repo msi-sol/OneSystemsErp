@@ -8,7 +8,11 @@ import { getStoredUploadDownloadUrl, readStoredUpload, uploadToS3 as put } from 
 import { actorCanAccessProject } from '@/lib/boq/workspace-service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { GoogleGenAI, Type, Schema } from '@google/genai';
+import OpenAI from 'openai';
+import { zodTextFormat } from 'openai/helpers/zod';
+import type { ResponseInputContent } from 'openai/resources/responses/responses';
+import { z } from 'zod';
+import { openAIModelName } from '@/lib/ai/openai-model';
 import ExcelJS from 'exceljs';
 import { cookies } from 'next/headers';
 import { randomUUID } from 'node:crypto';
@@ -66,59 +70,48 @@ async function requireProjectTemplateView(projectId: string) {
   }
 }
 
-async function parseBoqWithGemini(buffer: Buffer | null, mimeType: string, rawTextContent?: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  
-  const schema: Schema = {
-    type: Type.OBJECT,
-    properties: {
-      name: { type: Type.STRING, description: "The name of the project" },
-      location: { type: Type.STRING, description: "The location or address of the project" },
-      contractAmount: { type: Type.NUMBER, description: "The total contract amount" },
-      items: {
-        type: Type.ARRAY,
-        description: "List of Bill of Quantities (BOQ) line items",
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            itemCode: { type: Type.STRING, description: "Item Number or Code" },
-            description: { type: Type.STRING, description: "Description of work or item" },
-            unit: { type: Type.STRING, description: "Unit of Measurement (e.g., cu.m, sq.m, lot, ls)" },
-            quantity: { type: Type.NUMBER, description: "Quantity" },
-            unitCost: { type: Type.NUMBER, description: "Unit Cost or Price" },
-            totalCost: { type: Type.NUMBER, description: "Total Cost or Amount for this item" }
-          }
-        }
-      }
-    }
-  };
+// Structured BOQ extraction for PDF/image uploads. Runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default)
+// with the same structured-output approach as the BOQ workspace upload helper; previously Gemini.
+const boqExtractionSchema = z.object({
+  name: z.string().describe('The name of the project'),
+  location: z.string().describe('The location or address of the project'),
+  contractAmount: z.number().describe('The total contract amount'),
+  items: z.array(z.object({
+    itemCode: z.string().describe('Item Number or Code'),
+    description: z.string().describe('Description of work or item'),
+    unit: z.string().describe('Unit of Measurement (e.g., cu.m, sq.m, lot, ls)'),
+    quantity: z.number().describe('Quantity'),
+    unitCost: z.number().describe('Unit Cost or Price'),
+    totalCost: z.number().describe('Total Cost or Amount for this item'),
+  })).describe('List of Bill of Quantities (BOQ) line items'),
+});
 
-  const parts: any[] = [
-    { text: 'Extract the project details (name, location, total contract amount) and the detailed Bill of Quantities (BOQ) line items from this data. Ensure you capture all items accurately. STRICT RULES:\n1. Assign the numbering or item code exactly as it appears in the uploaded file to the "itemCode" field (column 1). Do not merge it into the description.\n2. Exclude irrelevant rows like "MATERIAL LABOR EQUIPMENT TOTAL" or standalone multipliers (e.g., 0.08, 0.05). Include header rows (e.g., "I. GENERAL REQUIREMENTS") as items with 0 cost/quantity so they appear as sections.' }
+async function parseBoqWithAI(buffer: Buffer | null, mimeType: string, rawTextContent?: string) {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw new Error('AI Processing Error: OpenAI is not configured. Upload an Excel file instead, which does not require AI to process.');
+
+  const content: ResponseInputContent[] = [
+    { type: 'input_text', text: 'Extract the project details (name, location, total contract amount) and the detailed Bill of Quantities (BOQ) line items from this data. Ensure you capture all items accurately. STRICT RULES:\n1. Assign the numbering or item code exactly as it appears in the uploaded file to the "itemCode" field (column 1). Do not merge it into the description.\n2. Exclude irrelevant rows like "MATERIAL LABOR EQUIPMENT TOTAL" or standalone multipliers (e.g., 0.08, 0.05). Include header rows (e.g., "I. GENERAL REQUIREMENTS") as items with 0 cost/quantity so they appear as sections.\n3. Use an empty string or 0 when a value is not shown; never invent quantities or prices.' },
   ];
-
   if (rawTextContent) {
-    parts.push({ text: `RAW EXCEL DATA:\n${rawTextContent}` });
+    content.push({ type: 'input_text', text: `RAW EXCEL DATA:\n${rawTextContent}` });
   } else if (buffer && mimeType) {
-    parts.push({ inlineData: { mimeType: mimeType, data: buffer.toString('base64') } });
+    const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+    content.push(mimeType.startsWith('image/')
+      ? { type: 'input_image', image_url: dataUrl, detail: 'high' }
+      : { type: 'input_file', filename: 'boq.pdf', file_data: dataUrl });
   }
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [
-      {
-        role: 'user',
-        parts: parts
-      }
-    ],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: schema
-    }
+  const client = new OpenAI({ apiKey, timeout: 120_000, maxRetries: 0 });
+  const response = await client.responses.create({
+    model: openAIModelName(), store: false, max_output_tokens: 24_000,
+    input: [{ role: 'user', content }],
+    text: { format: zodTextFormat(boqExtractionSchema, 'boq_extraction') },
   });
-
-  const rawJson = response.text || '{}';
-  const result = JSON.parse(rawJson);
+  if (response.status !== 'completed' || !response.output_text) {
+    throw new Error('AI Processing Error: the AI could not return a complete BOQ reading. Upload an Excel file instead.');
+  }
+  const result = boqExtractionSchema.parse(JSON.parse(response.output_text));
 
   // Normalize parsed items
   const items = (result.items || []).map((item: any) => {
@@ -193,10 +186,13 @@ export async function createProject(formData: FormData) {
     }
   } else if (isPdfOrImage) {
     try {
-      aiResult = await parseBoqWithGemini(buffer, boqFile.type);
+      aiResult = await parseBoqWithAI(buffer, boqFile.type);
     } catch (e: any) {
-      if (e.message?.includes('RESOURCE_EXHAUSTED') || e.status === 429) {
-        throw new Error('AI Processing Error: Your Gemini API credits have been depleted. Please upload an Excel file instead, which does not require AI to process.');
+      if (e?.code === 'insufficient_quota' || e?.status === 429) {
+        throw new Error('AI Processing Error: the OpenAI API quota or rate limit was reached. Please upload an Excel file instead, which does not require AI to process.');
+      }
+      if (e?.status === 401) {
+        throw new Error('AI Processing Error: the configured OpenAI key was not accepted. Please upload an Excel file instead, or ask your administrator to check the key.');
       }
       throw e;
     }

@@ -9,7 +9,9 @@ const router = Router();
 
 router.post('/generatePaymentBatch', async (req, res) => {
   try {
-    const { periodId, paymentMethodType, payrollBankAccountId, userId } = req.body;
+    const { periodId, paymentMethodType, payrollBankAccountId } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     if (!periodId || !paymentMethodType || !payrollBankAccountId || !userId) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });

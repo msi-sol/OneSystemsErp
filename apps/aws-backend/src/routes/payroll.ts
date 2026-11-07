@@ -413,6 +413,14 @@ router.post('/dtr/save-bulk', async (req, res) => {
     await requirePermission(userId!, 'PAYROLL', 'canEdit', simulatedRole);
     const { workerId, payrollPeriodId, entries } = req.body;
 
+    // Attendance must not change once the payroll period is locked (approved/funded).
+    if (payrollPeriodId) {
+      const period = await prisma.payrollPeriod.findUnique({ where: { id: payrollPeriodId }, select: { isLocked: true } });
+      if (period?.isLocked) {
+        return res.status(409).json({ success: false, error: 'This payroll period is locked. DTR entries can no longer be edited.' });
+      }
+    }
+
     for (const entry of entries) {
       const parsedDate = new Date(entry.date);
       if (entry.regularHours === 0 && entry.overtimeHours === 0 && !entry.timeIn && !entry.timeOut) continue;

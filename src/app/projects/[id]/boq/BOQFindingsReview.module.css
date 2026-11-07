@@ -1,0 +1,43 @@
+.review { margin: 18px 0 24px; padding: 18px 20px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--bg-secondary); min-width: 0; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
+.header h4 { margin: 0 0 4px; font-size: 1rem; }
+.header p { margin: 0; color: var(--text-secondary); font-size: .85rem; line-height: 1.6; max-width: 70ch; }
+.count { color: var(--text-secondary); font-size: .8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.progress { height: 6px; margin: 14px 0 16px; border-radius: 999px; background: var(--bg-tertiary); overflow: hidden; }
+.progress span { display: block; height: 100%; background: #4fbf9a; transition: width 200ms ease-out; }
+
+.card { padding: 18px; border: 1px solid var(--glass-border-highlight); border-radius: 10px; background: rgba(0, 240, 255, .03); }
+.cardTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.position { color: var(--accent-color); font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.blocking, .attention { padding: 3px 10px; border-radius: 999px; font-size: .72rem; font-weight: 650; }
+.blocking { background: rgba(255, 160, 160, .12); color: #ffb4b4; }
+.attention { background: rgba(241, 199, 130, .12); color: #f1c782; }
+.card h5 { margin: 10px 0 4px; font-size: .95rem; }
+.message { margin: 0; color: var(--text-primary); font-size: .9rem; line-height: 1.6; }
+.help { margin: 10px 0 14px; color: var(--text-secondary); font-size: .82rem; line-height: 1.6; }
+.help a { color: var(--accent-color); text-decoration: underline; text-underline-offset: 3px; }
+.card label { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: .78rem; }
+.card input { width: 100%; min-height: 40px; }
+.decisions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.confirm, .other, .pager button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 14px; border-radius: 8px; font: inherit; font-size: .84rem; cursor: pointer; }
+.confirm { border: 1px solid var(--accent-color); background: var(--accent-color); color: #061117; font-weight: 650; }
+.other, .pager button { border: 1px solid #526373; background: transparent; color: var(--text-primary); }
+.other:hover:not(:disabled), .pager button:hover:not(:disabled) { border-color: var(--accent-color); color: var(--accent-color); }
+.confirm:disabled, .other:disabled, .pager button:disabled { opacity: .45; cursor: default; }
+.waiting { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--bg-tertiary); color: var(--text-secondary); font-size: .82rem; }
+.pager { display: flex; justify-content: space-between; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--glass-border); }
+.done { display: flex; align-items: center; gap: 8px; margin: 0; padding: 12px 14px; border-radius: 8px; background: rgba(79, 191, 154, .08); color: #91dfc1; font-size: .875rem; }
+
+.all { margin-top: 14px; }
+.all > summary { cursor: pointer; padding: 6px 0; color: var(--text-secondary); font-size: .82rem; }
+.all ol { display: grid; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.all li { display: flex; gap: 10px; align-items: baseline; font-size: .82rem; line-height: 1.5; color: var(--text-secondary); }
+.all li strong { color: var(--text-primary); font-weight: 600; }
+.all em { color: var(--text-muted); }
+.superseded { opacity: .6; }
+.statusOpen, .statusDone { flex: 0 0 auto; padding: 1px 8px; border-radius: 999px; font-size: .7rem; font-weight: 650; white-space: nowrap; }
+.statusOpen { background: rgba(241, 199, 130, .12); color: #f1c782; }
+.statusDone { background: rgba(79, 191, 154, .12); color: #91dfc1; }
+.review :is(a, button, input, summary):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
+@media (max-width: 520px) { .review { padding: 14px; } .card { padding: 14px; } .decisions > button { flex: 1 1 140px; justify-content: center; } }
+@media (prefers-reduced-motion: reduce) { .progress span { transition: none; } }

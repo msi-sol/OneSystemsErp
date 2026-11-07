@@ -21,15 +21,19 @@ export default async function proxy(request: NextRequest) {
   }
 
   const PUBLIC_ROUTES = ['/login', '/forgot-password', '/reset-password'];
-  
+  // Machine-to-machine endpoints with their own secret/signature checks (they fail closed).
+  const INTEGRATION_ROUTES = ['/api/webhooks/unionbank', '/api/cron/payment-polling'];
+
   const isExactPublicRoute = PUBLIC_ROUTES.includes(pathname);
-  
-  // Allow public assets, offline fallback, exact public routes and Auth.js APIs
-  const isPublicRoute = isExactPublicRoute || 
+
+  // Allow public assets, offline fallback, exact public routes and Auth.js APIs.
+  // The asset-extension rule never applies under /api/, so "/api/<anything>.json" still requires a session.
+  const isPublicRoute = isExactPublicRoute ||
+                        INTEGRATION_ROUTES.includes(normalizedPath) ||
                         pathname.startsWith('/~offline') ||
                         pathname.startsWith('/api/auth/') ||
                         (pathname.includes('/scheduling/simulate') && process.env.SCHEDULING_GENERATION_MODE === 'RECONSTRUCTION_GATE_8C') ||
-                        pathname.match(/\.(png|jpg|jpeg|svg|ico|json|webmanifest)$/);
+                        (!pathname.startsWith('/api/') && pathname.match(/\.(png|jpg|jpeg|svg|ico|json|webmanifest)$/));
 
   // We only use auth() here optimistically. The real validation is in verifySession()
   const session: any = await auth();
@@ -58,8 +62,12 @@ export default async function proxy(request: NextRequest) {
 
   // If user IS logged in
   if (hasValidSession) {
-    // 1. Redirect away from login page
+    // 1. Redirect away from login page, but only if the session is still valid server-side.
+    // A stale token (password reset, deactivation, sessionVersion bump) must be able to sign in again
+    // instead of bouncing between /login and pages that reject it.
     if (pathname === '/login') {
+      const actor = await verifySession();
+      if (!actor) return NextResponse.next();
       return NextResponse.redirect(new URL('/', request.url));
     }
     

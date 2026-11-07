@@ -1,3 +1,14 @@
+/*
+ * Tailwind utilities without the preflight reset. Two dozen screens (Collections, password recovery,
+ * accomplishment entry, progress billing, security dashboard, shared UI components...) are written with
+ * Tailwind classes, but Tailwind was never imported, so they rendered unstyled. Preflight is left out on
+ * purpose: the rest of the app relies on browser defaults plus inline styles, and the reset would restyle
+ * every heading, list and button. Utilities only affect elements that use them.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
 :root {
   /* High-Tech Dark Mode Palette */
   --bg-primary: #06060c;
@@ -183,4 +194,92 @@ h1, h2, h3 {
 
 .is-guest-user button[type="submit"]:not(.allow-guest) {
   display: none !important;
+}
+
+/*
+ * Shared component classes. These names are used across the app (btn-primary x23, glass-panel x18, btn x11,
+ * btn-secondary x15...) but were only defined inside a few components' own <style> blocks, or nowhere,
+ * so buttons and panels on most pages rendered as bare browser defaults. In the components layer, so
+ * Tailwind utilities and any component-level <style> still take precedence.
+ */
+@layer components {
+  .btn, .btn-primary, .btn-secondary, .btn-danger, .btn-success, .btn-info, .btn-warning, .btn-ai {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s, background-color 0.2s, color 0.2s;
+  }
+  .btn { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--glass-border); }
+  .btn:hover:not(:disabled) { border-color: var(--glass-border-highlight); }
+  .btn-primary { background-color: var(--accent-color); color: #000; box-shadow: 0 0 10px var(--accent-glow); }
+  .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 0 15px var(--accent-glow); }
+  .btn-secondary { background-color: transparent; color: var(--text-secondary); border-color: var(--glass-border); }
+  .btn-secondary:hover:not(:disabled) { background-color: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+  .btn-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.4); }
+  .btn-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.4); }
+  .btn-info { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border-color: rgba(59, 130, 246, 0.4); }
+  .btn-warning { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); }
+  .btn-ai { background: rgba(138, 43, 226, 0.15); color: #c084fc; border-color: rgba(138, 43, 226, 0.4); }
+  .btn:disabled, .btn-primary:disabled, .btn-secondary:disabled, .btn-danger:disabled, .btn-success:disabled,
+  .btn-info:disabled, .btn-warning:disabled, .btn-ai:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+  .glass-panel, .glass-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    backdrop-filter: blur(12px);
+  }
+  .glass-card { padding: 20px; }
+
+  .table-container { width: 100%; overflow-x: auto; border: 1px solid var(--glass-border); border-radius: 12px; }
+  .glass-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; color: var(--text-primary); }
+  .glass-table th { text-align: left; padding: 12px 14px; color: var(--text-secondary); font-weight: 600; background: rgba(0, 0, 0, 0.2); border-bottom: 1px solid var(--glass-border); }
+  .glass-table td { padding: 12px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+  .glass-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-control, .form-input, .input-field { width: 100%; box-sizing: border-box; }
+
+  .spinner {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: app-spin 0.75s linear infinite;
+    vertical-align: -0.125em;
+  }
+}
+
+@keyframes app-spin { to { transform: rotate(360deg); } }
+
+/*
+ * Tailwind light surfaces (white/50-tint cards) were designed for dark text, but text without an explicit
+ * color inherits the dark theme's near-white body color and became invisible (e.g. "Outstanding Receivables"
+ * on Collections). Give those surfaces a dark default; explicit text-* utilities still win (utilities layer).
+ */
+@layer components {
+  [class~="bg-white"], [class~="bg-gray-50"], [class~="bg-gray-100"], [class~="bg-slate-50"], [class~="bg-slate-100"],
+  [class~="bg-blue-50"], [class~="bg-green-50"], [class~="bg-red-50"], [class~="bg-yellow-50"], [class~="bg-amber-50"],
+  [class~="bg-indigo-50"], [class~="bg-emerald-50"], [class~="bg-purple-50"], [class~="bg-orange-50"] {
+    color: #111827;
+  }
+}
+
+/* Headings inside light cards follow the card's dark text instead of the dark-theme heading color/glow.
+   Unlayered (like the global h1-h3 rule above) and more specific, so it wins over it; headings directly on
+   the dark shell keep the light heading color. */
+:is([class~="bg-white"], [class~="bg-gray-50"], [class~="bg-gray-100"], [class~="bg-slate-50"], [class~="bg-blue-50"], [class~="bg-yellow-50"]) :is(h1, h2, h3) {
+  color: inherit;
+  text-shadow: none;
 }

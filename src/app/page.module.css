@@ -34,6 +34,8 @@
 .statCard h3 {
   font-size: 0.875rem;
   color: #6b7280;
+  /* White card: drop the dark-theme heading glow from globals.css, which blurred these labels. */
+  text-shadow: none;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }

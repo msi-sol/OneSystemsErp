@@ -2,16 +2,20 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { UnionBankApiService } from '@/services/unionBankApiService';
 import { PaymentReconciliationService } from '@/services/paymentReconciliationService';
+import { configuredSecret, verifyBearerSecret } from '@/lib/integration-auth';
 
 export const maxDuration = 60; // Next.js edge/serverless execution timeout
 
 export async function GET(req: Request) {
   try {
-    // Basic auth/secret check for cron security
-    const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      // return new NextResponse('Unauthorized', { status: 401 });
-      // Bypassing for dev/demo purposes
+    // Public (no user session) so the scheduler can call it; requires CRON_SECRET and fails closed.
+    const secret = configuredSecret('CRON_SECRET');
+    if (!secret) {
+      console.error('Payment polling rejected: CRON_SECRET is not configured.');
+      return NextResponse.json({ error: 'Cron not configured' }, { status: 503 });
+    }
+    if (!verifyBearerSecret(req.headers.get('authorization'), secret)) {
+      return new NextResponse('Unauthorized', { status: 401 });
     }
 
     // Find all payment lines that are currently Processing or Awaiting Settlement

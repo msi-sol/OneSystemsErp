@@ -24,7 +24,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/projects/:projectId/accomplishments',
-        destination: '/progress/:projectId/accomplishments',
+        destination: '/projects/:projectId?tab=accomplishment',
         permanent: true,
       },
     ];

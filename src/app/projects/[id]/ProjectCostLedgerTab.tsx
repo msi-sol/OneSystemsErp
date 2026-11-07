@@ -30,7 +30,10 @@ export default function ProjectCostLedgerTab({ projectId }: { projectId: string 
   if (loading) return <div style={{ padding: '20px', color: 'var(--text-secondary)' }}>Loading Cost Ledger...</div>;
   if (error) return <div style={{ padding: '20px', color: '#ef4444' }}>Error: {error}</div>;
 
-  const totalCost = entries.reduce((acc, entry) => acc + entry.netAmount, 0);
+  // Only approved entries count toward actual cost (matches the Project Summary tab); pending/rejected rows are still listed.
+  const totalCost = entries
+    .filter((entry) => entry.approvalStatus === 'APPROVED')
+    .reduce((acc, entry) => acc + (Number(entry.netAmount) || 0), 0);
 
   return (
     <div>

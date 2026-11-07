@@ -36,6 +36,8 @@ export default function MRWorkflowButtons({ mrId, status, currentUser, capabilit
   return (
     <div style={{ marginTop: '10px' }}>
       {error && <p role="alert" style={{ color: '#fca5a5', marginBottom: 12 }}>{error}</p>}
+      {/* Submit only appears after the check, so say so instead of leaving the draft looking stuck. */}
+      {status === 'DRAFT' && <p style={{ color: 'var(--text-secondary)', margin: '0 0 10px', fontSize: '0.9rem' }}>Next: run the AI check. The “Submit for Review” button appears once it finishes.</p>}
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
         
         {/* Preparation Phase - Materials Engineer */}

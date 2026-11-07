@@ -8,14 +8,18 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   };
 }
 
-export default async function PrintPayrollPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ type: string }> }) {
+export default async function PrintPayrollPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ type: string, workerId?: string }> }) {
   const { id } = await params;
-  const { type } = await searchParams;
+  const { type, workerId } = await searchParams;
 
   const period = await prisma.payrollPeriod.findUnique({
     where: { id },
     include: {
+      // Payslip header shows the contracting company recorded on the project (was a literal "COMPANY NAME").
+      project: { select: { contractor: true, name: true } },
       payrolls: {
+        // A single-worker payslip print (from PayslipModal) must not include other workers' pay.
+        where: type !== 'summary' && workerId ? { workerId } : undefined,
         include: { worker: true }
       }
     }
@@ -93,7 +97,7 @@ export default async function PrintPayrollPage({ params, searchParams }: { param
             {period.payrolls.sort((a:any,b:any) => a.worker.lastName.localeCompare(b.worker.lastName)).map((p: any) => (
               <div key={p.id} className="payslip">
                 <div className="payslip-header">
-                  <h2>COMPANY NAME</h2>
+                  <h2>{period.project?.contractor || process.env.NEXT_PUBLIC_COMPANY_NAME || 'Payslip'}</h2>
                   <p>PAYSLIP - {period.month}/{period.year}</p>
                 </div>
                 <div className="payslip-row">

@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { verifySession } from '@/lib/dal/auth';
+import { hasPermission } from '@/lib/permissions';
 import { getSystemRoles } from '@/app/actions/user';
 import EditUserClient from './EditUserClient';
 import UserTabs from './UserTabs';
@@ -10,6 +12,12 @@ export const dynamic = 'force-dynamic';
 export default async function EditUserPage({ params }: { params: Promise<{ id: string }> }) {
   // Await params to avoid Next.js 15 sync access warnings
   const { id } = await params;
+
+  const actor = await verifySession();
+  if (!actor) redirect('/login');
+  if (!['SUPER_ADMIN', 'SYSTEM_ADMIN', 'PROJECT_DIRECTOR'].includes(actor.role) && !(await hasPermission(actor.id, 'SYSTEM_ROLES', 'canView'))) {
+    redirect('/');
+  }
 
   const user = await prisma.user.findUnique({
     where: { id },

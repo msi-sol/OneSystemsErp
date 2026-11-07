@@ -49,7 +49,11 @@ export async function getUserPermissions(userId: string) {
 
   const isActualAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'SYSTEM_ADMIN' || user?.role === 'ADMIN' || user?.role === 'PROJECT_DIRECTOR' || user?.role === 'DIRECTORS';
 
-  if (simulatedRole && isActualAdmin) {
+  // Role simulation may only step down: only real system admins may simulate an admin role,
+  // otherwise a director could set the cookie to SUPER_ADMIN and receive IS_ADMIN.
+  const isRealSystemAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'SYSTEM_ADMIN';
+  const simulatesAdminRole = simulatedRole === 'SUPER_ADMIN' || simulatedRole === 'SYSTEM_ADMIN';
+  if (simulatedRole && isActualAdmin && (!simulatesAdminRole || isRealSystemAdmin)) {
     return getPermissionsForRole(simulatedRole);
   }
 

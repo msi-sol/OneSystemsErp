@@ -6,7 +6,9 @@ const router = Router();
 
 router.post('/updateProfile', async (req: Request, res: Response) => {
   try {
-    const { userId, name, email, password, confirmPassword } = req.body;
+    const { name, email, password, confirmPassword } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized. User ID is missing.' });

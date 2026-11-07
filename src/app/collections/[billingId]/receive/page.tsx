@@ -44,7 +44,7 @@ export default async function ReceivePaymentPage({ params }: { params: Promise<{
           <div className="flex items-center space-x-2 text-sm text-gray-500 mb-2">
             <Link href="/collections" className="hover:text-blue-600">Collections</Link>
             <span>/</span>
-            <span className="text-gray-900">{billing.billingNumber}</span>
+            <span className="text-gray-200">{billing.billingNumber}</span>
           </div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Receive Payment</h1>
         </div>

@@ -9,7 +9,9 @@ const router = Router();
 
 router.post('/createFundingRequest', async (req, res) => {
   try {
-    const { periodId, destinationAccountId, userId, boqItemId } = req.body; // userId should be provided by authenticated request
+    const { periodId, destinationAccountId, boqItemId } = req.body; // userId should be provided by authenticated request
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     // In a production backend, userId would typically be derived from an authenticated session/token,
     // not directly from req.body. For this migration, we use the provided userId for actions and permissions.
@@ -98,7 +100,9 @@ router.post('/createFundingRequest', async (req, res) => {
 
 router.post('/approveFundingRequest', async (req, res) => {
   try {
-    const { requestId, userId } = req.body; // userId should be provided by authenticated request
+    const { requestId } = req.body; // userId should be provided by authenticated request
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     const request = await prisma.payrollFundingRequest.findUnique({
       where: { id: requestId },

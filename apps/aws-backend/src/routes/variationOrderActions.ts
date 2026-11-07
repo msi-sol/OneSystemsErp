@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router } from 'express';
+import { requirePermission } from '../lib/permissions';
 import { PrismaClient } from '@prisma/client';
 import {
   VariationOrder,
@@ -608,7 +609,33 @@ router.post('/submitVariationOrder', async (req, res) => {
 
 router.post('/approveVariationOrderStage', async (req, res) => {
   try {
-    const { voId, stage, action, userId, remarks } = req.body;
+    const { voId, stage, action, remarks } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
+
+    // Each stage may only act on a VO that is currently at that stage, and needs the matching permission.
+    const STAGE_REQUIRES_STATUS: Record<string, string> = {
+      TECHNICAL_REVIEW: 'SUBMITTED',
+      COST_REVIEW: 'FOR_COSTING',
+      PM_REVIEW: 'FOR_PM_REVIEW',
+      FINANCE_REVIEW: 'FOR_FINANCE_REVIEW',
+      PD_APPROVAL: 'FOR_PD_APPROVAL',
+    };
+    const ACTION_PERMISSION: Record<string, string> = {
+      APPROVED: 'canApprove',
+      REJECTED: 'canReject',
+      RETURNED: 'canReturnForCorrection',
+    };
+    if (!STAGE_REQUIRES_STATUS[stage] || !ACTION_PERMISSION[action]) {
+      return res.status(400).json({ success: false, error: 'Invalid approval stage or action.' });
+    }
+    await requirePermission(userId, 'VARIATION_ORDERS', ACTION_PERMISSION[action], req.body.simulatedRole);
+    const current = await prisma.variationOrder.findUnique({ where: { id: voId }, select: { currentStatus: true } });
+    if (!current) return res.status(404).json({ success: false, error: 'Variation Order not found.' });
+    if (current.currentStatus !== STAGE_REQUIRES_STATUS[stage]) {
+      return res.status(409).json({ success: false, error: `This Variation Order is ${current.currentStatus}, not awaiting ${stage.replace(/_/g, ' ').toLowerCase()}.` });
+    }
+
     await prisma.variationOrderApproval.create({
       data: {
         variationOrderId: voId,
@@ -662,7 +689,9 @@ router.post('/approveVariationOrderStage', async (req, res) => {
 
 router.post('/createMRFFromVO', async (req, res) => {
   try {
-    const { voId, itemIds, userId } = req.body;
+    const { voId, itemIds } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     const vo = await prisma.variationOrder.findUnique({
       where: { id: voId },
       include: { items: true, project: true }

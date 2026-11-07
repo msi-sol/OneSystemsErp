@@ -3,8 +3,10 @@ import { prisma } from '@/lib/prisma';
 import Link from 'next/link';
 import styles from '../../projects/page.module.css';
 import { cookies } from 'next/headers';
+import type { Prisma } from '@prisma/client';
 import { getUserPermissions } from '@/lib/permissions';
 import PermissionGuard from '@/components/PermissionGuard';
+import { materialQuantity, materialStock } from '@/lib/procurement/material-values';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,17 +23,18 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
   const permissions = sessionId ? await getUserPermissions(sessionId) : {};
   const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'SYSTEM_ADMIN';
 
-  const baseProjectFilter: any = {};
+  const baseProjectFilter: Prisma.ProjectWhereInput = {};
   if (!isSuperAdmin && sessionId) {
     baseProjectFilter.userAssignments = {
       some: { userId: sessionId, assignmentStatus: 'active' }
     };
   }
 
-  const itemsFilter: any = {};
+  const itemsFilter: Prisma.ConsolidatedBOQItemWhereInput = {};
   if (!isSuperAdmin) itemsFilter.project = baseProjectFilter;
   if (activeProjectId) itemsFilter.projectId = activeProjectId;
 
+  const activeProject = activeProjectId ? await prisma.project.findUnique({ where: { id: activeProjectId }, select: { name: true } }) : null;
   const items = await prisma.consolidatedBOQItem.findMany({
     where: itemsFilter,
     include: {
@@ -51,6 +54,8 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
           </Link>
           <h1>Site Stocks & Materials</h1>
           <p style={{ color: 'var(--text-secondary)', marginTop: '5px' }}>Master inventory of all BOQ items across projects, driven by approved deliveries.</p>
+          {/* The list follows the header's active project; say so, otherwise an empty list looks like missing stock. */}
+          {activeProject && <p style={{ marginTop: '8px' }}>Showing materials for the active project <strong>{activeProject.name}</strong>. Change the active project in the header to see another project.</p>}
           
           <div style={{ marginTop: '20px' }}>
             <Link href={inStockOnly ? "/inventory/stocks" : "/inventory/stocks?inStock=true"}>
@@ -80,7 +85,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
               <th>Category</th>
               <th>Item Description</th>
               <th>Unit</th>
-              <th>Awarded BOQ</th>
+              <th>Approved Quantity</th>
               <th>Delivered Qty</th>
               <th>Consumed / Issued</th>
               <th>Stock on Hand</th>
@@ -89,9 +94,9 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
           <tbody>
             {items.filter(item => {
               if (!inStockOnly) return true;
-              return (item.deliveredQty - item.consumedQty) > 0;
+              return materialStock(item) > 0;
             }).map(item => {
-              const stockOnHand = item.deliveredQty - item.consumedQty;
+              const stockOnHand = materialStock(item);
               const isLowStock = stockOnHand <= 0 && item.deliveredQty > 0;
               
               return (
@@ -99,7 +104,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
                   <td>{item.category || '-'}</td>
                   <td>{item.description}</td>
                   <td>{item.unit}</td>
-                  <td>{item.quantity}</td>
+                  <td>{materialQuantity(item)}</td>
                   <td style={{ color: 'var(--accent-color)' }}>{item.deliveredQty}</td>
                   <td>{item.consumedQty}</td>
                   <td style={{ 
@@ -114,11 +119,11 @@ export default async function StocksPage({ searchParams }: { searchParams: Promi
             
             {items.filter(item => {
               if (!inStockOnly) return true;
-              return (item.deliveredQty - item.consumedQty) > 0;
+              return materialStock(item) > 0;
             }).length === 0 && (
               <tr>
                 <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-secondary)' }}>
-                  No BOQ items found.
+                  {activeProject ? `No materials found for ${activeProject.name}${inStockOnly ? ' with stock on hand' : ''}.` : 'No BOQ items found.'}
                 </td>
               </tr>
             )}

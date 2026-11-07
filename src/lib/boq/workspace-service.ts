@@ -278,6 +278,7 @@ export async function confirmBOQWorkspaceUpload(input: ConfirmWorkspaceInput) {
         breakdownMapping: analysis.breakdownMapping,
         documentKind: analysis.documentKind,
         documentExtraction: analysis.documentExtraction,
+        readingMethod: analysis.readingMethod,
       };
       const metadataJson = JSON.stringify(metadata);
 

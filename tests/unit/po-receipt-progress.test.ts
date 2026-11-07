@@ -1,6 +1,14 @@
 import { calculatePoReceiptProgress } from '@/lib/procurement/po-receipt-progress';
 
 describe('purchase order receipt progress', () => {
+  it('reconciles fractional quantities without leaving false outstanding balances', () => {
+    const progress = calculatePoReceiptProgress([
+      { id: 'a', consolidatedBoqItemId: 'cement', quantity: 0.1 },
+      { id: 'b', consolidatedBoqItemId: 'cement', quantity: 0.2 },
+    ], [{ items: [{ consolidatedBoqItemId: 'cement', quantity: 0.3 }] }]);
+    expect(progress.status).toBe('DELIVERED');
+    expect([...progress.remainingByOrderItemId.values()]).toEqual([0, 0]);
+  });
   const order = [
     { id: 'line-a', consolidatedBoqItemId: 'material-a', quantity: 10 },
     { id: 'line-b', consolidatedBoqItemId: 'material-b', quantity: 5 },

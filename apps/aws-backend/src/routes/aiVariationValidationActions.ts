@@ -3,17 +3,16 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { generateText } from 'ai';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY, // Ensure this env var is available in your AWS environment
-});
+// AI runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default); previously Gemini.
+import { openAIModel } from '../../../../src/lib/ai/openai-model';
 
 const router = Router();
 
 router.post('/preCheckVariationOrder', async (req, res) => {
   try {
-    const { voId, userId } = req.body;
+    const { voId } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     if (!voId || !userId) {
       return res.status(400).json({ success: false, error: 'voId and userId are required.' });
@@ -69,7 +68,7 @@ router.post('/preCheckVariationOrder', async (req, res) => {
       }
     `;
 
-    const model = google('gemini-2.5-flash');
+    const model = openAIModel();
 
     const result = await generateText({
       model: model,
@@ -176,7 +175,7 @@ router.post('/askVariationOrderAssistant', async (req, res) => {
       Provide a helpful, precise, and professional response. Do not invent details not present in the context.
     `;
 
-    const model = google('gemini-2.5-flash');
+    const model = openAIModel();
 
     const result = await generateText({
       model: model,

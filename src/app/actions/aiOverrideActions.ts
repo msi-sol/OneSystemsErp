@@ -59,8 +59,29 @@ export async function submitAIOverrideRequest(data: {
   }
 }
 
-export async function approveAIOverride(overrideId: string, approvedBy: string, approvedByRole: string) {
+const OVERRIDE_APPROVER_ROLES = ['PROJECT_DIRECTOR', 'DIRECTORS', 'SUPER_ADMIN', 'SYSTEM_ADMIN'];
+
+// The approver is always the signed-in user (callers used to pass any ID/role, e.g. a hard-coded
+// 'PROJECT_DIRECTOR'), must hold a director/admin role, cannot decide their own request, and can
+// only decide a request that is still pending.
+async function authorizeOverrideDecision(overrideId: string) {
+  const actor = await verifySession();
+  if (!actor) throw new Error('Unauthorized');
+  if (!OVERRIDE_APPROVER_ROLES.includes(actor.role)) {
+    throw new Error('Unauthorized: Only a Project Director or administrator can decide AI override requests.');
+  }
+  const existing = await prisma.aIValidationOverride.findUnique({ where: { id: overrideId } });
+  if (!existing) throw new Error('Override request not found.');
+  if (existing.approvedBy) throw new Error('This override request has already been decided.');
+  if (existing.overriddenBy === actor.id) throw new Error('You cannot decide your own override request.');
+  return actor;
+}
+
+export async function approveAIOverride(overrideId: string, _approvedBy?: string, _approvedByRole?: string) {
   try {
+    const actor = await authorizeOverrideDecision(overrideId);
+    const approvedBy = actor.id;
+    const approvedByRole = actor.role;
     const override = await prisma.aIValidationOverride.update({
       where: { id: overrideId },
       data: {
@@ -91,8 +112,11 @@ export async function approveAIOverride(overrideId: string, approvedBy: string, 
   }
 }
 
-export async function rejectAIOverride(overrideId: string, rejectedBy: string, rejectedByRole: string) {
+export async function rejectAIOverride(overrideId: string, _rejectedBy?: string, _rejectedByRole?: string) {
   try {
+    const actor = await authorizeOverrideDecision(overrideId);
+    const rejectedBy = actor.id;
+    const rejectedByRole = actor.role;
     const override = await prisma.aIValidationOverride.update({
       where: { id: overrideId },
       data: {

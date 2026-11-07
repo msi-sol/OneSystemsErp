@@ -201,7 +201,11 @@ export default function PayrollClient({ periods, workers, projects, currentUserI
                     📅
                   </div>
                   <div>
-                    {period.month}/{period.year} - {period.periodType === 'FIRST_HALF' ? '1st Half' : '2nd Half'}
+                    {period.month}/{period.year} - {period.periodType === 'FIRST_HALF' ? '1st Half'
+                      : period.periodType === 'SECOND_HALF' ? '2nd Half'
+                      : period.periodType === 'FULL_MONTH' ? 'Full Month'
+                      : /^WEEK_\d+$/.test(period.periodType || '') ? `Week ${period.periodType.replace('WEEK_', '')}`
+                      : String(period.periodType || 'Custom').replace(/_/g, ' ')}
                   </div>
                 </td>
                 <td style={{ padding: '15px 20px' }}>{new Date(period.startDate).toLocaleDateString()}</td>

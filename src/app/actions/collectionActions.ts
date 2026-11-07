@@ -14,8 +14,11 @@ export async function processPaymentAction(formData: FormData) {
     const ewtCertificateReference = (formData.get("ewtCertificateReference") as string) || null;
     const remarks = (formData.get("remarks") as string) || null;
 
-    if (!billingId || isNaN(amountPaid) || !paymentDate) {
+    if (!billingId || isNaN(amountPaid) || isNaN(paymentDate.getTime())) {
       throw new Error("Missing required fields: Billing ID, Amount, or Date.");
+    }
+    if (amountPaid <= 0) {
+      throw new Error("Amount paid must be greater than zero.");
     }
 
     const payment = await recordCollection(

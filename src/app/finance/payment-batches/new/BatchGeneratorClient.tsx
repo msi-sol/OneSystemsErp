@@ -75,7 +75,7 @@ export default function BatchGeneratorClient({ periods, accounts }: { periods: a
             <option value="">Select a period...</option>
             {periods.map(p => (
               <option key={p.id} value={p.id}>
-                {new Date(p.startDate).toLocaleDateString()} to {new Date(p.endDate).toLocaleDateString()} (Batch: {p.batchId})
+                {new Date(p.startDate).toLocaleDateString()} to {new Date(p.endDate).toLocaleDateString()} (Batch: {p.payrollBatchNumber})
               </option>
             ))}
           </select>

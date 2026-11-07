@@ -1,190 +1,146 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { CheckCircle2, Download } from 'lucide-react';
+import { compareBOQLines, decimal, isStated, summarizeComparison, type BOQComparisonLine, type ComparisonField, type ComparisonRow, type ComparisonStatus } from '@/lib/boq/comparison';
 import styles from './BOQComparison.module.css';
 
-export type BOQComparisonLine = {
-  itemId: string | null;
-  rowNumber: number;
-  section: string;
-  itemCode: string;
-  description: string;
-  unit: string;
-  quantity: string;
-  unitCost: string;
-  amount: string;
-};
+export type { BOQComparisonLine } from '@/lib/boq/comparison';
 
-type ComparisonStatus = 'Changed' | 'Matched' | 'Source only' | 'Current only';
-type ComparisonRow = { source: BOQComparisonLine | null; current: BOQComparisonLine | null; status: ComparisonStatus };
+const money = (value: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value);
+const qty = (value: number) => new Intl.NumberFormat('en-PH', { maximumFractionDigits: 4 }).format(value);
+const signed = (value: number, format: (value: number) => string) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${format(Math.abs(value))}`;
+const PAGE_SIZE = 25;
 
-function decimal(value: string | number | null | undefined): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+type Filter = 'differences' | 'all' | ComparisonStatus;
+const STATUS_CLASS: Record<ComparisonStatus, string> = { Matched: 'matched', Changed: 'changed', 'Only in file': 'onlyFile', 'Only in system': 'onlySystem' };
+
+function show(field: ComparisonField, line: BOQComparisonLine): string {
+  if (field === 'quantity') return isStated(line.quantity) ? qty(decimal(line.quantity)) : 'Not stated';
+  if (field === 'unitCost') return isStated(line.unitCost) ? money(decimal(line.unitCost)) : 'Not stated';
+  if (field === 'amount') return money(decimal(line.amount));
+  if (field === 'unit') return line.unit || 'Not stated';
+  return line[field] || '—';
 }
 
-function money(value: number) {
-  return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value);
-}
-
-function quantity(value: number) {
-  return new Intl.NumberFormat('en-PH', { maximumFractionDigits: 4 }).format(value);
-}
-
-const stated = (value: string | undefined) => value !== undefined && value.trim() !== '';
-const statedQuantity = (value: string) => stated(value) ? quantity(decimal(value)) : 'Not stated';
-const statedRate = (value: string) => stated(value) ? money(decimal(value)) : 'Not stated';
-const PAGE_SIZE_DEFAULT = 25;
-
-function sectionQuantity(rows: BOQComparisonLine[]) {
-  const totals = new Map<string, number>();
-  for (const row of rows.filter(row => stated(row.quantity))) totals.set(row.unit || 'unit not recorded', (totals.get(row.unit || 'unit not recorded') ?? 0) + decimal(row.quantity));
-  const missing = rows.filter(row => !stated(row.quantity)).length;
-  return [...[...totals].map(([unit, value]) => `${quantity(value)} ${unit}`), ...(missing ? [`${missing} quantity not stated`] : [])].join(', ') || '—';
-}
-
-function same(source: BOQComparisonLine, current: BOQComparisonLine) {
-  return source.section.trim() === current.section.trim()
-    && source.itemCode.trim() === current.itemCode.trim()
-    && source.description.trim() === current.description.trim()
-    && source.unit.trim() === current.unit.trim()
-    && stated(source.quantity) === stated(current.quantity) && decimal(source.quantity) === decimal(current.quantity)
-    && stated(source.unitCost) === stated(current.unitCost) && decimal(source.unitCost) === decimal(current.unitCost)
-    && decimal(source.amount) === decimal(current.amount);
-}
-
-function compare(sourceRows: BOQComparisonLine[], currentRows: BOQComparisonLine[]): ComparisonRow[] {
-  const currentById = new Map(currentRows.filter(row => row.itemId).map(row => [row.itemId!, row]));
-  const sourceByCode = new Map<string, BOQComparisonLine[]>();
-  for (const row of sourceRows) {
-    if (!row.itemId && row.itemCode.trim()) sourceByCode.set(row.itemCode.trim(), [...(sourceByCode.get(row.itemCode.trim()) ?? []), row]);
+function ValueCell({ row, field }: { row: ComparisonRow; field: Extract<ComparisonField, 'quantity' | 'unit' | 'unitCost' | 'amount'> }) {
+  const { source, current } = row;
+  if (source && current && row.changed.includes(field)) {
+    const numeric = field !== 'unit' && isStated(source[field]) && isStated(current[field]);
+    const delta = numeric ? decimal(current[field]) - decimal(source[field]) : 0;
+    return <td className={styles.diffCell}>
+      <span className={styles.old}><span className={styles.srOnly}>File: </span>{show(field, source)}</span>
+      <span className={styles.new}><span className={styles.srOnly}>System: </span>{show(field, current)}</span>
+      {numeric && <small className={styles.delta}>{signed(delta, field === 'quantity' ? qty : money)}</small>}
+    </td>;
   }
-  const usedSource = new Set<BOQComparisonLine>();
-  const usedCurrent = new Set<BOQComparisonLine>();
-  const rows: ComparisonRow[] = [];
-
-  for (const source of sourceRows) {
-    let current = source.itemId ? currentById.get(source.itemId) : undefined;
-    if (!current && source.itemCode.trim()) {
-      const candidates = currentRows.filter(row => row.itemCode.trim() === source.itemCode.trim());
-      const sourceCandidates = sourceByCode.get(source.itemCode.trim()) ?? [];
-      if (candidates.length === 1 && sourceCandidates.length === 1) current = candidates[0];
-    }
-    if (current && !usedCurrent.has(current)) {
-      usedSource.add(source);
-      usedCurrent.add(current);
-      rows.push({ source, current, status: same(source, current) ? 'Matched' : 'Changed' });
-    } else {
-      rows.push({ source, current: null, status: 'Source only' });
-    }
-  }
-  for (const current of currentRows) {
-    if (!usedCurrent.has(current)) rows.push({ source: null, current, status: 'Current only' });
-  }
-  return rows;
+  const line = current ?? source;
+  return <td className={!current ? styles.fileOnlyValue : undefined}>{line ? show(field, line) : '—'}</td>;
 }
 
-function metricDelta(source: string | undefined, current: string | undefined, kind: 'quantity' | 'money') {
-  if (!stated(source) || !stated(current)) return '—';
-  const delta = decimal(current) - decimal(source);
-  return kind === 'money' ? money(delta) : quantity(delta);
-}
-
-export default function BOQComparison({
-  sourceAvailable,
-  sourceName,
-  sourceRows,
-  currentRows,
-  nextAction,
-  reviewHistory,
-}: {
+export default function BOQComparison({ sourceAvailable, sourceName, sourceRows, currentRows, originalHref }: {
   sourceAvailable: boolean;
   sourceName: string | null;
   sourceRows: BOQComparisonLine[];
   currentRows: BOQComparisonLine[];
-  nextAction: string;
-  reviewHistory: { action: string; at: string; reason: string | null }[];
+  originalHref?: string | null;
 }) {
-  const [sectionFilter, setSectionFilter] = useState('all');
+  const rows = useMemo(() => compareBOQLines(sourceRows, currentRows), [sourceRows, currentRows]);
+  const summary = useMemo(() => summarizeComparison(rows), [rows]);
+  const [filter, setFilter] = useState<Filter>(summary.differences > 0 ? 'differences' : 'all');
+  const [section, setSection] = useState('all');
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+
   if (!sourceAvailable) return <section className={styles.notice} aria-labelledby="boq-comparison-heading">
-    <h3 id="boq-comparison-heading">BOQ comparison</h3>
-    <p><strong>Legacy canonical snapshot.</strong> No original workbook or first source reading was preserved, so a source-to-current comparison cannot be shown. The saved BOQ remains available below.</p>
-    <p><strong>Current next action:</strong> {nextAction}</p>
-    {reviewHistory.length > 0 && <History rows={reviewHistory} />}
+    <h3 id="boq-comparison-heading">Compare with the uploaded file</h3>
+    <p>This BOQ came from an earlier import that did not keep the original file reading, so there is nothing to compare against. The recorded BOQ is still available under BOQ items.</p>
   </section>;
 
-  const rows = compare(sourceRows, currentRows);
-  const sourceTotal = sourceRows.reduce((sum, row) => sum + decimal(row.amount), 0);
-  const currentTotal = currentRows.reduce((sum, row) => sum + decimal(row.amount), 0);
-  const sections = [...new Set([...sourceRows, ...currentRows].map(row => row.section || 'Unsectioned'))].sort((left, right) => left.localeCompare(right));
-  const filteredRows = sectionFilter === 'all' ? rows : rows.filter(row =>
-    (row.source?.section || 'Unsectioned') === sectionFilter || (row.current?.section || 'Unsectioned') === sectionFilter,
-  );
-  const filteredSource = filteredRows.flatMap(row => row.source ? [row.source] : []);
-  const filteredCurrent = filteredRows.flatMap(row => row.current ? [row.current] : []);
-  const filteredSourceTotal = filteredSource.reduce((sum, row) => sum + decimal(row.amount), 0);
-  const filteredCurrentTotal = filteredCurrent.reduce((sum, row) => sum + decimal(row.amount), 0);
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const filtered = rows.filter(row => (filter === 'all' || (filter === 'differences' ? row.status !== 'Matched' : row.status === filter))
+    && (section === 'all' || summary.sectionOf(row) === section));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
-  const visibleRows = filteredRows.slice(safePage * pageSize, (safePage + 1) * pageSize);
-  const changed = rows.filter(row => row.status === 'Changed').length;
-  const sourceOnly = rows.filter(row => row.status === 'Source only').length;
-  const currentOnly = rows.filter(row => row.status === 'Current only').length;
+  const visible = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const allMatch = summary.differences === 0 && Math.abs(summary.difference) < 0.005;
+  const filters: { key: Filter; label: string; count: number }[] = [
+    { key: 'differences', label: 'Differences', count: summary.differences },
+    { key: 'Changed', label: 'Changed', count: summary.changed },
+    { key: 'Only in file', label: 'Only in file', count: summary.onlyInFile },
+    { key: 'Only in system', label: 'Only in system', count: summary.onlyInSystem },
+    { key: 'all', label: 'All items', count: rows.length },
+  ];
 
   return <section className={styles.section} aria-labelledby="boq-comparison-heading">
-    <div className={styles.heading}>
-      <div><h3 id="boq-comparison-heading">Source reading compared with current BOQ</h3><p>{sourceName || 'Preserved first workbook reading'} · {sourceRows.length} source lines · {currentRows.length} current lines</p></div>
-      <span className={styles.action}><strong>Current next action</strong>{nextAction}</span>
-    </div>
-    <div className={styles.totals}>
-      <div><span>All source · {sourceRows.length} lines</span><strong>{money(sourceTotal)}</strong></div>
-      <div><span>All current · {currentRows.length} lines</span><strong>{money(currentTotal)}</strong></div>
-      <div><span>Amount difference</span><strong>{money(currentTotal - sourceTotal)}</strong></div>
-      <div><span>Line differences</span><strong>{changed} changed · {sourceOnly} source only · {currentOnly} current only</strong></div>
-    </div>
-    <div className={styles.sectionTotals}>
-      <h4>Section totals</h4>
-      <div className={styles.sectionScroll}><table><thead><tr><th>Section</th><th>Source quantities</th><th>Current quantities</th><th>Source amount</th><th>Current amount</th><th>Amount difference</th></tr></thead><tbody>
-        {[...new Set([...sourceRows.map(row => row.section || 'Unsectioned'), ...currentRows.map(row => row.section || 'Unsectioned')])].map(section => {
-          const sourceSection = sourceRows.filter(row => (row.section || 'Unsectioned') === section);
-          const currentSection = currentRows.filter(row => (row.section || 'Unsectioned') === section);
-          const sourceAmount = sourceSection.reduce((sum, row) => sum + decimal(row.amount), 0);
-          const currentAmount = currentSection.reduce((sum, row) => sum + decimal(row.amount), 0);
-          return <tr key={section}><th>{section}</th><td>{sectionQuantity(sourceSection)}</td><td>{sectionQuantity(currentSection)}</td><td>{money(sourceAmount)}</td><td>{money(currentAmount)}</td><td>{money(currentAmount - sourceAmount)}</td></tr>;
-        })}
-        <tr className={styles.total}><th>All sections</th><td>{sectionQuantity(sourceRows)}</td><td>{sectionQuantity(currentRows)}</td><td>{money(sourceTotal)}</td><td>{money(currentTotal)}</td><td>{money(currentTotal - sourceTotal)}</td></tr>
-      </tbody></table></div>
-    </div>
-    <div className={styles.controls} aria-label="Comparison row controls">
-      <label>Section <select value={sectionFilter} onChange={event => { setSectionFilter(event.target.value); setPage(0); }}><option value="all">All sections ({rows.length} comparison rows)</option>{sections.map(section => <option key={section} value={section}>{section}</option>)}</select></label>
-      <label>Rows per page <select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPage(0); }}><option value={25}>25</option><option value={50}>50</option></select></label>
-      <p aria-live="polite">{filteredRows.length === 0 ? 'No comparison rows in this section' : `Showing ${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, filteredRows.length)} of ${filteredRows.length} filtered comparison rows · source ${filteredSource.length} lines / ${money(filteredSourceTotal)} · current ${filteredCurrent.length} lines / ${money(filteredCurrentTotal)}`}</p>
-      <div className={styles.pagination}><button type="button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>Previous</button><span>Page {safePage + 1} of {pageCount}</span><button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>Next</button></div>
-    </div>
-    <div className={styles.tableScroll} role="region" aria-label="Side-by-side BOQ line comparison" tabIndex={0}>
-      <table className={styles.comparisonTable}><thead>
-        <tr><th colSpan={5}>First source reading</th><th colSpan={5}>Current structured BOQ</th><th colSpan={5}>Difference · current minus source</th></tr>
-        <tr><th>Section / item</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Amount</th><th>Section / item</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Amount</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Amount</th><th>Status</th></tr>
-      </thead><tbody>
-        {visibleRows.map((row, index) => <tr key={`${row.source?.rowNumber ?? 'current'}:${row.current?.itemId ?? row.current?.rowNumber ?? index}`}>
-          <td>{row.source ? <><small>{row.source.section || 'Unsectioned'} · row {row.source.rowNumber}</small><strong>{row.source.itemCode} {row.source.description}</strong></> : <span className={styles.missing}>No matching source line</span>}</td>
-          <td>{row.source ? statedQuantity(row.source.quantity) : '—'}</td><td>{row.source?.unit || '—'}</td><td>{row.source ? statedRate(row.source.unitCost) : '—'}</td><td>{row.source ? money(decimal(row.source.amount)) : '—'}</td>
-          <td>{row.current ? <><small>{row.current.section || 'Unsectioned'}</small><strong>{row.current.itemCode} {row.current.description}</strong></> : <span className={styles.missing}>No current BOQ line</span>}</td>
-          <td>{row.current ? quantity(decimal(row.current.quantity)) : '—'}</td><td>{row.current?.unit || '—'}</td><td>{row.current ? money(decimal(row.current.unitCost)) : '—'}</td><td>{row.current ? money(decimal(row.current.amount)) : '—'}</td>
-          <td>{metricDelta(row.source?.quantity, row.current?.quantity, 'quantity')}</td><td>{row.source && row.current ? row.source.unit === row.current.unit ? 'No change' : `${row.source.unit || '—'} → ${row.current.unit || '—'}` : row.source ? `${row.source.unit || '—'} → —` : `— → ${row.current?.unit || '—'}`}</td><td>{metricDelta(row.source?.unitCost, row.current?.unitCost, 'money')}</td><td>{metricDelta(row.source?.amount, row.current?.amount, 'money')}</td>
-          <td><span className={`${styles.badge} ${row.status === 'Matched' ? styles.matched : styles.changed}`}>{row.status}</span></td>
-        </tr>)}
-        <tr className={styles.total}><th>Source total</th><td colSpan={3}>{sectionQuantity(sourceRows)}</td><td>{money(sourceTotal)}</td><th>Current total</th><td colSpan={3}>{sectionQuantity(currentRows)}</td><td>{money(currentTotal)}</td><td>By unit above</td><td>Units vary by line</td><td>—</td><td>{money(currentTotal - sourceTotal)}</td><td>—</td></tr>
-      </tbody></table>
-    </div>
-    <History rows={reviewHistory} />
-  </section>;
-}
+    <header className={styles.heading}>
+      <div>
+        <h3 id="boq-comparison-heading">Compare the file with the system</h3>
+        <p>What was first read from <strong>{sourceName || 'the uploaded file'}</strong> next to what is recorded in the system now.</p>
+      </div>
+      {originalHref && <a className={styles.download} href={originalHref}><Download size={16} aria-hidden="true" /> Download original file</a>}
+    </header>
 
-function History({ rows }: { rows: { action: string; at: string; reason: string | null }[] }) {
-  return <details className={styles.history}><summary>Approval and source review history · {rows.length}</summary>
-    {rows.length ? <ol>{rows.map((row, index) => <li key={`${row.at}:${row.action}:${index}`}><strong>{row.action.replaceAll('_', ' ')}</strong><time>{new Date(row.at).toLocaleString('en-PH')}</time>{row.reason && <p>{row.reason}</p>}</li>)}</ol> : <p>No approval or source review events are recorded for this BOQ version yet.</p>}
-  </details>;
+    <dl className={styles.totals}>
+      <div><dt>From the file · {sourceRows.length} items</dt><dd>{money(summary.sourceTotal)}</dd></div>
+      <div><dt>In the system · {currentRows.length} items</dt><dd>{money(summary.currentTotal)}</dd></div>
+      <div className={Math.abs(summary.difference) >= 0.005 ? styles.warnTile : undefined}><dt>Total difference</dt><dd>{Math.abs(summary.difference) < 0.005 ? 'None' : signed(summary.difference, money)}</dd></div>
+      <div className={summary.differences ? styles.warnTile : undefined}><dt>Items that differ</dt><dd>{summary.differences}</dd>
+        {summary.differences > 0 && <span className={styles.tileNote}>{summary.changed} changed · {summary.onlyInFile} only in file · {summary.onlyInSystem} only in system</span>}</div>
+    </dl>
+
+    {allMatch && <p className={styles.allMatch}><CheckCircle2 size={18} aria-hidden="true" /> Every recorded item matches the file, and the totals agree.</p>}
+
+    <div className={styles.controls}>
+      <div className={styles.chips} role="radiogroup" aria-label="Show items">
+        {filters.map(item => <button key={item.key} type="button" role="radio" aria-checked={filter === item.key} className={filter === item.key ? styles.chipActive : styles.chip}
+          disabled={item.count === 0 && item.key !== 'all'} onClick={() => { setFilter(item.key); setPage(0); }}>{item.label} <span>{item.count}</span></button>)}
+      </div>
+      <label className={styles.sectionSelect}>Section
+        <select value={section} onChange={event => { setSection(event.target.value); setPage(0); }}>
+          <option value="all">All sections</option>
+          {summary.sections.map(entry => <option key={entry.section} value={entry.section}>{entry.section}{entry.differences ? ` · ${entry.differences} differ` : ''}</option>)}
+        </select>
+      </label>
+    </div>
+
+    {filtered.length === 0
+      ? <p className={styles.empty}>{filter === 'differences' ? 'No differences in this selection.' : 'No items in this selection.'}</p>
+      : <div className={styles.tableScroll} role="region" aria-label="Item comparison, file and system" tabIndex={0}>
+        <table className={styles.comparisonTable}>
+          <caption className={styles.srOnly}>Each changed value shows the file value, then the system value.</caption>
+          <thead><tr><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Unit</th><th scope="col">Unit rate</th><th scope="col">Amount</th><th scope="col">Status</th></tr></thead>
+          <tbody>{visible.map((row, index) => {
+            const line = row.current ?? row.source!;
+            const textChanged = row.source && row.current && (['itemCode', 'description', 'section'] as const).filter(field => row.changed.includes(field));
+            return <tr key={`${row.source?.rowNumber ?? 'system'}:${row.current?.itemId ?? row.current?.rowNumber ?? index}`} className={styles[STATUS_CLASS[row.status]]}>
+              <th scope="row">
+                <span className={styles.itemTitle}>{line.itemCode && <span className={styles.code}>{line.itemCode}</span>}{line.description}</span>
+                <small>{summary.sectionOf(row)}{row.source ? ` · file row ${row.source.rowNumber}` : ''}</small>
+                {textChanged && textChanged.length > 0 && <small className={styles.textChange}>In the file: {textChanged.map(field => `${field === 'itemCode' ? 'code' : field} “${show(field, row.source!)}”`).join(' · ')}</small>}
+              </th>
+              <ValueCell row={row} field="quantity" /><ValueCell row={row} field="unit" /><ValueCell row={row} field="unitCost" /><ValueCell row={row} field="amount" />
+              <td><span className={styles.badge}>{row.status}</span></td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>}
+
+    {filtered.length > PAGE_SIZE && <div className={styles.pagination}>
+      <span aria-live="polite">Showing {safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+      <button type="button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>Previous</button>
+      <button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>Next</button>
+    </div>}
+
+    <details className={styles.sectionTotals} open={summary.sections.some(entry => Math.abs(entry.currentAmount - entry.sourceAmount) >= 0.005)}>
+      <summary>Section totals · {summary.sections.length} sections</summary>
+      <div className={styles.tableScroll}><table className={styles.sectionTable}>
+        <thead><tr><th scope="col">Section</th><th scope="col">From the file</th><th scope="col">In the system</th><th scope="col">Difference</th><th scope="col">Items that differ</th></tr></thead>
+        <tbody>
+          {summary.sections.map(entry => { const delta = entry.currentAmount - entry.sourceAmount; return <tr key={entry.section} className={Math.abs(delta) >= 0.005 || entry.differences ? styles.changed : undefined}>
+            <th scope="row">{entry.section}</th><td>{money(entry.sourceAmount)} <small>({entry.sourceCount})</small></td><td>{money(entry.currentAmount)} <small>({entry.currentCount})</small></td>
+            <td>{Math.abs(delta) < 0.005 ? '—' : signed(delta, money)}</td><td>{entry.differences || '—'}</td></tr>; })}
+          <tr className={styles.total}><th scope="row">All sections</th><td>{money(summary.sourceTotal)}</td><td>{money(summary.currentTotal)}</td><td>{Math.abs(summary.difference) < 0.005 ? '—' : signed(summary.difference, money)}</td><td>{summary.differences || '—'}</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+  </section>;
 }

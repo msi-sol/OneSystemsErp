@@ -44,7 +44,8 @@ const router = Router();
 // Maps to /hikvisionDeviceService/getHikvisionDevices
 router.post('/getHikvisionDevices', async (req, res) => {
   try {
-    const { userId } = req.body; // userId is passed from the Next.js proxy for permission checking
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     await requirePermission(userId, 'EQUIPMENT', 'canView');
     
     const devices = await prisma.hikvisionDevice.findMany({
@@ -71,7 +72,9 @@ router.post('/getHikvisionDevices', async (req, res) => {
 // Maps to /hikvisionDeviceService/registerHikvisionDevice
 router.post('/registerHikvisionDevice', async (req, res) => {
   try {
-    const { userId, data } = req.body; // userId and original 'data' object are passed
+    const { data } = req.body; // userId and original 'data' object are passed
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     await requirePermission(userId, 'EQUIPMENT', 'canEdit');
 
     const {
@@ -122,7 +125,9 @@ router.post('/registerHikvisionDevice', async (req, res) => {
 // Maps to /hikvisionDeviceService/testDeviceConnection
 router.post('/testDeviceConnection', async (req, res) => {
   try {
-    const { userId, deviceId } = req.body; // userId and original 'deviceId' are passed
+    const { deviceId } = req.body; // userId and original 'deviceId' are passed
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
     await requirePermission(userId, 'EQUIPMENT', 'canView');
     
     const device = await prisma.hikvisionDevice.findUnique({ where: { id: deviceId } });

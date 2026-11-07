@@ -3,7 +3,26 @@ import Link from 'next/link';
 import { ShieldAlert, Activity, Eye, Search } from 'lucide-react';
 
 export default async function ProjectAuditTrailTab({ projectId }: { projectId: string }) {
+  // AuditLog has no projectId column: scope to logs about this project or its own records.
+  const byProject = { where: { projectId }, select: { id: true } } as const;
+  const related = await Promise.all([
+    prisma.materialRequest.findMany(byProject),
+    prisma.billing.findMany(byProject),
+    prisma.variationOrder.findMany(byProject),
+    prisma.jobOrder.findMany(byProject),
+    prisma.subcontractPackage.findMany(byProject),
+    prisma.accomplishment.findMany(byProject),
+  ]);
+  const transactionIds = [projectId, ...related.flat().map((r) => r.id)];
+
   const auditLogs = await prisma.auditLog.findMany({
+    where: {
+      OR: [
+        { transactionId: { in: transactionIds } },
+        { newValue: { contains: projectId } },
+        { oldValue: { contains: projectId } },
+      ],
+    },
     include: {
       user: { select: { name: true, role: true } }
     },

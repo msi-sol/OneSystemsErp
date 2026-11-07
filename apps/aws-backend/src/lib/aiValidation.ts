@@ -1,11 +1,8 @@
 import { prisma } from './prisma';
 import { PrismaClient } from '@prisma/client';
 import { generateText } from 'ai';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
+// AI runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default); previously Gemini.
+import { openAIModel, generateOpenAIText } from '../../../../src/lib/ai/openai-model';
 
 export async function validateTransactionWithAI(
   moduleName: string,
@@ -78,7 +75,7 @@ Otherwise, return PASSED.
 `;
 
     const result = await generateText({
-      model: google('gemini-2.5-flash'),
+      model: openAIModel(),
       prompt
     });
 
@@ -154,20 +151,10 @@ Return EXACTLY the following JSON format:
   "findings": "Explanation of the matches or the specific mismatches found."
 }`;
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-    const result = await model.generateContent([
+    const responseText = await generateOpenAIText({
       prompt,
-      {
-        inlineData: {
-          data: fileBuffer.toString("base64"),
-          mimeType: mimeType
-        }
-      }
-    ]);
-
-    const responseText = result.response.text();
+      file: { base64: fileBuffer.toString('base64'), mediaType: mimeType, filename: 'delivery-receipt' },
+    });
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
        return JSON.parse(jsonMatch[0]);

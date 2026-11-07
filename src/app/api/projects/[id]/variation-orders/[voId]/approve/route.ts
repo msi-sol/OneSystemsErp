@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionActor, checkSchedulingAccess } from '@/lib/scheduling/authUtils';
+import { hasPermission } from '@/lib/permissions';
 
 export async function POST(
   req: NextRequest,
@@ -7,6 +9,19 @@ export async function POST(
 ) {
   try {
     const { id: projectId, voId } = await params;
+
+    // Final VO approval changes the contract amount and BOQ, so it must be an authorized approver.
+    const actor = await getSessionActor().catch(() => null);
+    if (!actor) {
+      return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+    }
+    const [canApprove, projectAccess] = await Promise.all([
+      hasPermission(actor.id, 'VARIATION_ORDERS', 'canApprove'),
+      checkSchedulingAccess(actor.id, actor.role, projectId, 'canView'),
+    ]);
+    if (!canApprove || !projectAccess.allowed) {
+      return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
+    }
 
     // Fetch the VO with its items
     const variationOrder = await prisma.variationOrder.findUnique({
@@ -24,6 +39,10 @@ export async function POST(
 
     if (variationOrder.projectId !== projectId) {
       return NextResponse.json({ error: 'Variation Order does not belong to this project' }, { status: 400 });
+    }
+
+    if (variationOrder.currentStatus !== 'FOR_PD_APPROVAL') {
+      return NextResponse.json({ error: 'Variation Order must complete all review stages before final approval' }, { status: 409 });
     }
 
     // Begin a transaction to update VO, BOQ Items, and Project
@@ -131,31 +150,21 @@ export async function POST(
         });
       }
 
-      // 3. Update Project
-      // Update revisedCompletionDate if days were requested
+      // 3. Update Project: the contract amount always changes; dates only when days were requested
+      // and there is an end date to extend (previously a null endDate also skipped the amount).
+      const projectUpdate: Record<string, unknown> = {
+        contractAmount: { increment: variationOrder.netVariationAmount },
+      };
       if (variationOrder.additionalCalendarDaysRequested > 0) {
         const project = await tx.project.findUnique({ where: { id: projectId } });
         if (project && project.endDate) {
           const newEndDate = new Date(project.endDate);
           newEndDate.setDate(newEndDate.getDate() + variationOrder.additionalCalendarDaysRequested);
-          
-          await tx.project.update({
-            where: { id: projectId },
-            data: {
-              revisedCompletionDate: newEndDate,
-              endDate: newEndDate, // Update endDate as well for scheduling logic
-              contractAmount: { increment: variationOrder.netVariationAmount },
-            },
-          });
+          projectUpdate.revisedCompletionDate = newEndDate;
+          projectUpdate.endDate = newEndDate; // Update endDate as well for scheduling logic
         }
-      } else {
-        await tx.project.update({
-          where: { id: projectId },
-          data: {
-            contractAmount: { increment: variationOrder.netVariationAmount },
-          },
-        });
       }
+      await tx.project.update({ where: { id: projectId }, data: projectUpdate });
     }, {
       maxWait: 5000,
       timeout: 30000

@@ -4,6 +4,9 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/prisma';
 import { authConfig } from './auth.config';
 
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
+
 // Module augmentation to add custom fields to NextAuth Session
 declare module 'next-auth' {
   interface User {
@@ -55,38 +58,43 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where: { email: { equals: email } },
         });
 
-        console.log("LOGIN ATTEMPT:", email, "Found user:", !!user);
-
         if (!user) {
           return null;
         }
 
         if (user.status !== 'ACTIVE') {
-          console.log("LOGIN FAILED: NOT ACTIVE");
           return null;
         }
 
         if (user.lockedUntil && user.lockedUntil > new Date()) {
-          console.log("LOGIN FAILED: LOCKED");
           return null;
         }
 
         const isValid = await bcrypt.compare(password, user.passwordHash || '');
-        console.log("LOGIN FAILED? Password valid:", isValid);
         if (!isValid) {
-          // Increment failed login attempts
-          await prisma.user.update({
+          // Count consecutive failures and lock the account once the limit is reached
+          // (lockedUntil was checked everywhere but never set, so guessing was unlimited).
+          // A completed password reset clears the lock.
+          const updated = await prisma.user.update({
             where: { id: user.id },
             data: { failedLoginAttempts: { increment: 1 } },
+            select: { failedLoginAttempts: true },
           });
+          if ((updated.failedLoginAttempts || 0) >= MAX_FAILED_LOGIN_ATTEMPTS) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { lockedUntil: new Date(Date.now() + LOGIN_LOCKOUT_MS), failedLoginAttempts: 0 },
+            });
+            console.warn(`Account locked after ${MAX_FAILED_LOGIN_ATTEMPTS} failed logins: user ${user.id}`);
+          }
           return null;
         }
 
-        // On success, reset failed login attempts
-        if ((user.failedLoginAttempts || 0) > 0) {
+        // On success, reset failed login attempts and any expired lock
+        if ((user.failedLoginAttempts || 0) > 0 || user.lockedUntil) {
           await prisma.user.update({
             where: { id: user.id },
-            data: { failedLoginAttempts: 0 },
+            data: { failedLoginAttempts: 0, lockedUntil: null },
           });
         }
 

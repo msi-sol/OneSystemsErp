@@ -2,9 +2,17 @@ import React from "react";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import AccomplishmentForm from "./AccomplishmentForm";
+import { notFound, redirect } from "next/navigation";
+import { verifySession } from "@/lib/dal/auth";
+import { checkSchedulingAccess } from "@/lib/scheduling/authUtils";
 
 export default async function NewAccomplishmentPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
+
+  const actor = await verifySession();
+  if (!actor) redirect('/login');
+  const access = await checkSchedulingAccess(actor.id, actor.role, projectId, 'canView');
+  if (!access.allowed) notFound();
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -26,9 +34,10 @@ export default async function NewAccomplishmentPage({ params }: { params: Promis
     itemCode: item.itemCode,
     description: item.description,
     unit: item.unit,
-    contractQuantity: item.quantity,
+    // Same basis the server uses when saving (revised values after approved variation orders).
+    contractQuantity: item.revisedContractQuantity || item.quantity,
     previousQuantity: item.totalQuantityAccomplished,
-    unitCost: (item as any).unitCost || (item as any).combinedUnitCost || 0, // Fallbacks
+    unitCost: item.revisedContractUnitPrice || item.combinedUnitCost || 0,
   }));
 
   return (
@@ -38,7 +47,7 @@ export default async function NewAccomplishmentPage({ params }: { params: Promis
           <div className="flex items-center space-x-2 text-sm text-gray-500 mb-2">
             <Link href="/accomplishments" className="hover:text-blue-600">Accomplishments</Link>
             <span>/</span>
-            <span className="text-gray-900">{project.name}</span>
+            <span className="text-gray-200">{project.name}</span>
           </div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Record Accomplishment</h1>
         </div>

@@ -6,12 +6,14 @@ import { useRouter } from 'next/navigation';
 import { encodeDeliveryWithFile } from '@/app/actions/deliveryActions';
 import { submitAIOverrideRequest } from '@/app/actions/aiOverrideActions';
 import { calculatePoReceiptProgress } from '@/lib/procurement/po-receipt-progress';
+import { groupPoReceivingItems } from '@/lib/procurement/po-receipt-cost';
 import styles from '../../projects/page.module.css';
 
-export default function LogDeliveryForm({ purchaseOrders }: { purchaseOrders: any[] }) {
+export default function LogDeliveryForm({ purchaseOrders, initialPoId = '' }: { purchaseOrders: any[]; initialPoId?: string }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [selectedPoId, setSelectedPoId] = useState('');
+  // Preselected when opened from a PO's "Receive delivery" link.
+  const [selectedPoId, setSelectedPoId] = useState(initialPoId);
   const [receiptNumber, setReceiptNumber] = useState('');
   const [drFile, setDrFile] = useState<File | null>(null);
   const [isNoFile, setIsNoFile] = useState(false);
@@ -27,8 +29,9 @@ export default function LogDeliveryForm({ purchaseOrders }: { purchaseOrders: an
   const [overrideSuccess, setOverrideSuccess] = useState(false);
 
   const selectedPo = purchaseOrders.find(po => po.id === selectedPoId);
+  const receivingItems = selectedPo ? groupPoReceivingItems(selectedPo.items) : [];
   const receiptProgress = selectedPo
-    ? calculatePoReceiptProgress(selectedPo.items, selectedPo.deliveries || [])
+    ? calculatePoReceiptProgress(receivingItems, selectedPo.deliveries || [])
     : null;
 
   const handleDrQtyChange = (itemId: string, val: string) => {
@@ -219,7 +222,7 @@ export default function LogDeliveryForm({ purchaseOrders }: { purchaseOrders: an
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedPo.items.map((item: any) => {
+                  {receivingItems.map((item: any) => {
                     const ordered = item.quantity;
                     const remaining = receiptProgress?.remainingByOrderItemId.get(item.id) || 0;
                     const isDone = remaining === 0;

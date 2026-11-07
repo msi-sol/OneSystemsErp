@@ -35,9 +35,12 @@ export default async function Home() {
 
   // Respect simulated role
   const simulatedRole = cookieStore.get('simulatedRole')?.value;
-  const effectiveRole = (simulatedRole && (primaryRole === 'SUPER_ADMIN' || primaryRole === 'ADMIN' || primaryRole === 'PROJECT_DIRECTOR' || primaryRole === 'DIRECTORS')) 
-    ? simulatedRole 
+  // Same simulation rule as getUserPermissions (lib/permissions.ts), so the dashboard matches the sidebar and permissions.
+  const effectiveRole = (simulatedRole && (primaryRole === 'SUPER_ADMIN' || primaryRole === 'SYSTEM_ADMIN' || primaryRole === 'ADMIN' || primaryRole === 'PROJECT_DIRECTOR' || primaryRole === 'DIRECTORS'))
+    ? simulatedRole
     : primaryRole;
+  // The dashboard's role list has no SYSTEM_ADMIN entry; it shares the System Admin view.
+  const dashboardRole = effectiveRole === 'SYSTEM_ADMIN' ? 'SUPER_ADMIN' : effectiveRole;
 
   if (primaryRole === 'DIRECTORS' && !simulatedRole) {
     redirect('/executive/home');
@@ -45,6 +48,6 @@ export default async function Home() {
 
 
   return (
-    <RoleDashboardClient stats={stats} isSystemAdmin={isSystemAdmin} initialRole={primaryRole} />
+    <RoleDashboardClient stats={stats} isSystemAdmin={isSystemAdmin} initialRole={dashboardRole} />
   );
 }

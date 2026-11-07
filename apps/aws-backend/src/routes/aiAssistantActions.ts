@@ -3,7 +3,8 @@ import { prisma } from '../lib/prisma';
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { generateText } from 'ai';
-import { google } from '@ai-sdk/google';
+// AI runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default); previously Gemini.
+import { openAIModel } from '../../../../src/lib/ai/openai-model';
 
 const router = Router();
 
@@ -53,10 +54,10 @@ ${knowledgeContext}
 `;
 
     const { text } = await generateText({
-      model: google('gemini-2.5-flash'),
+      model: openAIModel(),
       system: systemPrompt,
       prompt: question,
-      temperature: 0.2, // Low temperature for factual rule-based answers
+      // No temperature: the configured OpenAI model may be a reasoning model that rejects it (the upload helper omits it too).
     });
 
     res.json({ success: true, answer: text });

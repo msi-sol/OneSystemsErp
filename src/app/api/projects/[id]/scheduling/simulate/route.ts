@@ -26,7 +26,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'FORBIDDEN_PROJECT_ACCESS' }, { status: 403 });
     }
 
-    const body = await req.json();
+    // The timeline editor triggers a resimulation with no body; treat that as defaults.
+    const body = await req.json().catch(() => ({}));
     const idempotencyKey = body.idempotencyKey;
     const lockedBOQVersionId = body.lockedBOQVersionId;
     
@@ -54,7 +55,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // 3. Locked BOQ Validation
     const activeVersion = await prisma.projectBOQVersion.findFirst({
-        where: { projectId, status: 'LOCKED' }
+        // The current draft workflow approves BOQs as APPROVED; legacy locks used LOCKED.
+        where: { projectId, status: { in: ['APPROVED', 'LOCKED'] } },
+        orderBy: { versionNumber: 'desc' }
     });
     
     if (!activeVersion) {

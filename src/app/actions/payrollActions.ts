@@ -26,7 +26,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   if (!res.ok) {
     const errorText = await res.text();
     if (res.status === 400 && errorText.includes('AI Blocked')) {
-      return res.json(); // Pass the validation block to frontend
+      return JSON.parse(errorText); // Pass the validation block to frontend (body already read above)
     }
     throw new Error(`Backend Error: ${res.status} ${errorText}`);
   }

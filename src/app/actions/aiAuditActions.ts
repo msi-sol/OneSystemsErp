@@ -1,8 +1,12 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
+import { getAuditViewer } from '@/lib/audit-access';
+
+// These are server actions (callable by any signed-in client), so each one checks audit access itself.
 
 export async function getAIAuditLogs(filter?: string) {
+  if (!(await getAuditViewer())) return [];
   try {
     const whereClause: any = {};
     if (filter === 'BLOCKED') {
@@ -29,6 +33,7 @@ export async function getAIAuditLogs(filter?: string) {
 }
 
 export async function getAIAuditMetrics() {
+  if (!(await getAuditViewer())) return { total: 0, blocked: 0, warnings: 0 };
   try {
     const [total, blocked, warnings] = await Promise.all([
       prisma.aITransactionValidation.count(),
@@ -44,6 +49,7 @@ export async function getAIAuditMetrics() {
 }
 
 export async function getChatbotAuditLogs() {
+  if (!(await getAuditViewer())) return [];
   try {
     const logs = await prisma.aiAccessAuditLog.findMany({
       orderBy: { createdAt: 'desc' },

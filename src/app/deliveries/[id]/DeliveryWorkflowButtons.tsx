@@ -13,26 +13,28 @@ export default function DeliveryWorkflowButtons({
 }: { 
   deliveryId: string; 
   status: string; 
-  permissions: Record<string, any>; 
+  permissions: Record<string, unknown>;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState('');
+  // In-page two-step confirmation (like the other approval screens) instead of a browser confirm() pop-up.
+  const [confirming, setConfirming] = useState(false);
 
   const handleApprove = () => {
-    if (!confirm('Are you sure you want to approve this delivery? This will officially record the delivered quantities.')) return;
-    
+    if (!confirming) { setConfirming(true); return; }
+    setConfirming(false);
     setError('');
     startTransition(async () => {
       try {
-        const res = await approveDelivery(deliveryId) as any;
+        const res = await approveDelivery(deliveryId) as { success?: boolean; error?: string };
         if (res.success) {
           router.refresh();
         } else {
           setError(res.error || 'Failed to approve delivery.');
         }
-      } catch (err: any) {
-        setError(err.message || 'Failed to approve delivery.');
+      } catch (err: unknown) {
+        setError(err instanceof Error && err.message ? err.message : 'Failed to approve delivery.');
       }
     });
   };
@@ -51,9 +53,11 @@ export default function DeliveryWorkflowButtons({
             opacity: isPending ? 0.7 : 1 
           }}
         >
-          {isPending ? 'Approving...' : '✓ Approve Delivery'}
+          {isPending ? 'Approving...' : confirming ? '✓ Confirm approval' : '✓ Approve Delivery'}
         </button>
+        {confirming && <button type="button" onClick={() => setConfirming(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>Cancel</button>}
       </PermissionGuard>
+      {confirming && <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', maxWidth: 360, textAlign: 'right' }}>Approving officially records the delivered quantities.</div>}
       {error && <div style={{ color: '#ef4444', fontSize: '0.9rem' }}>{error}</div>}
     </div>
   );

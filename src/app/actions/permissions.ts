@@ -5,7 +5,8 @@ import { verifySession } from '@/lib/dal/auth';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { generateText } from 'ai';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
+// AI runs on OpenAI (OPENAI_API_KEY, gpt-6-luna by default); previously Gemini.
+import { openAIModel } from '@/lib/ai/openai-model';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies();
@@ -46,10 +47,6 @@ export async function saveRolePermission(roleId: string, moduleId: string, field
   return { success: true };
 }
 
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
-
 export async function summarizeRolePermissions(roleName: string, permissions: any[]) {
   try {
     const activePerms = permissions.map(p => {
@@ -81,10 +78,10 @@ Do not just list the modules. Synthesize the permissions into a summary of their
 `;
 
     const { text } = await generateText({
-      model: google('gemini-2.5-flash'),
+      model: openAIModel(),
       system: systemPrompt,
       prompt: `Role: ${roleName}\n\nPermissions:\n${activePerms}`,
-      temperature: 0.2,
+      // No temperature: the configured OpenAI model may be a reasoning model that rejects it.
     });
 
     return { success: true, summary: text };

@@ -2,12 +2,15 @@ import { prisma } from '@/lib/prisma';
 import NewMRFForm from './NewMRFForm';
 import Link from 'next/link';
 import PackageMaterialRequestForm from './PackageMaterialRequestForm';
+import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
 export default async function NewMRFPage({ searchParams }: { searchParams: Promise<{ projectId?: string }> }) {
   const params = await searchParams;
-  const projectId = params?.projectId;
+  // Fall back to the header's active project, like the stock and issuance pages, instead of asking again.
+  // This adds no access: the same id could already be passed in the URL, and the request actions check project access.
+  const projectId = params?.projectId || (await cookies()).get('activeProjectId')?.value;
 
   if (!projectId) {
     return (
@@ -53,7 +56,7 @@ export default async function NewMRFPage({ searchParams }: { searchParams: Promi
 
   const schedule = generatedMaterials > 0 ? await prisma.projectSchedule.findFirst({
     where: { projectId, workflowStatus: 'ACTIVE_BASELINE' }, orderBy: { activatedAt: 'desc' },
-    select: { activities: { select: { id: true, name: true }, orderBy: { activityCode: 'asc' } } },
+    select: { activities: { select: { id: true, name: true, activityCode: true }, orderBy: { activityCode: 'asc' } } },
   }) : null;
 
   return (

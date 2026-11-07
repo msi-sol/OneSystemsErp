@@ -59,7 +59,11 @@ describe('Super Admin Recovery Integration', () => {
   it('2. No token is created when email is unavailable', async () => {
     (PasswordRecoveryMailer.isConfigured as jest.Mock).mockReturnValueOnce(false);
     const res = await requestPasswordReset('superadmin_test@onesystemserp.com');
-    expect(res.code).toBe('SUPER_ADMIN_RECOVERY_EMAIL_PROVIDER_CONFIGURATION_REQUIRED');
+    // Same generic response as a nonexistent account (no account enumeration); the gap is audit-logged instead.
+    const nonexistent = await requestPasswordReset('nonexistent@onesystemserp.com');
+    expect(res).toEqual(nonexistent);
+    const audit = await prisma.auditLog.findFirst({ where: { actionType: 'PASSWORD_RECOVERY_EMAIL_CONFIGURATION_MISSING' } });
+    expect(audit).not.toBeNull();
     const tokens = await prisma.passwordRecoveryToken.findMany();
     expect(tokens.length).toBe(0);
   });

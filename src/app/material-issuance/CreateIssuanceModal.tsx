@@ -1,4 +1,5 @@
 'use client';
+import { materialStock } from '@/lib/procurement/material-values';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -11,7 +12,8 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
   const [loading, setLoading] = useState(false);
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState('');
-  const [projectId, setProjectId] = useState('');
+  // With a single project (the header's active project) there is nothing to choose, so preselect it.
+  const [projectId, setProjectId] = useState(projects.length === 1 ? projects[0].id : '');
   const [foremanId, setForemanId] = useState('');
   const [activity, setActivity] = useState('');
   const [items, setItems] = useState<any[]>([{ consolidatedBoqItemId: '', requestedQty: 1 }]);
@@ -63,7 +65,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
   const getAvailableQty = (boqItemId: string) => {
     const boq = boqItems.find(b => b.id === boqItemId);
     if (!boq) return 0;
-    return boq.deliveredQty - boq.consumedQty;
+    return materialStock(boq);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -363,7 +365,7 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                 {/* Rows */}
                 {items.map((item, index) => {
                   const boqItem = boqItems.find(b => b.id === item.consolidatedBoqItemId);
-                  const available = boqItem ? (boqItem.deliveredQty - boqItem.consumedQty) : 0;
+                  const available = boqItem ? materialStock(boqItem) : 0;
                   const unit = boqItem ? boqItem.unit : '';
 
                   return (
@@ -381,8 +383,9 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                     onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
                     onMouseOut={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
                     >
-                      <select 
-                        value={item.consolidatedBoqItemId} 
+                      <select
+                        aria-label={`Material for row ${index + 1}`}
+                        value={item.consolidatedBoqItemId}
                         onChange={(e) => updateItem(index, 'consolidatedBoqItemId', e.target.value)}
                         required
                         style={{
@@ -399,11 +402,12 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                       >
                         <option value="" disabled>Select from available inventory...</option>
                         {boqItems.map(b => {
-                          const stock = b.deliveredQty - b.consumedQty;
+                          const stock = materialStock(b);
                           const isSelectedElsewhere = items.some((it, i) => i !== index && it.consolidatedBoqItemId === b.id);
                           return (
                             <option key={b.id} value={b.id} disabled={isSelectedElsewhere}>
-                              [{b.category || 'N/A'}] {b.description} {isSelectedElsewhere ? '(Already Added)' : ''}
+                              {/* Category prefix only when there is one (no "[N/A]" noise), plus stock so users can pick without guessing. */}
+                              {b.category ? `[${b.category}] ` : ''}{b.description} · {stock.toLocaleString()} {b.unit} in stock {isSelectedElsewhere ? '(Already Added)' : ''}
                             </option>
                           );
                         })}
@@ -427,10 +431,13 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                       </div>
 
                       <div style={{ position: 'relative' }}>
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
+                          aria-label={`Requested quantity for row ${index + 1}`}
+                          min="0"
+                          max={item.consolidatedBoqItemId ? available : undefined}
                           step="any"
-                          value={item.requestedQty} 
+                          value={item.requestedQty}
                           onChange={(e) => updateItem(index, 'requestedQty', parseFloat(e.target.value) || 0)} 
                           required 
                           style={{

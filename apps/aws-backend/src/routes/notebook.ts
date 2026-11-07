@@ -9,7 +9,10 @@ const router = Router();
 
 router.post('/uploadReferenceFile', async (req, res) => {
   try {
-    const { userId, userRole, fileName, fileType, fileUrl, referenceCategory, projectAssignment, moduleAssignment } = req.body;
+    const { fileName, fileType, fileUrl, referenceCategory, projectAssignment, moduleAssignment } = req.body;
+    const userRole = (req as any).user?.role as string | undefined;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     // Enforce access control - wait, user must have "Upload Attachment" or "Create" permission for AI Notebook Reference Center
     // Since we haven't mapped this exact action name in UI perfectly, we'll check 'canCreate' on the module
@@ -50,7 +53,9 @@ router.post('/getReferenceFiles', async (req, res) => {
 
 router.post('/updateReferenceStatus', async (req, res) => {
   try {
-    const { fileId, userId, newStatus, isMandatory = false } = req.body;
+    const { fileId, newStatus, isMandatory = false } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     // Requires Approval rights to make a file ACTIVE or APPROVED
     if (['APPROVED', 'ACTIVE_REFERENCE'].includes(newStatus)) {

@@ -6,7 +6,9 @@ const router = Router();
 
 router.post('/createPayrollAccount', async (req, res) => {
   try {
-    const { data, userId } = req.body;
+    const { data } = req.body;
+    // Acting user comes from the verified backend token (auth middleware), never from the client body.
+    const userId = req.body.sessionId as string;
 
     // Validate input if necessary
     if (!data || !userId) {
