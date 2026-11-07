@@ -128,7 +128,7 @@ export async function attachWorkPackageBreakdown(args: {
   if (!capacity.canEditPlan) fail('PLANNING_EDIT_PERMISSION_REQUIRED', 403);
   const expected = expectedVersion(args.expectedRowVersion);
   if (!args.fileName || args.fileName.length > 191) fail('Use a workbook filename of at most 191 characters.');
-  if (/\.(pdf|docx)$/i.test(args.fileName) && !args.documentToken) fail('Analyze the DUPA document before preserving it.');
+  if (/\.(pdf|docx|txt|png|jpe?g|webp)$/i.test(args.fileName) && !args.documentToken) fail('Analyze the DUPA document before preserving it.');
   const { analysis, items } = await parseWorkspaceWorkbook({ buffer: args.buffer, fileName: args.fileName, selectedSheet: args.selectedSheet, mapping: args.mapping,
     documentToken: args.documentToken, documentContext: `dupa:${args.actor.id}:${args.projectId}:${args.scheduleId}:${args.activityId}` });
   if (analysis.fileHash !== args.fileHash) conflict('The workbook changed. Analyze it again before preserving the breakdown.');

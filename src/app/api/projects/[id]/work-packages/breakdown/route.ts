@@ -24,7 +24,7 @@ export async function POST(request: Request, { params }: Context) {
     if (Number(request.headers.get('content-length')) > MAX_WORKSPACE_FILE_BYTES + 2 * 1024 * 1024) throw new WorkspaceError('The document request is too large.', 400);
     const form = await request.formData();
     const file = form.get('file');
-    if (!file || typeof file === 'string' || !/\.(xlsx|pdf|docx)$/i.test(file.name) || file.size <= 0 || file.size > MAX_WORKSPACE_FILE_BYTES) throw new WorkspaceError('Choose a nonempty Excel (.xlsx), PDF, or Word (.docx) document, up to 10 MiB.', 400);
+    if (!file || typeof file === 'string' || !/\.(xlsx|xls|csv|tsv|pdf|docx|txt|png|jpe?g|webp)$/i.test(file.name) || file.size <= 0 || file.size > MAX_WORKSPACE_FILE_BYTES) throw new WorkspaceError('Choose a supported Excel, delimited text, PDF, Word, text or PNG/JPEG/WEBP source, up to 10 MiB.', 400);
     const text = (key: string) => { const value = form.get(key); if (value !== null && typeof value !== 'string') throw new WorkspaceError(`Invalid ${key}.`, 400); return typeof value === 'string' ? value.trim() : ''; };
     const scheduleId = text('scheduleId'), activityId = text('activityId');
     const schedule = await prisma.projectSchedule.findFirst({ where: { id: scheduleId, projectId }, select: { workflowStatus: true, generationRulesVersion: true, activities: { where: { id: activityId }, select: { id: true } } } });

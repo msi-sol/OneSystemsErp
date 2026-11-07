@@ -333,9 +333,9 @@ export default function BenchmarkReviewClient({ projectId }: { projectId: string
 
       {(!data.project.boqLocked || !data.approvedScheduleId) && <section className={styles.panel}><h2>Complete the project baseline first</h2><p>You may preserve and review a benchmark draft now. Approval needs an approved BOQ and an approved Work Package Schedule before package assignments become available.</p><div className={styles.actions}><Link href={`/projects/${projectId}/boq`}>Open BOQ review →</Link><Link href={`/projects/${projectId}/work-packages`}>Open Work Package Schedule →</Link></div></section>}
 
-      {(!review || review.status === 'DRAFT') && data.canEdit && <section className={styles.panel}><div className={styles.panelHeading}><div><p className={styles.eyebrow}>SOURCE</p><h2>{review ? 'Saved benchmark source' : 'Analyze benchmark source'}</h2><p>Supported files: .xlsx, .pdf, .docx. Review all extracted rows and column mapping before saving.</p></div></div>
+      {(!review || review.status === 'DRAFT') && data.canEdit && <section className={styles.panel}><div className={styles.panelHeading}><div><p className={styles.eyebrow}>SOURCE</p><h2>{review ? 'Saved benchmark source' : 'Analyze benchmark source'}</h2><p>Supported files: Excel (.xlsx/.xls), CSV/TSV, PDF, Word (.docx), text (.txt), PNG, JPEG and WEBP. Review all extracted rows and column mapping before saving.</p></div></div>
 
-        {!review && data.legacyItemCount === 0 && <div className={styles.upload}><label>Benchmark file<input type="file" accept=".xlsx,.pdf,.docx" onChange={chooseFile}/></label><button disabled={!file || busy} onClick={() => analyze('analyze')}>{busy ? 'Analyzing…' : 'Analyze file'}</button>{file && <span>{file.name}</span>}</div>}
+        {!review && data.legacyItemCount === 0 && <div className={styles.upload}><label>Benchmark file<input type="file" accept=".xlsx,.xls,.csv,.tsv,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" onChange={chooseFile}/></label><button disabled={!file || busy} onClick={() => analyze('analyze')}>{busy ? 'Analyzing…' : 'Analyze file'}</button>{file && <span>{file.name}</span>}</div>}
 
         {!review && data.legacyItemCount > 0 && <p className={styles.finding}>Existing legacy benchmark rows are retained. New source intake is unavailable while those records remain; use the existing procurement benchmark workflow.</p>}
 

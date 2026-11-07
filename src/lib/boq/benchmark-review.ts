@@ -189,7 +189,7 @@ export async function analyzeBenchmark(actor: Actor, projectId: string, input: {
 }
 export async function saveBenchmarkSource(actor: Actor, projectId: string, input: { buffer: Buffer; fileName: string; fileHash: string; selectedSheet: string; mapping: WorkspaceMapping; documentToken?: string | null; expectedRevision: unknown; nonPricedRows?: NonPricedSourceRow[] }) {
   if (!(await capacities(actor, projectId)).canEdit) fail('Project editing permission is required.', 403);
-  if (/\.(pdf|docx)$/i.test(input.fileName) && !input.documentToken) fail('Analyze the document before saving it.');
+  if (/\.(pdf|docx|txt|png|jpe?g|webp)$/i.test(input.fileName) && !input.documentToken) fail('Analyze the document before saving it.');
   const parsed = await analyzeBenchmark(actor, projectId, input);
   if (parsed.analysis.fileHash !== input.fileHash) fail('The source changed. Analyze it again.', 409);
   if (parsed.analysis.errors.length || !parsed.rows.length) fail(parsed.analysis.errors[0]?.message || 'No valid benchmark rows were read.');

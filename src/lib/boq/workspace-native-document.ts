@@ -1,4 +1,3 @@
-import { PDFParse } from 'pdf-parse';
 import { SaxesParser } from 'saxes';
 import { inspectWorkspaceArchive } from './workspace-parser';
 import { WorkspaceError } from './workspace-types';
@@ -220,6 +219,15 @@ async function readWordTables(buffer: Buffer): Promise<{ tables: ParsedTable[]; 
 
 async function readPdfTables(buffer: Buffer): Promise<{ tables: ParsedTable[]; text: string }> {
   if (!buffer.subarray(0, 1024).includes(Buffer.from('%PDF-'))) fail('The selected file is not a valid PDF.');
+  // PDF.js loads native graphics at module evaluation. Keep it isolated so a
+  // missing PDF runtime cannot crash Excel/Word intake before the route runs.
+  let PDFParse: typeof import('pdf-parse')['PDFParse'];
+  try {
+    ({ PDFParse } = await import('pdf-parse'));
+  } catch {
+    console.warn('Built-in PDF reader is unavailable; using the upload helper.');
+    return { tables: [], text: '' };
+  }
   const parser = new PDFParse({ data: buffer, stopAtErrors: true, isEvalSupported: false });
   try {
     const info = await parser.getInfo();

@@ -305,18 +305,64 @@ function normalizeSpreadsheetMlPrefixes(xml: string): string {
     cursor = tagEnd + 1;
   }
   if (openIndex !== opens.length || closeIndex !== closes.length) return failStructure();
-  for (const replacement of replacements.reverse()) {
-    xml = xml.slice(0, replacement.start) + replacement.value + xml.slice(replacement.end);
+  if (!replacements.length) return xml;
+  // Rebuilding the entire XML string per tag is quadratic and can exhaust a
+  // production Node heap on small workbooks with many namespace-prefixed tags.
+  const chunks: string[] = [];
+  let copied = 0;
+  for (const replacement of replacements) {
+    chunks.push(xml.slice(copied, replacement.start), replacement.value);
+    copied = replacement.end;
   }
-  return xml;
+  chunks.push(xml.slice(copied));
+  return chunks.join('');
+}
+
+function withoutWorkbookHistory(xml: string): string {
+  const parser = new SaxesParser({ xmlns: true });
+  const spans: { start: number; end: number }[] = [];
+  let depth = 0, skippedDepth = -1, start = 0;
+  parser.on('opentag', tag => {
+    depth += 1;
+    if (depth === 2 && tag.uri === SPREADSHEETML_NAMESPACE && ['definedNames', 'externalReferences'].includes(tag.local)) {
+      start = xml.lastIndexOf('<', parser.position - 1);
+      skippedDepth = depth;
+    }
+  });
+  parser.on('closetag', () => {
+    if (depth === skippedDepth) {
+      spans.push({ start, end: parser.position });
+      skippedDepth = -1;
+    }
+    depth -= 1;
+  });
+  // The namespace normalizer has already validated the full source XML.
+  parser.write(xml).close();
+  let copied = 0;
+  const chunks: string[] = [];
+  for (const span of spans) { chunks.push(xml.slice(copied, span.start)); copied = span.end; }
+  chunks.push(xml.slice(copied));
+  return chunks.join('');
 }
 
 async function analysisCopy(buffer: Buffer, archive: JSZip): Promise<Buffer> {
   let changed = false;
   for (const [path, entry] of Object.entries(archive.files)) {
+    // ExcelJS does not use external-workbook cache parts, but still inflates
+    // every ZIP entry. Exclude these caches only from the analysis copy; the
+    // original file, worksheet formulas and cached cell results remain intact.
+    if (path.startsWith('xl/externalLinks/')) {
+      archive.remove(path);
+      changed = true;
+      continue;
+    }
     if (entry.dir || !path.startsWith('xl/') || !path.endsWith('.xml') || path.split('/').includes('_rels')) continue;
     const xml = await entry.async('string');
-    const normalized = normalizeSpreadsheetMlPrefixes(xml);
+    let normalized = normalizeSpreadsheetMlPrefixes(xml);
+    // ExcelJS expands defined names into individual cells, including stale
+    // external ranges with millions of references. Intake reads cached cells,
+    // not named ranges or print areas. Keep this metadata in the original only.
+    if (path === 'xl/workbook.xml') normalized = withoutWorkbookHistory(normalized);
     if (normalized !== xml) {
       archive.file(path, normalized);
       changed = true;
@@ -483,7 +529,7 @@ function validateMapping(mapping: WorkspaceMapping, columnCount: number, rowCoun
 }
 
 function suggestProjectName(fileName: string): string {
-  const base = fileName.replace(/\.xlsx$/i, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const base = fileName.replace(/\.(xlsx|xls|csv|tsv|pdf|docx|txt|png|jpe?g|webp)$/i, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
   return base.slice(0, 150) || 'New BOQ Project';
 }
 
@@ -555,8 +601,8 @@ async function parseWorkspaceWorkbookBuiltin(options: WorkspaceParseOptions): Pr
   if (options.nonPricedRows !== undefined && (!Array.isArray(options.nonPricedRows) || options.nonPricedRows.length > 100 || options.nonPricedRows.some(row => !row || !Number.isSafeInteger(row.rowNumber) || row.rowNumber < 1 || typeof row.reason !== 'string' || row.reason.trim().length < 5 || row.reason.length > 300) || new Set(options.nonPricedRows.map(row => row.rowNumber)).size !== options.nonPricedRows.length)) {
     throw new WorkspaceError('Each non-priced source row needs a unique row number and a reason of 5–300 characters.', 400);
   }
-  if (/\.(pdf|docx)$/i.test(fileName)) return parseWorkspaceDocument(options, parseWorkspaceWorkbook);
-  if (!/\.xlsx$/i.test(fileName)) throw new WorkspaceError('Only .xlsx workbooks are supported.', 400);
+  if (/\.(pdf|docx|txt|png|jpe?g|webp)$/i.test(fileName)) return parseWorkspaceDocument(options, parseWorkspaceWorkbook);
+  if (!/\.(xlsx|xls|csv|tsv)$/i.test(fileName)) throw new WorkspaceError('Supported BOQ sources are .xlsx, .xls, .csv, .tsv, .pdf, .docx, .txt, .png, .jpg, .jpeg and .webp.', 400);
   if (!buffer.byteLength) throw new WorkspaceError('The workbook is empty.', 400);
   if (buffer.byteLength > MAX_WORKSPACE_FILE_BYTES) throw new WorkspaceError('The workbook must be 10 MiB or smaller.', 400);
   const archive = await inspectWorkspaceArchive(buffer);
@@ -913,8 +959,23 @@ const assistedMappingSchema = z.object({
   }).strict().nullable(),
 }).strict();
 
-export async function parseWorkspaceWorkbook(options: WorkspaceParseOptions): Promise<{ analysis: WorkspaceAnalysis; items: WorkspaceItem[] }> {
+export async function parseWorkspaceWorkbook(originalOptions: WorkspaceParseOptions): Promise<{ analysis: WorkspaceAnalysis; items: WorkspaceItem[] }> {
+  const originalName = originalOptions.fileName;
+  const originalHash = createHash('sha256').update(originalOptions.buffer).digest('hex');
+  let options = originalOptions;
+  if (/\.xls$/i.test(originalName)) {
+    const { convertLegacyXls } = await import('./workspace-format-conversion');
+    options = { ...originalOptions, buffer: await convertLegacyXls(originalOptions.buffer), fileName: originalName.replace(/\.xls$/i, '.xlsx') };
+  } else if (/\.(csv|tsv)$/i.test(originalName)) {
+    const { convertDelimitedWorkspaceFile } = await import('./workspace-format-conversion');
+    options = { ...originalOptions, buffer: await convertDelimitedWorkspaceFile(originalOptions.buffer, originalName), fileName: originalName.replace(/\.(csv|tsv)$/i, '.xlsx') };
+  }
   const parsed = await parseWorkspaceWorkbookBuiltin(options);
+  if (options !== originalOptions) {
+    parsed.analysis.fileName = originalName;
+    parsed.analysis.fileHash = originalHash;
+    parsed.analysis.suggestedProjectName = parsed.analysis.extractedProjectName || suggestProjectName(originalName);
+  }
   // Financial validation failures and explicit user mappings must remain visible.
   // AI helps identify an unfamiliar layout; it never replaces source values.
   const layoutFailed = parsed.analysis.errors.some(issue => issue.row === 'sheet' || issue.row === 'header');
@@ -950,6 +1011,11 @@ export async function parseWorkspaceWorkbook(options: WorkspaceParseOptions): Pr
     }
     const mapping = normalizeWorkspaceMapping(suggestion.mapping);
     const assisted = await parseWorkspaceWorkbookBuiltin({ ...options, selectedSheet: sheet.name, mapping });
+    if (options !== originalOptions) {
+      assisted.analysis.fileName = originalName;
+      assisted.analysis.fileHash = originalHash;
+      assisted.analysis.suggestedProjectName = assisted.analysis.extractedProjectName || suggestProjectName(originalName);
+    }
     assisted.analysis.readingMethod = 'openai-assisted';
     assisted.analysis.warnings.unshift({ row: 'header', field: 'OpenAI fallback', message: 'OpenAI helped identify the columns after the built-in reader could not recognize the layout. All rows and values were read from the original workbook by the system. Review the mapping before saving.' });
     return assisted;

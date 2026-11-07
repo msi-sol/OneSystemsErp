@@ -29,6 +29,27 @@ function addHeader(worksheet: ExcelJS.Worksheet) {
 }
 
 describe('BOQ workspace workbook parser', () => {
+  it('ignores external-workbook history caches while retaining original bytes and cached worksheet values', async () => {
+    const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet('BOQ');
+    addHeader(sheet);
+    sheet.addRow(['A-1', 'Cement', 'bag', 2, 35, { formula: "'[1]External'!A1", result: 70 }]);
+    const archive = await JSZip.loadAsync(await workbookBuffer(workbook));
+    const bookXml = await archive.file('xl/workbook.xml')!.async('string');
+    archive.file('xl/workbook.xml', bookXml.replace('</workbook>', '<definedNames><definedName name="StaleHistory">[1]External!$A$1:$Q$1048576</definedName></definedNames><externalReferences><externalReference r:id="rId999"/></externalReferences></workbook>'));
+    archive.file('xl/externalLinks/externalLink1.xml', `<x:externalLink xmlns:x="${SPREADSHEETML_NAMESPACE}">${'<x:sheetDataSet><x:sheetData sheetId="0"/></x:sheetDataSet>'.repeat(5000)}</x:externalLink>`);
+    const original = await archive.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    const retained = Buffer.from(original);
+    // Intercept the library boundary so a regression fails without allocating
+    // millions of named-range cells in the test runner itself.
+    const namedRanges = jest.spyOn(Object.getPrototypeOf(workbook.definedNames), 'model', 'set').mockImplementation(() => {});
+    try {
+      const result = await analyzeBOQWorkbook({ buffer: original, fileName: 'with-external-cache.xlsx' });
+      expect(result).toMatchObject({ itemCount: 1, total: '70.00', fileHash: createHash('sha256').update(retained).digest('hex'), errors: [] });
+      expect(namedRanges).toHaveBeenCalledWith([]);
+    } finally { namedRanges.mockRestore(); }
+    expect(original.equals(retained)).toBe(true);
+    expect((await JSZip.loadAsync(original)).file('xl/externalLinks/externalLink1.xml')).not.toBeNull();
+  });
   it('keeps identifiers intact and does not read a PROJECT table heading as metadata', async () => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('BOQ');

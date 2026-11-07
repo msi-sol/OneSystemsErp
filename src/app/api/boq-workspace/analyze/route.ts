@@ -16,11 +16,11 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get('file');
     if (!file || typeof file === 'string' || typeof file.arrayBuffer !== 'function') {
-      throw new WorkspaceError('Choose an .xlsx workbook to analyze.', 400);
+      throw new WorkspaceError('Choose a supported BOQ source to analyze.', 400);
     }
-    if (!file.name || !/\.(xlsx|pdf|docx)$/i.test(file.name)) throw new WorkspaceError('Choose Excel (.xlsx), PDF, or Word (.docx). Save older .xls/.doc files in a supported format.', 400);
+    if (!file.name || !/\.(xlsx|xls|csv|tsv|pdf|docx|txt|png|jpe?g|webp)$/i.test(file.name)) throw new WorkspaceError('Supported BOQ sources are .xlsx, .xls, .csv, .tsv, .pdf, .docx, .txt, .png, .jpg, .jpeg and .webp. Executable and archive files are not accepted.', 400);
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_WORKSPACE_FILE_BYTES) {
-      throw new WorkspaceError('The workbook must be between 1 byte and 10 MiB.', 400);
+      throw new WorkspaceError('The source file must be between 1 byte and 10 MiB.', 400);
     }
     const rawProjectId = form.get('projectId');
     if (rawProjectId !== null && typeof rawProjectId !== 'string') throw new WorkspaceError('Invalid target project.', 400);

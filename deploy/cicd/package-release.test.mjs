@@ -1,9 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { includeRuntimePath, releaseManifest, packageRelease, verifyAppRoutes } from './package-release.mjs';
+import { includeRuntimePath, releaseManifest, packageRelease, verifyAppRoutes, smokeRuntimeLibraries } from './package-release.mjs';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+test('packaging rejects the PDF native-runtime failure that previously crashed Excel upload routes', async () => {
+  const runtime = name => {
+    if (name === 'exceljs') return { Workbook: class {
+      xlsx = { writeBuffer: async () => Buffer.from([0x50, 0x4b, 0x03, 0x04]) };
+      addWorksheet() { return { getCell: () => ({ value: null }) }; }
+    } };
+    if (name === 'pdf-parse') throw new ReferenceError('DOMMatrix is not defined');
+    throw new Error(`Unexpected smoke dependency: ${name}`);
+  };
+  runtime.resolve = () => { const error = new Error('Optional PDFKit is bundled'); error.code = 'MODULE_NOT_FOUND'; throw error; };
+  await assert.rejects(smokeRuntimeLibraries(runtime), /DOMMatrix is not defined/);
+});
 
 test('runtime packaging excludes credentials, mutable uploads/cache and nonproduction engines', () => {
   for (const path of ['.next/standalone/.env', 'node_modules/foo/.env.production', 'public/uploads/a.xlsx', 'uploads/a', '.next/cache/foo', 'node_modules/.prisma/client/libquery_engine-debian-openssl-1.1.x.so.node', 'node_modules/@prisma/engines/schema-engine-darwin-arm64', 'node_modules/.prisma/client/query_engine-windows.dll.node']) assert.equal(includeRuntimePath(path), false, path);

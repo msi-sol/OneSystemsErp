@@ -73,9 +73,29 @@ export async function smokeRuntimeLibraries(runtimeRequire) {
     document.text('Packaging verification');
     document.end();
     await completed;
-    if (Buffer.concat(chunks).subarray(0, 5).toString() !== '%PDF-') throw new Error('Staged PDFKit font generation failed');
+    const pdf = Buffer.concat(chunks);
+    if (pdf.subarray(0, 5).toString() !== '%PDF-') throw new Error('Staged PDFKit font generation failed');
   }
-  console.log(`Runtime asset smoke checks passed: ExcelJS ZIP${pdfEntry ? ', PDFKit fonts/PDF' : ' (PDFKit is not a traced runtime import)'}`);
+  // Exercise PDF.js's native canvas and worker, even if PDFKit was bundled into
+  // Next rather than traced as an external package. This minimal PDF has a real xref.
+  const content = 'BT /F1 12 Tf 72 720 Td (Packaging verification) Tj ET';
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', `<< /Length ${content.length} >>\nstream\n${content}\nendstream`];
+  let source = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(source)); source += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+  const xref = Buffer.byteLength(source);
+  source += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => String(offset).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const { PDFParse } = runtimeRequire('pdf-parse');
+  const parser = new PDFParse({ data: Buffer.from(source), isEvalSupported: false });
+  try {
+    const text = await parser.getText();
+    if (!text.text.includes('Packaging verification')) throw new Error('Staged PDF reader returned no source text');
+  } finally { await parser.destroy(); }
+  const image = await runtimeRequire('sharp')(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jI8cAAAAASUVORK5CYII=', 'base64')).metadata();
+  if (image.format !== 'png' || image.width !== 1 || image.height !== 1) throw new Error('Staged upload image decoder failed');
+  console.log(`Runtime asset smoke checks passed: ExcelJS ZIP, PDF.js native canvas/worker/text, image decoder${pdfEntry ? ', PDFKit fonts/PDF' : ''}`);
 }
 
 export async function packageRelease(stagePath) {
@@ -122,6 +142,9 @@ export async function packageRelease(stagePath) {
   // include them rather than depending on a tracer's interpretation of globs.
   for (const path of ['node_modules/.prisma/client', 'node_modules/prisma/build', 'node_modules/@prisma/engines',
     'node_modules/pdfkit/js/data', 'node_modules/exceljs/lib', 'node_modules/xlsx',
+    'node_modules/pdf-parse', 'node_modules/pdfjs-dist', 'node_modules/@napi-rs/canvas',
+    'node_modules/@napi-rs/canvas-linux-x64-gnu',
+    'node_modules/sharp', 'node_modules/@img/sharp-linux-x64', 'node_modules/@img/sharp-libvips-linux-x64',
     'prisma/schema.prisma', 'prisma/migrations', 'artifacts/scheduling', 'src/lib/scheduling/blueprints']) {
     await copyTree(join(root, path), join(stage, path));
   }

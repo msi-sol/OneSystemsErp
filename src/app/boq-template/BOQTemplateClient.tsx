@@ -10,6 +10,7 @@ import { WORKSPACE_BREAKDOWN_FIELDS, type WorkspaceAnalysis, type WorkspaceBreak
 import styles from './boqTemplate.module.css';
 import NextStepCard from '@/components/boq/NextStepCard';
 import { deriveIntakeLifecycle } from '@/lib/planning/lifecycle';
+import { readWorkspaceResponse } from '@/lib/boq/workspace-response';
 
 export interface WorkspaceProject {
   id: string; name: string; contractAmount: number; boqLocked: boolean; hasBOQ: boolean;
@@ -81,8 +82,8 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
   function chooseFile(selected?: File) {
     if (!selected || busy) return;
     setError(''); setMessage('');
-    if (!/\.(xlsx|pdf|docx)$/i.test(selected.name)) { setError('Choose Excel (.xlsx), PDF, or Word (.docx). Older .xls/.doc files must be saved in a supported format.'); return; }
-    if (selected.size === 0 || selected.size > 10 * 1024 * 1024) { setError('Choose a workbook larger than 0 bytes and no bigger than 10 MB.'); return; }
+    if (!/\.(xlsx|xls|csv|tsv|pdf|docx|txt|png|jpe?g|webp)$/i.test(selected.name)) { setError('Choose .xlsx, .xls, .csv, .tsv, .pdf, .docx, .txt, .png, .jpg, .jpeg or .webp. Executable and archive files are not supported.'); return; }
+    if (selected.size === 0 || selected.size > 10 * 1024 * 1024) { setError('Choose a source file larger than 0 bytes and no bigger than 10 MB.'); return; }
     setFile(selected); setAnalysis(null); setMapping(null); setBreakdownMapping(null); setSheetName(''); setUpload(null); setApprovalConfirmation(false);
     resetProjectDetails();
   }
@@ -108,8 +109,8 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
       body.set('offset', String(preview?.offset ?? 0));
       if (preview?.sectionKey) body.set('sectionKey', preview.sectionKey);
       const response = await fetch('/api/boq-workspace/analyze', { method: 'POST', body });
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || 'Could not analyze this workbook.');
+      const data = await readWorkspaceResponse(response, 'analyze');
+      if (!data.success) throw new Error(data.error);
       const result: WorkspaceAnalysis = data.analysis;
       setAnalysis(result); setMapping(result.mapping); setBreakdownMapping(result.breakdownMapping); setSheetName(result.selectedSheet || '');
       if (!nameEdited) setProjectName(result.suggestedProjectName || '');
@@ -140,8 +141,8 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
       body.set('breakdownMapping', JSON.stringify(breakdownMapping ?? {}));
       body.set('projectContractAmount', projectContractAmount);
       const response = await fetch('/api/boq-workspace/confirm', { method: 'POST', body });
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || 'Could not save this BOQ import.');
+      const data = await readWorkspaceResponse(response, 'confirm');
+      if (!data.success) throw new Error(data.error);
       setUpload({ uploadId: data.uploadId, projectId: data.projectId, status: data.status,
         fileName: file.name, fileUrl: data.report.fileUrl, grandTotal: Number(data.report.grandTotal),
         validRowsCount: data.report.validRowsCount, warningRowsCount: data.report.warningRowsCount, errorRowsCount: data.report.errorRowsCount,
@@ -198,9 +199,9 @@ export default function BOQTemplateClient({ projects, actorName, actorRole, canC
         <div className={`${styles.dropzone} ${dragging ? styles.dragging : ''}`} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
           <div className={styles.uploadIcon}><UploadCloud size={28} strokeWidth={1.6} /></div>
           <h2>{file ? file.name : 'Drop the BOQ document here'}</h2>
-          <p>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to analyze` : 'Excel (.xlsx), PDF, or Word (.docx) · up to 10 MB'}</p>
+          <p>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to analyze` : 'Excel, CSV/TSV, PDF, Word, text, or PNG/JPEG/WEBP image · up to 10 MB'}</p>
           <label className={styles.fileButton}><FileSpreadsheet size={18} /> {file ? 'Choose another file' : 'Choose file'}
-            <input ref={fileInput} aria-label="Choose BOQ workbook" className={styles.fileInput} type="file" accept=".xlsx,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event: ChangeEvent<HTMLInputElement>) => chooseFile(event.target.files?.[0])} disabled={!!busy || !canAnalyze} />
+            <input ref={fileInput} aria-label="Choose BOQ source file" className={styles.fileInput} type="file" accept=".xlsx,.xls,.csv,.tsv,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values,text/plain,application/pdf,image/png,image/jpeg,image/webp" onChange={(event: ChangeEvent<HTMLInputElement>) => chooseFile(event.target.files?.[0])} disabled={!!busy || !canAnalyze} />
           </label>
           {file && !busy && <button className={styles.clearFile} onClick={() => { setFile(null); setAnalysis(null); setMapping(null); setSheetName(''); resetProjectDetails(); if (fileInput.current) fileInput.current.value = ''; }} aria-label="Remove selected workbook"><X size={16} /></button>}
         </div>
