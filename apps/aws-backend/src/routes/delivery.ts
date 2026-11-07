@@ -320,6 +320,28 @@ router.post('/:id/approve', async (req, res) => {
   }
 });
 
+// Reject a mis-encoded receipt that is still awaiting approval. Pending receipts have not changed stock, costs or
+// payables (approval does that), so rejecting only closes the record; the correct receipt can then be encoded.
+router.post('/:id/reject', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, simulatedRole } = getPbacContext(req);
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 5 || reason.length > 500) return res.status(400).json({ error: 'Give a reason of 5 to 500 characters for rejecting this delivery.' });
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    await requirePermission(user.id, 'DELIVERY_RECEIVING', 'canApprove', simulatedRole);
+    const rejected = await prisma.delivery.updateMany({ where: { id, status: 'FOR_ACCOUNTANT_APPROVAL' }, data: { status: 'REJECTED', reviewerId: user.id } });
+    if (rejected.count !== 1) return res.status(409).json({ error: 'Only a delivery awaiting approval can be rejected. Refresh to see its current status.' });
+    await prisma.auditLog.create({ data: { userId: user.id, userRole: user.role, moduleName: 'DELIVERY_RECEIVING', transactionId: id, actionType: 'REJECT', oldValue: 'FOR_ACCOUNTANT_APPROVAL', newValue: 'REJECTED', remarks: reason } });
+    res.json({ success: true });
+  } catch (error: unknown) {
+    const message = error instanceof Error && error.message ? error.message : 'Failed to reject delivery';
+    res.status(message.startsWith('Unauthorized Action') ? 403 : 500).json({ error: message });
+  }
+});
+
 router.post('/:id/upload-proof', async (req, res) => {
   try {
     const { id } = req.params;

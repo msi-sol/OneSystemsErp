@@ -6,6 +6,7 @@ jest.mock('@/lib/prisma', () => ({
 import { prisma } from '@/lib/prisma';
 import { buildDraftBOQChecksum } from '@/lib/boq/draft-workflow';
 import { runWorkPackagePlanningCommand, WorkPackagePlanningError } from '@/lib/scheduling/work-package-planning';
+import { emptyWorkPackagePlanDetails } from '@/lib/scheduling/work-package-details-types';
 
 const actor = { id: 'actor-a', role: 'PROJECT_ENGINEER', name: 'Engineer' };
 const item = {
@@ -130,6 +131,78 @@ describe('BOQ work package planning commands', () => {
       action: 'create', expectedRowVersion: 3, name: 'Footings',
     } })).rejects.toMatchObject<Partial<WorkPackagePlanningError>>({ message: 'SCHEDULE_VERSION_CONFLICT', status: 409 });
     expect(tx.scheduleActivity.create).not.toHaveBeenCalled();
+  });
+
+  function withLocations(tx: ReturnType<typeof setup>['tx'], schedule: ReturnType<typeof setup>['schedule'], allocationLocations: Record<string, string> = {}) {
+    const details = { ...emptyWorkPackagePlanDetails(), locations: [{ id: 'loc-site', name: 'Project Site', parentId: null, isActive: true }, { id: 'loc-old', name: 'Old yard', parentId: null, isActive: false }], allocationLocations };
+    const located = { ...schedule, description: JSON.stringify(details) };
+    tx.projectSchedule.findFirst.mockResolvedValue(located);
+    Object.assign(tx.projectSchedule, { findMany: jest.fn().mockResolvedValue([located]) });
+    return located;
+  }
+  const savedDetails = (tx: ReturnType<typeof setup>['tx']) => JSON.parse(tx.projectSchedule.updateMany.mock.calls.at(-1)[0].data.description);
+
+  it('sets one location on every BOQ line of a package', async () => {
+    const { tx, schedule } = setup();
+    withLocations(tx, schedule, { 'alloc-1': 'loc-other' });
+    tx.scheduleBOQAllocation.findMany.mockResolvedValueOnce([{ id: 'alloc-1' }, { id: 'alloc-2' }]);
+    const result = await runWorkPackagePlanningCommand({ projectId: 'project-a', actor, body: { action: 'locate-package', expectedRowVersion: 1, activityId: 'activity-a', locationId: 'loc-site' } });
+    expect(tx.scheduleBOQAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { scheduleId: 'schedule-a', activityId: 'activity-a' } }));
+    expect(savedDetails(tx).allocationLocations).toEqual({ 'alloc-1': 'loc-site', 'alloc-2': 'loc-site' });
+    expect(result).toMatchObject({ rowVersion: 2, located: 2 });
+  });
+
+  it('clears a package location and refuses archived locations', async () => {
+    const { tx, schedule } = setup();
+    withLocations(tx, schedule, { 'alloc-1': 'loc-site' });
+    await expect(runWorkPackagePlanningCommand({ projectId: 'project-a', actor, body: { action: 'locate-package', expectedRowVersion: 1, activityId: 'activity-a', locationId: 'loc-old' } }))
+      .rejects.toMatchObject<Partial<WorkPackagePlanningError>>({ message: 'ACTIVE_LOCATION_REQUIRED' });
+    tx.scheduleBOQAllocation.findMany.mockResolvedValueOnce([{ id: 'alloc-1' }]);
+    await runWorkPackagePlanningCommand({ projectId: 'project-a', actor, body: { action: 'locate-package', expectedRowVersion: 1, activityId: 'activity-a', locationId: '' } });
+    expect(savedDetails(tx).allocationLocations).toEqual({});
+  });
+
+  it('uses one named location for every unlocated line, reusing a matching project location', async () => {
+    const { tx, schedule } = setup();
+    withLocations(tx, schedule, { 'alloc-1': 'loc-other' });
+    tx.scheduleBOQAllocation.findMany.mockResolvedValueOnce([{ id: 'alloc-1' }, { id: 'alloc-2' }, { id: 'alloc-3' }]);
+    const result = await runWorkPackagePlanningCommand({ projectId: 'project-a', actor, body: { action: 'locate-all-at', expectedRowVersion: 1, name: '  project site ' } });
+    expect(tx.workPackageExecutionState.findUnique).toHaveBeenCalled();
+    expect(savedDetails(tx).allocationLocations).toEqual({ 'alloc-1': 'loc-other', 'alloc-2': 'loc-site', 'alloc-3': 'loc-site' });
+    expect(result).toMatchObject({ rowVersion: 2, locationId: 'loc-site', located: 2 });
+  });
+
+  function withPackages(tx: ReturnType<typeof setup>['tx'], links: { predecessorId: string; successorId: string; type: string }[] = []) {
+    Object.assign(tx.scheduleActivity, { findMany: jest.fn().mockResolvedValue([{ id: 'wp-1' }, { id: 'wp-2' }, { id: 'wp-3' }]), update: jest.fn().mockResolvedValue({}) });
+    Object.assign(tx.scheduleDependency, { findMany: jest.fn().mockResolvedValue(links) });
+    tx.scheduleDependency.create.mockResolvedValue({ id: 'dep-new' });
+  }
+
+  it('saves accepted AI dates and links together in one plan change', async () => {
+    const { tx } = setup();
+    withPackages(tx);
+    const result = await runWorkPackagePlanningCommand({ projectId: 'project-a', actor, body: { action: 'apply-plan-dates', expectedRowVersion: 1,
+      dates: [{ activityId: 'wp-1', start: '2026-12-01', finish: '2026-12-14' }, { activityId: 'wp-2', start: '2026-12-15', finish: '2026-12-15' }],
+      links: [{ predecessorId: 'wp-1', successorId: 'wp-2', lagDays: 0, remarks: 'AI Check: cure first' }] } });
+    expect(tx.projectSchedule.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.scheduleActivity.update).toHaveBeenCalledWith({ where: { id: 'wp-1' }, data: { plannedStartDate: new Date('2026-12-01T00:00:00.000Z'), plannedFinishDate: new Date('2026-12-14T00:00:00.000Z'), plannedDuration: 14 } });
+    expect(tx.scheduleActivity.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'wp-2' }, data: expect.objectContaining({ plannedDuration: 1 }) }));
+    expect(tx.scheduleDependency.create).toHaveBeenCalledWith({ data: { scheduleId: 'schedule-a', predecessorId: 'wp-1', successorId: 'wp-2', type: 'FS', lagDays: 0, remarks: 'AI Check: cure first' } });
+    expect(result).toMatchObject({ rowVersion: 2, dated: 2, linked: 1 });
+  });
+
+  it('saves nothing when an accepted link would make a loop or a finish is before its start', async () => {
+    const { tx } = setup();
+    withPackages(tx, [{ predecessorId: 'wp-2', successorId: 'wp-3', type: 'FS' }]);
+    await expect(runWorkPackagePlanningCommand({ projectId: 'project-a', actor, body: { action: 'apply-plan-dates', expectedRowVersion: 1,
+      links: [{ predecessorId: 'wp-1', successorId: 'wp-2' }, { predecessorId: 'wp-3', successorId: 'wp-1' }] } }))
+      .rejects.toMatchObject<Partial<WorkPackagePlanningError>>({ message: 'DEPENDENCY_CYCLE', status: 409 });
+    await expect(runWorkPackagePlanningCommand({ projectId: 'project-a', actor, body: { action: 'apply-plan-dates', expectedRowVersion: 1,
+      dates: [{ activityId: 'wp-1', start: '2026-12-10', finish: '2026-12-01' }] } }))
+      .rejects.toMatchObject<Partial<WorkPackagePlanningError>>({ message: 'FINISH_BEFORE_START' });
+    expect(tx.projectSchedule.updateMany).not.toHaveBeenCalled();
+    expect(tx.scheduleActivity.update).not.toHaveBeenCalled();
+    expect(tx.scheduleDependency.create).not.toHaveBeenCalled();
   });
 
   it('does not let a draft command mutate an active baseline', async () => {

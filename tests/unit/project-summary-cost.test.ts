@@ -2,6 +2,7 @@ jest.mock('@/lib/prisma', () => ({ prisma: {
   project: { findUnique: jest.fn() },
   projectBOQVersion: { findFirst: jest.fn() },
   projectSchedule: { findFirst: jest.fn() },
+  scheduleActivity: { aggregate: jest.fn().mockResolvedValue({ _min: { plannedStartDate: null }, _max: { plannedFinishDate: null } }) },
   purchaseOrder: { count: jest.fn() },
 } }));
 jest.mock('../../src/app/projects/[id]/ProjectTimelineEditor', () => ({ __esModule: true, default: () => null }));
@@ -79,6 +80,25 @@ it('marks missing BOQ and schedule data unavailable rather than inventing zero t
   expect(html).toContain('Actual Cost to Date</h3><p');
   expect(html).toContain('Not available');
   expect(html).toContain('No approved actual-cost ledger entries recorded.');
+});
+
+it('shows the approved work-package plan span when no contract dates are recorded', async () => {
+  (prisma.project.findUnique as jest.Mock).mockResolvedValue({
+    contractAmount: 1000, variationOrders: [], billings: [], expenses: [], subcontractBillings: [],
+    projectCostLedgers: [], materialRequests: [], workers: [], awardedBoqItems: [],
+    startDate: null, originalCompletionDate: null, revisedCompletionDate: null,
+  });
+  (prisma.projectBOQVersion.findFirst as jest.Mock).mockResolvedValue(null);
+  (prisma.projectSchedule.findFirst as jest.Mock).mockResolvedValue({ id: 'baseline-1', name: 'Work Packages', workflowStatus: 'ACTIVE_BASELINE', baselineCode: 'BL-001', revisionCode: null, _count: { activities: 11 } });
+  (prisma.scheduleActivity as unknown as { aggregate: jest.Mock }).aggregate.mockResolvedValueOnce({ _min: { plannedStartDate: new Date('2026-11-07T00:00:00Z') }, _max: { plannedFinishDate: new Date('2027-02-02T00:00:00Z') } });
+  (prisma.purchaseOrder.count as jest.Mock).mockResolvedValue(0);
+
+  const html = renderToStaticMarkup((await ProjectSummaryTab({ projectId: 'project-1' }))!);
+
+  expect(html).toMatch(/\d+ \/ 88 Days \(plan\)/);
+  expect(html).toContain('Plan finish');
+  expect(html).toContain('No contract dates recorded; showing the approved work-package plan.');
+  expect(html).not.toContain('Not scheduled');
 });
 
 it('shows a recorded zero actual cost when an approved zero-value ledger entry exists', async () => {

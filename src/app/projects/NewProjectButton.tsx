@@ -347,14 +347,16 @@ export default function NewProjectButton({ users }: { users?: {id: string, name:
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Project Start Date</label>
-                  <input type="date" name="startDate" value={startDate} onChange={e => setStartDate(e.target.value)} required style={{ width: '100%', padding: '10px', borderRadius: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', colorScheme: 'dark' }} />
+                  <label htmlFor="new-project-start" style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Project Start Date <span style={{ opacity: 0.7 }}>(optional)</span></label>
+                  <input id="new-project-start" type="date" name="startDate" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', colorScheme: 'dark' }} />
                 </div>
-                
+
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Duration (Days)</label>
-                  <input type="number" name="durationDays" value={durationDays} onChange={e => setDurationDays(e.target.value ? Number(e.target.value) : '')} min={1} required style={{ width: '100%', padding: '10px', borderRadius: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white' }} />
+                  <label htmlFor="new-project-duration" style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Duration (Days) <span style={{ opacity: 0.7 }}>(optional)</span></label>
+                  {/* colorScheme dark: the number spinner was drawn as a white box on the dark field. */}
+                  <input id="new-project-duration" type="number" name="durationDays" value={durationDays} onChange={e => setDurationDays(e.target.value ? Number(e.target.value) : '')} min={1} step={1} placeholder="e.g. 120" style={{ width: '100%', padding: '10px', borderRadius: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', colorScheme: 'dark' }} />
                 </div>
+                <p style={{ gridColumn: '1 / -1', margin: '-6px 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Not known yet? Leave both blank and set them later in the Project Summary.</p>
 
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Computed Completion Date</label>
@@ -363,7 +365,7 @@ export default function NewProjectButton({ users }: { users?: {id: string, name:
 
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Total Contract Amount (Optional Override)</label>
-                  <input type="number" name="contractAmountOverride" value={contractAmountOverride} onChange={e => setContractAmountOverride(e.target.value ? Number(e.target.value) : '')} step="0.01" placeholder="Leave blank to auto-calculate from BOQ sum" style={{ width: '100%', padding: '10px', borderRadius: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white' }} />
+                  <input type="number" name="contractAmountOverride" value={contractAmountOverride} onChange={e => setContractAmountOverride(e.target.value ? Number(e.target.value) : '')} step="0.01" placeholder="Leave blank to auto-calculate from BOQ sum" style={{ width: '100%', padding: '10px', borderRadius: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', colorScheme: 'dark' }} />
                 </div>
               </div>
 

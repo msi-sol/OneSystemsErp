@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './AiCheckPanel.module.css';
 
@@ -67,9 +67,18 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
   const [confirmApply, setConfirmApply] = useState(false);
   const [links, setLinks] = useState<Record<number, boolean>>({});
   const [rowVersion, setRowVersion] = useState<number | null>(null);
+  // Elapsed seconds while a check runs, so a 30–60 s model call visibly progresses instead of looking frozen.
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
 
   async function run() {
-    setBusy(true); setError(''); setMessage(''); setConfirmApply(false);
+    setBusy(true); setRunning(true); setElapsed(0); setError(''); setMessage(''); setConfirmApply(false);
     try {
       const data = await call(`/api/projects/${projectId}/ai-check`, 'POST', { scope });
       if (scope === 'boq') {
@@ -80,7 +89,7 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
         setWp(result); setGroups(result.grouping.map((group) => ({ ...group, sections: [...group.sections] }))); setLinks({}); setRowVersion(result.schedule?.rowVersion ?? null);
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The AI Check failed.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setRunning(false); }
   }
 
   // ---- BOQ: accept (optionally edited) correction through the normal draft-edit endpoint.
@@ -153,8 +162,13 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
           ? 'Have AI look over this BOQ for misplaced items, inconsistent units, duplicates and unclear descriptions before the baseline is locked. Nothing changes unless you accept a suggestion.'
           : 'Have AI suggest how BOQ sections should be grouped into work packages and which packages must finish before others start. Edit any suggestion before accepting it; nothing changes otherwise.'}</p>
       </div>
-      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{busy && !result ? 'Checking… (up to a minute)' : result ? 'Run again' : 'Run AI Check'}</button>
+      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? `Checking… ${elapsed}s` : result ? 'Run again' : 'Run AI Check'}</button>
     </div>
+    {running && <p className={styles.muted} role="status" style={{ marginTop: 10 }}>
+      {elapsed < 90
+        ? `The AI is reading the BOQ${scope === 'work-packages' ? ' sections and current packages' : ''}. This usually takes 30–60 seconds.${scope === 'work-packages' ? ' You can keep working on other steps; the result will be here when you come back.' : ''}`
+        : 'Still working: the AI service is slower than usual. It stops by itself after about 4 minutes, and nothing is changed either way.'}
+    </p>}
     {error && <div className={styles.error} role="alert">{error}</div>}
     {message && <div className={styles.success} role="status">{message}</div>}
 

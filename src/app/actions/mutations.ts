@@ -20,6 +20,7 @@ import { Prisma } from '@prisma/client';
 import { materialQuantity } from '@/lib/procurement/material-values';
 import { hasPermission } from '@/lib/permissions';
 import { assertMaterialRequestAllowance, assertMaterialRequestTransition } from '@/lib/boq/benchmark-request-allowance';
+import { BENCHMARK_BOQ_LINKS_ACTION, readBenchmarkBoqLinks } from '@/lib/boq/benchmark-boq-links';
 
 async function requireMaterialRequestActor(mrId: string, capabilities: string[]) {
   const actor = await verifySession();
@@ -1060,6 +1061,85 @@ export async function deleteProcurementBenchmark(projectId: string) {
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath('/projects');
+}
+
+/**
+ * Saves the AI Check suggestions the reviewer kept (possibly edited) on an unlocked procurement benchmark:
+ * field corrections and line removals, in one transaction with an audit record. Refused when the benchmark is
+ * locked, under a benchmark review, or already linked to the master material list (same guard as delete).
+ */
+export async function applyProcurementBenchmarkSuggestions(projectId: string, changes: Array<{ rowId: string; field: string; value: string }>) {
+  const actor = await requireProjectCapability(projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project procurement benchmark.');
+  if (!Array.isArray(changes) || !changes.length) throw new Error('Choose at least one suggestion to save.');
+  if (changes.length > 500) throw new Error('Too many changes at once.');
+  const TEXT: Record<string, number> = { description: 8000, unit: 191, category: 191, itemCode: 191 };
+  const MONEY = new Set(['unitCost', 'totalCost']);
+  const result = await prisma.$transaction(async tx => {
+    await assertProcurementBenchmarkReplaceable(tx as unknown as Prisma.TransactionClient, projectId);
+    const ids = [...new Set(changes.map(change => String(change.rowId)))];
+    const rows = await tx.procurementBenchmarkItem.findMany({ where: { projectId, id: { in: ids } } });
+    if (rows.length !== ids.length) throw new Error('Some benchmark lines no longer exist. Run the AI Check again.');
+    const updates = new Map<string, Record<string, string | number>>();
+    const removals = new Set<string>();
+    for (const change of changes) {
+      const id = String(change.rowId), field = String(change.field), value = String(change.value ?? '').trim();
+      if (field === 'remove') { removals.add(id); continue; }
+      let parsed: string | number;
+      if (TEXT[field]) {
+        if ((field === 'description' || field === 'unit') && !value) throw new Error(`The ${field} cannot be empty.`);
+        if (value.length > TEXT[field]) throw new Error(`The ${field} is too long.`);
+        parsed = value;
+      } else if (MONEY.has(field)) {
+        const amount = Number(value.replace(/[₱,\s]/g, ''));
+        if (!Number.isFinite(amount) || amount < 0) throw new Error(`Enter a valid ${field === 'unitCost' ? 'unit cost' : 'total'} (a number, 0 or more).`);
+        parsed = amount;
+      } else throw new Error('This change is not supported.');
+      updates.set(id, { ...(updates.get(id) ?? {}), [field]: parsed });
+    }
+    for (const id of removals) updates.delete(id);
+    for (const [id, data] of updates) await tx.procurementBenchmarkItem.update({ where: { id }, data });
+    if (removals.size) await tx.procurementBenchmarkItem.deleteMany({ where: { projectId, id: { in: [...removals] } } });
+    await tx.auditLog.create({ data: {
+      userId: actor.id, userRole: actor.role, moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: 'PROCUREMENT_BENCHMARK_AI_SUGGESTIONS_APPLIED',
+      oldValue: JSON.stringify(rows.map(row => ({ id: row.id, itemCode: row.itemCode, category: row.category, description: row.description, unit: row.unit, unitCost: row.unitCost, totalCost: row.totalCost }))),
+      newValue: JSON.stringify({ updated: Object.fromEntries(updates), removed: [...removals] }),
+    } });
+    return { updated: updates.size, removed: removals.size };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  revalidatePath(`/projects/${projectId}`);
+  return result;
+}
+
+/**
+ * Saves the reviewer's benchmark-line → BOQ-item links (usually AI Check suggestions, possibly changed).
+ * A null boqItemId clears a link. Allowed until the master materials list is generated, since generation copies
+ * the links into its BOQ mappings.
+ */
+export async function saveProcurementBenchmarkBoqLinks(projectId: string, links: Array<{ rowId: string; boqItemId: string | null }>) {
+  const actor = await requireProjectCapability(projectId, ['canEdit', 'canEditDraft'], 'You do not have permission to edit this project procurement benchmark.');
+  if (!Array.isArray(links) || !links.length) throw new Error('Choose at least one BOQ link to save.');
+  if (links.length > 1500) throw new Error('Too many links at once.');
+  const result = await prisma.$transaction(async tx => {
+    const generated = await tx.bOQMapping.findFirst({ where: { procurementBenchmarkItem: { is: { projectId } } }, select: { id: true } });
+    if (generated) throw new Error('The master materials list was already generated from this benchmark, so its BOQ links can no longer change here.');
+    const rowIds = [...new Set(links.map(link => String(link.rowId)))];
+    const rows = await tx.procurementBenchmarkItem.findMany({ where: { projectId, id: { in: rowIds } }, select: { id: true } });
+    if (rows.length !== rowIds.length) throw new Error('Some benchmark lines no longer exist. Run the AI Check again.');
+    const boqIds = [...new Set(links.map(link => link.boqItemId).filter((id): id is string => typeof id === 'string' && !!id))];
+    const boq = boqIds.length ? await tx.awardedBOQItem.findMany({ where: { projectId, id: { in: boqIds } }, select: { id: true } }) : [];
+    if (boq.length !== boqIds.length) throw new Error('A chosen BOQ item does not belong to this project.');
+    const existingIds = new Set((await tx.procurementBenchmarkItem.findMany({ where: { projectId }, select: { id: true } })).map(row => row.id));
+    const current = await readBenchmarkBoqLinks(tx as unknown as Prisma.TransactionClient, projectId);
+    const next = Object.fromEntries(Object.entries(current).filter(([rowId]) => existingIds.has(rowId)));
+    for (const link of links) { if (link.boqItemId) next[String(link.rowId)] = link.boqItemId; else delete next[String(link.rowId)]; }
+    await tx.auditLog.create({ data: {
+      userId: actor.id, userRole: actor.role, moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: BENCHMARK_BOQ_LINKS_ACTION,
+      oldValue: JSON.stringify({ links: current }), newValue: JSON.stringify({ links: next }),
+    } });
+    return { saved: links.length, linked: Object.keys(next).length };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  revalidatePath(`/projects/${projectId}`);
+  return result;
 }
 
 export async function lockProjectBOQ(projectId: string) {

@@ -47,6 +47,13 @@ export default async function BOQWorkspacePage({ searchParams }: { searchParams:
   });
   const latestStatuses = new Map<string, string>();
   for (const version of versions) if (!latestStatuses.has(version.projectId)) latestStatuses.set(version.projectId, version.status);
+  // Work-package plan standing per project, so the board can say what comes next.
+  const schedules = await prisma.projectSchedule.findMany({ where: { projectId: { in: projectIds } }, select: { projectId: true, workflowStatus: true } });
+  const planStages = new Map<string, WorkspaceProject['planStage']>();
+  for (const schedule of schedules) {
+    if (schedule.workflowStatus === 'ACTIVE_BASELINE') planStages.set(schedule.projectId, 'approved');
+    else if (planStages.get(schedule.projectId) !== 'approved' && !['SUPERSEDED_BASELINE', 'ARCHIVED_BASELINE'].includes(schedule.workflowStatus)) planStages.set(schedule.projectId, 'draft');
+  }
   const projects: WorkspaceProject[] = await Promise.all(sourceProjects.map(async project => {
     const [edit, editDraft, approve] = await Promise.all([
       checkSchedulingAccess(actor.id, actor.role, project.id, 'canEdit'),
@@ -58,7 +65,7 @@ export default async function BOQWorkspacePage({ searchParams }: { searchParams:
       hasBOQ: project._count.awardedBoqItems > 0, boqStatus: latestStatuses.get(project.id) || 'NOT_STARTED',
       fileName: upload?.originalFilename ?? null, uploadId: upload?.id ?? null,
       uploadStatus: upload ? upload.validationStatus === 'FAILED' || upload.validationStatus === 'CRITICAL_ERROR' ? 'VALIDATION_FAILED' : upload.commitStatus : null,
-      canEdit: edit.allowed || editDraft.allowed, canApprove: approve.allowed };
+      canEdit: edit.allowed || editDraft.allowed, canApprove: approve.allowed, planStage: planStages.get(project.id) ?? 'none' };
   }));
   const [canCreate, canApprove] = await Promise.all([
     hasPermission(actor.id, 'PROJECT_MANAGEMENT', 'canCreate'),

@@ -38,6 +38,21 @@ export default async function Topbar() {
           orderBy: { project: { name: 'asc' } }
         });
       }
+      // Duration fallback for the header: when no contract duration was recorded, show the approved work-package
+      // plan's span (first planned start to last planned finish, inclusive) instead of "Not set".
+      const projectIds = assignments.map(row => row.projectId as string).filter(Boolean);
+      if (projectIds.length) {
+        const baselines = await prisma.projectSchedule.findMany({ where: { projectId: { in: projectIds }, workflowStatus: 'ACTIVE_BASELINE' }, select: { id: true, projectId: true } });
+        const spans = baselines.length ? await prisma.scheduleActivity.groupBy({ by: ['scheduleId'], where: { scheduleId: { in: baselines.map(row => row.id) } }, _min: { plannedStartDate: true }, _max: { plannedFinishDate: true } }) : [];
+        const planned = new Map<string, { days: number; start: string; finish: string }>();
+        for (const span of spans) {
+          const projectId = baselines.find(row => row.id === span.scheduleId)?.projectId;
+          const start = span._min.plannedStartDate, finish = span._max.plannedFinishDate;
+          if (!projectId || !start || !finish || finish < start) continue;
+          planned.set(projectId, { days: Math.round((finish.getTime() - start.getTime()) / 86_400_000) + 1, start: start.toISOString().slice(0, 10), finish: finish.toISOString().slice(0, 10) });
+        }
+        assignments = assignments.map(row => ({ ...row, project: { ...row.project, plannedSpan: planned.get(row.projectId) ?? null } }));
+      }
     }
   }
 

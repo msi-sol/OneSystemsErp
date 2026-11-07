@@ -106,6 +106,9 @@
 .projectName:hover { color: var(--accent-color); text-decoration: underline; text-underline-offset: 4px; }
 .projectRow p { margin: 6px 0; color: var(--text-secondary); font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
 .smallStatus { color: #becad5; font-size: .75rem; }
+.nextAction { display: inline-block; color: var(--text-primary); font-size: .78rem; font-weight: 550; padding: 2px 10px; border-radius: 999px; background: rgba(0, 240, 255, .08); }
+.projectActions a.projectCta { padding: 7px 12px; border: 1px solid var(--accent-color); border-radius: 8px; font-weight: 600; }
+.projectActions a.projectCta:hover { background: rgba(0, 240, 255, .1); }
 .projectActions { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; flex-shrink: 0; }
 .projectActions > span { font-size: .9rem; font-variant-numeric: tabular-nums; }
 .projectActions a { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-color); font-size: .825rem; }

@@ -1,0 +1,52 @@
+/* Locations & constraints step: status line, one-click site setup, collapsed sub-areas, constraint form extras */
+.statusLine { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px; margin: 0 0 20px; border: 1px solid var(--glass-border); border-radius: 8px; background: var(--bg-secondary); font-size: .875rem; line-height: 1.6; }
+.done { color: #91dfc1; font-weight: 600; }
+.todo { color: #f1c782; font-weight: 600; }
+.dot { color: var(--text-secondary); }
+.optional { color: var(--text-secondary); font-size: .8rem; border: 1px solid var(--glass-border); border-radius: 999px; padding: 1px 8px; margin-left: 4px; }
+.quickRow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-top: 14px; }
+.quickRow > div { flex: 1 1 280px; min-width: 0; }
+.locationSelect { min-width: 220px !important; } /* beats the shared `.panel select { min-width: 0 }` */
+.subAreas { border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px 18px; margin-bottom: 24px; }
+.subAreas > summary { cursor: pointer; font-size: .9rem; color: var(--accent-color); line-height: 1.6; }
+.subAreas > summary span { color: var(--text-secondary); font-size: .8rem; }
+.subAreas[open] > summary { margin-bottom: 12px; }
+.subAreas > p { margin: 0 0 14px; }
+.moreOptions { margin: 0 0 18px; }
+.moreOptions > summary { cursor: pointer; color: var(--accent-color); font-size: .85rem; line-height: 1.6; margin-bottom: 12px; }
+.resolveRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 260px; white-space: normal; }
+.resolveRow input { flex: 1 1 160px; min-width: 0; }
+.rowActions { display: flex; gap: 8px; flex-wrap: wrap; }
+.bad { color: #ffb4b4; font-weight: 600; }
+.helpList { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: .875rem; line-height: 1.6; color: var(--text-secondary); }
+.helpList strong { color: var(--text-primary); }
+.linkButton { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-color); cursor: pointer; }
+.linkButton:hover, .linkButton:focus-visible { text-decoration: underline; }
+/* Resources step: one card per package — name and status | money with a bar | actions */
+.pkgList { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+.pkgCard { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) auto; gap: 12px 20px; align-items: center; padding: 14px 16px; border: 1px solid var(--glass-border); border-radius: 10px; background: var(--bg-secondary); }
+.pkgName { display: grid; gap: 4px; min-width: 0; font-size: .875rem; line-height: 1.5; }
+.pkgName strong { font-weight: 600; overflow-wrap: anywhere; }
+.pkgName > span { font-size: .8rem; }
+.pkgCode { color: var(--accent-color); margin-right: 8px; white-space: nowrap; }
+.pkgMoney { min-width: 0; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.pkgMoney p { margin: 0 0 6px; line-height: 1.5; }
+.meter { height: 5px; border-radius: 4px; background: var(--bg-tertiary); overflow: hidden; }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-color); }
+.meter > .meterOver { background: #f87171; }
+.pkgActions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.small { min-height: 34px !important; padding: 6px 12px !important; font-size: .8rem !important; white-space: nowrap; }
+.split { display: block; margin-top: 6px; color: var(--text-secondary); font-size: .75rem; line-height: 1.5; }
+@media (max-width: 900px) { .pkgCard { grid-template-columns: minmax(0, 1fr); } .pkgActions { justify-content: flex-start; } }
+.lineTable td:nth-child(n+3), .lineTable thead th:nth-child(n+3) { text-align: right; }
+/* Only the Edit/Remove column is left-aligned. ("last-child" also hit the Allowance column in read-only view, where there are no buttons.) */
+.lineTable .actionsCell { text-align: left; }
+.lineTable .rowActions { flex-wrap: nowrap; align-items: center; }
+.lineTable tfoot th, .lineTable tfoot td { border-bottom: 0; color: var(--text-primary); }
+.lineTable tfoot th { text-align: right; }
+.lineTable tfoot td { text-align: right; } /* total sits under the Amount column, right-aligned like the amounts */
+.lineForm { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--glass-border); }
+.lineForm h4 { margin: 0 0 14px; }
+.amountOut { display: block; padding: 10px 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.emptyState p { margin: 0; }
+.emptyState p + p { margin-top: 6px; }

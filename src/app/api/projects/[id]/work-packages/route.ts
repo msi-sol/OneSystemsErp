@@ -1,5 +1,6 @@
 import { WorkPackageExecutionError } from '@/lib/scheduling/work-package-execution';
 import { NextResponse } from 'next/server';
+import { WorkPackageLocationError } from '@/lib/scheduling/work-package-project-locations';
 import { getSessionActor } from '@/lib/scheduling/authUtils';
 import { planningCapacity } from '@/lib/scheduling/planning-capacity';
 import {
@@ -20,7 +21,7 @@ async function authorize(projectId: string, action: 'canView' | 'canEditDraft') 
 
 function errorResponse(error: unknown) {
   if(error instanceof WorkPackageExecutionError) return NextResponse.json({error:error.message},{status:error.status});
-  if (error instanceof WorkPackagePlanningError) {
+  if (error instanceof WorkPackagePlanningError || error instanceof WorkPackageLocationError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
   const message = error instanceof Error ? error.message : '';

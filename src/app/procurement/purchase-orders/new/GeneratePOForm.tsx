@@ -21,12 +21,17 @@ export default function GeneratePOForm({ mr, suppliers }: { mr: any, suppliers: 
       category: item.consolidatedBoqItem.category || 'Uncategorized',
       description: item.consolidatedBoqItem.description,
       quantity: item.quantity,
+      unit: item.consolidatedBoqItem.unit || '',
+      // The approved benchmark (budget) rate for this material, shown as a guide; 0 when unknown.
+      budgetRate: Number(item.consolidatedBoqItem.revisedBenchmarkUnitCost) > 0 ? Number(item.consolidatedBoqItem.revisedBenchmarkUnitCost) : Number(item.consolidatedBoqItem.unitCost) || 0,
       unitCostInput: '', // Blank initially as requested
       supplierId: ''
     }))
   );
 
   const parseCost = (val: string) => parseFloat(val.replace(/,/g, '')) || 0;
+  const peso = (value: number) => `₱ ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const selectedBudget = items.reduce((acc: number, item: any) => item.supplierId && item.budgetRate ? acc + item.quantity * item.budgetRate : acc, 0);
 
   const handleCostChange = (id: string, val: string) => {
     if (!/^[0-9.,]*$/.test(val)) return;
@@ -51,9 +56,15 @@ export default function GeneratePOForm({ mr, suppliers }: { mr: any, suppliers: 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Messages are shown on the page: browser alert() popups do not appear in every browser (e.g. the app's built-in one).
     const itemsToProcure = items.filter((i: any) => i.supplierId !== '');
     if (itemsToProcure.length === 0) {
-      return alert('Please select a supplier for at least one item to generate a PO.');
+      setError('Select a supplier for at least one item to generate a PO.');
+      return;
+    }
+    if (itemsToProcure.some((i: any) => parseCost(i.unitCostInput) <= 0)) {
+      setError('Enter the supplier’s unit cost for every item with a supplier.');
+      return;
     }
 
     startTransition(async () => {
@@ -70,7 +81,6 @@ export default function GeneratePOForm({ mr, suppliers }: { mr: any, suppliers: 
           if (res.createdPOIds.length === 1) {
             router.push(`/procurement/${res.createdPOIds[0]}`);
           } else {
-            alert(`Successfully created ${res.createdPOIds.length} Purchase Orders.`);
             router.push(`/procurement/purchase-orders`);
           }
         } else {
@@ -109,6 +119,8 @@ export default function GeneratePOForm({ mr, suppliers }: { mr: any, suppliers: 
       <div style={{ marginBottom: '20px' }}>
         <h3 style={{ color: 'var(--text-primary)', marginBottom: '5px' }}>Purchase Order Items</h3>
         <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.9rem' }}>Assign a supplier for each item. Items with different suppliers will automatically be split into separate Purchase Orders.</p>
+        {suppliers.length === 0 && <p role="status" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(250, 204, 21, 0.35)', background: 'rgba(161, 98, 7, 0.12)', color: '#fde68a', fontSize: '0.9rem' }}>No suppliers are set up yet, so there is nobody to order from. <a href="/procurement/suppliers/new" style={{ color: 'var(--accent-color)', fontWeight: 600 }}>Add a supplier</a>, then come back to this page.</p>}
+        <p style={{ color: 'var(--text-secondary)', margin: '6px 0 0', fontSize: '0.85rem' }}>The budget price under each item comes from the approved procurement benchmark. Need supplier quotes first? Use <a href="/procurement/canvassing" style={{ color: 'var(--accent-color)' }}>Supplier Canvassing</a>, where quotes are compared with the budget.</p>
       </div>
 
       {error && (
@@ -156,7 +168,7 @@ export default function GeneratePOForm({ mr, suppliers }: { mr: any, suppliers: 
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{item.category}</div>
               </td>
               <td style={{ padding: '10px' }}>{item.description}</td>
-              <td style={{ padding: '10px', textAlign: 'right' }}>{item.quantity}</td>
+              <td style={{ padding: '10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{item.quantity}{item.unit ? <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}> {item.unit}</span> : null}</td>
               <td style={{ padding: '10px' }}>
                 <select 
                   value={item.supplierId} 
@@ -177,12 +189,27 @@ export default function GeneratePOForm({ mr, suppliers }: { mr: any, suppliers: 
                   value={item.unitCostInput}
                   onChange={e => handleCostChange(item.id, e.target.value)}
                   onBlur={e => handleCostBlur(item.id, e.target.value)}
-                  placeholder="0.00"
+                  placeholder={item.supplierId ? 'Supplier price' : 'Choose a supplier'}
+                  aria-label={`Unit cost for ${item.itemCode}`}
                   style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--glass-border)', backgroundColor: 'var(--bg-dark)', color: 'var(--text-primary)', opacity: item.supplierId ? 1 : 0.5 }}
                 />
+                {(() => {
+                  // Budget guide, and how the typed price compares with it.
+                  if (!item.budgetRate) return <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>No budget price</div>;
+                  const cost = parseCost(item.unitCostInput);
+                  const diff = cost - item.budgetRate;
+                  return <div style={{ fontSize: '0.75rem', marginTop: '4px', color: 'var(--text-secondary)' }}>
+                    Budget: {peso(item.budgetRate)}{item.unit ? ` / ${item.unit}` : ''}
+                    {item.supplierId && cost > 0 && Math.abs(diff) >= 0.005 && <div style={{ color: diff > 0 ? '#fca5a5' : '#86efac', fontWeight: 600 }}>{peso(Math.abs(diff))} {diff > 0 ? 'above' : 'under'} budget ({diff > 0 ? '+' : '−'}{Math.abs((diff / item.budgetRate) * 100).toFixed(1)}%)</div>}
+                  </div>;
+                })()}
               </td>
-              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: 'var(--accent-color)' }}>
-                {item.supplierId ? `₱ ${(item.quantity * parseCost(item.unitCostInput)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₱ 0.00'}
+              <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: 'var(--accent-color)', whiteSpace: 'nowrap' }}>
+                {/* "₱ 0.00" read as a zero-value item; "—" means not priced yet. */}
+                {item.supplierId && parseCost(item.unitCostInput) > 0
+                  ? peso(item.quantity * parseCost(item.unitCostInput))
+                  : <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>—{item.supplierId ? <span style={{ display: 'block', fontSize: '0.75rem' }}>Enter unit cost</span> : null}</span>}
+                {item.budgetRate > 0 && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>Budget {peso(item.quantity * item.budgetRate)}</div>}
               </td>
             </tr>
           ))}
@@ -190,8 +217,10 @@ export default function GeneratePOForm({ mr, suppliers }: { mr: any, suppliers: 
         <tfoot>
           <tr>
             <td colSpan={5} style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 'bold', fontSize: '1.2rem' }}>Grand Total (Selected Items):</td>
-            <td style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 'bold', fontSize: '1.2rem', color: '#00ffa3' }}>
-              ₱ {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <td style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 'bold', fontSize: '1.2rem', color: '#00ffa3', whiteSpace: 'nowrap' }}>
+              {totalAmount > 0 ? peso(totalAmount) : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+              {totalAmount > 0 || selectedBudget > 0 ? null : <div style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-secondary)' }}>Choose suppliers and prices</div>}
+              {selectedBudget > 0 && <div style={{ fontSize: '0.8rem', fontWeight: 400, color: totalAmount > selectedBudget ? '#fca5a5' : 'var(--text-secondary)' }}>Budget {peso(selectedBudget)}{totalAmount > selectedBudget ? ' · above budget' : ''}</div>}
             </td>
           </tr>
         </tfoot>

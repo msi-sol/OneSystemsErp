@@ -6,7 +6,7 @@
 .stepActive { border-color: var(--accent-color); background: rgba(0, 240, 255, .07); color: var(--text-primary); font-weight: 600; }
 .marker, .markerDone, .markerWarn { width: 24px; height: 24px; flex: 0 0 24px; border-radius: 50%; display: inline-grid; place-items: center; font-size: .72rem; border: 1px solid currentColor; }
 .markerDone { border-color: #4fbf9a; background: rgba(79, 191, 154, .12); color: #91dfc1; }
-.markerWarn { border-color: #f1c782; color: #f1c782; }
+.markerWarn { border-color: #f1c782; color: #f1c782; background: rgba(241, 199, 130, .12); font-weight: 800; font-size: .8rem; line-height: 1; }
 .stepText { display: grid; min-width: 0; }
 .stepText small { color: #f1c782; font-size: .7rem; font-weight: 500; }
 .siteNav { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding-top: 4px; }

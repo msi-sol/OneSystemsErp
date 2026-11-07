@@ -3,7 +3,6 @@ import { backendFetch } from '@/lib/backend-fetch';
 import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
-import { cookies } from 'next/headers';
 
 // Standard fetchWithAuth definition
 async function fetchWithAuth(url: string, options: RequestInit) {
@@ -34,30 +33,35 @@ async function fetchWithAuth(url: string, options: RequestInit) {
   return response.json();
 }
 
+/** "Reject PO": returns a purchase order under review to draft (the backend allows only this transition). */
 export async function updatePOStatus(poId: string, status: string) {
-  const cookieStore = await cookies();
-  const __session = await verifySession();
-  const sessionId = __session?.id || ''; // This session ID might represent the approverId
-  
-  if (!sessionId) {
-    throw new Error('Not authenticated');
-  }
-
-  const body: { poId: string; status: string; approverId?: string } = { poId, status };
-  
-  if (status === 'ISSUED') {
-    body.approverId = sessionId; // Pass the sessionId as approverId to the backend
-  }
+  const session = await verifySession();
+  if (!session?.id) throw new Error('Not authenticated');
 
   const result = await fetchWithAuth('/api/poUpdates/updatePOStatus', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ poId, status }),
   });
 
   if (result.success) {
-    revalidatePath(`/procurement/${poId}`);
+    revalidatePath(`/procurement/purchase-orders/${poId}`);
     revalidatePath('/procurement/purchase-orders');
   } else {
     throw new Error(result.error || 'Failed to update PO status');
+  }
+}
+
+/** Returns a draft or under-review canvass PO for further canvassing and reopens its canvass. */
+export async function returnPOToCanvassing(poId: string, reason: string): Promise<{ success: boolean; error?: string; canvassFormId?: string }> {
+  const session = await verifySession();
+  if (!session?.id) return { success: false, error: 'Not authenticated' };
+  try {
+    const result = await fetchWithAuth('/api/poUpdates/returnToCanvassing', { method: 'POST', body: JSON.stringify({ poId, reason }) });
+    revalidatePath(`/procurement/purchase-orders/${poId}`);
+    revalidatePath('/procurement/purchase-orders');
+    if (result.canvassFormId) revalidatePath(`/procurement/canvassing/${result.canvassFormId}`);
+    return { success: true, canvassFormId: result.canvassFormId };
+  } catch (cause) {
+    return { success: false, error: cause instanceof Error ? cause.message : 'The order could not be returned to canvassing.' };
   }
 }

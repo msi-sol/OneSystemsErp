@@ -25,6 +25,14 @@ export default async function CanvassDetailsPage({ params }: { params: Promise<{
   if (!canvass) return <div>Canvass not found</div>;
 
   const suppliers = await prisma.supplier.findMany();
+  // A returned canvass says which order was sent back and why, so the next canvasser knows what to fix.
+  const returnedOrders = canvass.status === 'RETURNED'
+    ? await prisma.purchaseOrder.findMany({ where: { canvassFormId: id, status: 'RETURNED' }, select: { id: true, poNumber: true } })
+    : [];
+  const lastReturn = returnedOrders.length
+    ? await prisma.auditLog.findFirst({ where: { actionType: 'RETURN_TO_CANVASSING', transactionId: { in: returnedOrders.map(order => order.id) } }, orderBy: { createdAt: 'desc' }, select: { transactionId: true, remarks: true } })
+    : null;
+  const returnedPoNumber = returnedOrders.find(order => order.id === lastReturn?.transactionId)?.poNumber;
 
   return (
     <div>
@@ -51,6 +59,11 @@ export default async function CanvassDetailsPage({ params }: { params: Promise<{
         </div>
       </div>
 
+      {lastReturn && (
+        <div role="status" style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#fcd34d' }}>
+          Returned for further canvassing{returnedPoNumber ? ` from ${returnedPoNumber}` : ''}: {lastReturn.remarks}. Add or correct quotations, run the comparison again, then endorse and approve the new recommendation.
+        </div>
+      )}
       <CanvassClientTabs canvass={canvass as any} suppliers={suppliers} />
     </div>
   );

@@ -86,7 +86,7 @@ a {
 }
 
 /* Base Input Styling for High-Tech Forms */
-input[type="text"], input[type="number"], input[type="password"], input[type="date"], select, textarea {
+input:not([type]), input[type="text"], input[type="number"], input[type="password"], input[type="date"], input[type="email"], input[type="search"], input[type="tel"], input[type="url"], select, textarea {
   background-color: rgba(0, 0, 0, 0.4);
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
@@ -102,6 +102,25 @@ select option {
   background-color: var(--bg-secondary);
   color: var(--text-primary);
 }
+
+/*
+ * Dropdowns: the native arrow sat flush against the right border and the text against the left.
+ * Draw our own chevron with breathing room on both sides. !important so module CSS and inline styles that set
+ * `background:` or a small padding (several forms do) cannot remove the arrow or push text under it.
+ */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-left: 14px !important;
+  padding-right: 40px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5l5-5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 14px center !important;
+  background-size: 12px 8px !important;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+select:not([multiple]):not([size]):disabled { cursor: default; opacity: .6; }
 
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent-color);

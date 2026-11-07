@@ -10,7 +10,10 @@ export default async function NewMRFPage({ searchParams }: { searchParams: Promi
   const params = await searchParams;
   // Fall back to the header's active project, like the stock and issuance pages, instead of asking again.
   // This adds no access: the same id could already be passed in the URL, and the request actions check project access.
-  const projectId = params?.projectId || (await cookies()).get('activeProjectId')?.value;
+  const activeProjectId = (await cookies()).get('activeProjectId')?.value;
+  // A stale active project (e.g. deleted) falls back to the "select a project" prompt instead of "Project Not Found".
+  const activeProjectExists = !params?.projectId && !!activeProjectId && !!await prisma.project.findUnique({ where: { id: activeProjectId }, select: { id: true } });
+  const projectId = params?.projectId || (activeProjectExists ? activeProjectId : undefined);
 
   if (!projectId) {
     return (

@@ -17,7 +17,8 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
         variationOrders: { where: { currentStatus: 'APPROVED' } },
         billings: { where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } }, include: { payments: true } },
         expenses: { where: { status: 'APPROVED' } },
-        subcontractBillings: true,
+        // Approved or paid only: drafts and billings still in validation are not costs yet.
+        subcontractBillings: { where: { status: { in: ['APPROVED_FOR_PAYMENT', 'PAID'] } }, select: { currentGross: true } },
         projectCostLedgers: { where: { approvalStatus: 'APPROVED' }, select: { netAmount: true } },
         materialRequests: true,
         workers: { where: { employmentStatus: 'ACTIVE' } },
@@ -40,6 +41,13 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
   ]);
 
   if (!project) return null;
+
+  // The approved work-package plan's span (first planned start to last planned finish), used for the timeline when
+  // no contract dates are recorded, so an approved, fully dated plan is not shown as "Not scheduled".
+  const baseline = await prisma.projectSchedule.findFirst({ where: { projectId, workflowStatus: 'ACTIVE_BASELINE' }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+  const planSpan = baseline ? await prisma.scheduleActivity.aggregate({ where: { scheduleId: baseline.id }, _min: { plannedStartDate: true }, _max: { plannedFinishDate: true } }) : null;
+  const planStart = planSpan?._min.plannedStartDate ?? null;
+  const planFinish = planSpan?._max.plannedFinishDate ?? null;
 
   // Calculate Financials
   const originalContract = project.contractAmount || 0;
@@ -87,15 +95,24 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
   let daysElapsed = 0;
   let totalDays = 0;
   let timeProgress = 0;
+  const DAY = 1000 * 3600 * 24;
+  // Which dates the timeline shows: the contract dates when recorded, else the approved plan (finish inclusive).
+  const timelineSource: 'contract' | 'plan' | null = startDate && endDate ? 'contract' : planStart && planFinish && planFinish >= planStart ? 'plan' : null;
+  const shownStart = timelineSource === 'contract' ? startDate : timelineSource === 'plan' ? planStart : null;
+  const shownEnd = timelineSource === 'contract' ? endDate : timelineSource === 'plan' ? planFinish : null;
 
-  if (startDate && endDate) {
+  if (timelineSource && shownStart && shownEnd) {
     const now = new Date();
-    totalDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 3600 * 24)));
-    daysElapsed = Math.max(0, Math.ceil((Math.min(now.getTime(), endDate.getTime()) - startDate.getTime()) / (1000 * 3600 * 24)));
+    const endExclusive = timelineSource === 'plan' ? shownEnd.getTime() + DAY : shownEnd.getTime();
+    totalDays = Math.max(1, Math.round((endExclusive - shownStart.getTime()) / DAY));
+    daysElapsed = Math.max(0, Math.ceil((Math.min(now.getTime(), endExclusive) - shownStart.getTime()) / DAY));
     timeProgress = Math.min(100, Math.max(0, (daysElapsed / totalDays) * 100));
   }
+  const shortDate = (date: Date | null) => date ? date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' }) : 'N/A';
 
   const formatCurrency = (amount: number) => `₱ ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // With no approved ledger entries the cost is not known yet ("Not available"), which differs from a recorded ₱0.00.
+  // It is shown in a neutral colour: red read as an alarm next to the green "100% remaining".
   const actualCostDisplay = approvedActualCostEntries === 0 ? 'Not available' : formatCurrency(totalCostToDate);
 
   return (
@@ -151,7 +168,7 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Actual Cost to Date</h3>
-              <p style={{ margin: 0, fontSize: '1.5rem', fontWeight: 'bold', color: '#ff6b6b' }}>{actualCostDisplay}</p>
+              <p style={{ margin: 0, fontSize: '1.5rem', fontWeight: 'bold', color: approvedActualCostEntries === 0 ? 'var(--text-primary)' : '#ff6b6b' }}>{actualCostDisplay}</p>
             </div>
           </div>
           
@@ -186,29 +203,32 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
             <div>
               <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Project Timeline</h3>
               <p style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', color: '#a855f7' }}>
-                {/* Without both dates there is no timeline; "0 / 0 Days" read like a real zero-day schedule. */}
-                {startDate && endDate ? `${daysElapsed} / ${totalDays} ${totalDays === 1 ? 'Day' : 'Days'}` : 'Not scheduled'}
+                {/* Without dates there is no timeline; "0 / 0 Days" read like a real zero-day schedule. */}
+                {timelineSource ? `${daysElapsed} / ${totalDays} ${totalDays === 1 ? 'Day' : 'Days'}${timelineSource === 'plan' ? ' (plan)' : ''}` : 'Not scheduled'}
               </p>
             </div>
-            <ProjectTimelineEditor 
-              projectId={projectId} 
-              initialStartDate={project.startDate?.toISOString() || null} 
-              initialDuration={project.originalContractDuration || totalDays || null} 
+            {/* With no contract dates yet, the editor starts from the approved plan's dates, so one save records them. */}
+            <ProjectTimelineEditor
+              projectId={projectId}
+              initialStartDate={project.startDate?.toISOString() || (timelineSource === 'plan' ? planStart?.toISOString() ?? null : null)}
+              initialDuration={project.originalContractDuration || totalDays || null}
             />
           </div>
-          
+
           <div style={{ marginTop: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '8px' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Time Elapsed</span>
-              <span style={{ fontWeight: 'bold' }}>{timeProgress.toFixed(1)}%</span>
+              <span style={{ fontWeight: 'bold' }}>{timelineSource ? `${timeProgress.toFixed(1)}%` : '—'}</span>
             </div>
             <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
               <div style={{ width: `${timeProgress}%`, height: '100%', background: '#a855f7', borderRadius: '4px', transition: 'width 1s ease-in-out' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginTop: '8px', color: 'var(--text-secondary)' }}>
-              <span>Start: {startDate ? startDate.toLocaleDateString() : 'N/A'}</span>
-              <span>Target: {endDate ? endDate.toLocaleDateString() : 'N/A'}</span>
+              <span>Start: {shortDate(shownStart)}</span>
+              <span>{timelineSource === 'plan' ? 'Plan finish' : 'Target'}: {shortDate(shownEnd)}</span>
             </div>
+            {timelineSource === 'plan' && <p style={{ margin: '8px 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>No contract dates recorded; showing the approved work-package plan. Use Edit Timeline to record the contract dates.</p>}
+            {!timelineSource && <p style={{ margin: '8px 0 0', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Set the contract start and duration with Edit Timeline, or approve a dated work-package plan.</p>}
           </div>
         </div>
 
@@ -219,7 +239,8 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
         <section style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px' }}>
           <h3 style={{ margin: '0 0 12px', fontSize: '1rem' }}>Latest BOQ version</h3>
           {boqVersion ? <>
-            <p style={{ margin: '0 0 6px', fontWeight: 700 }}>Version {boqVersion.versionNumber}{boqVersion.versionLabel ? ` · ${boqVersion.versionLabel}` : ''}</p>
+            {/* The import label ("Draft BOQ Workspace Import") is kept after approval; showing it next to "Status: APPROVED" contradicted itself. */}
+            <p style={{ margin: '0 0 6px', fontWeight: 700 }}>Version {boqVersion.versionNumber}{boqVersion.versionLabel && !(boqVersion.status !== 'DRAFT' && /^draft\b/i.test(boqVersion.versionLabel)) ? ` · ${boqVersion.versionLabel}` : ''}</p>
             <p style={{ margin: '0 0 6px', color: 'var(--text-secondary)' }}>Status: {boqVersion.status.replaceAll('_', ' ')}</p>
             <p style={{ margin: '0 0 6px', color: 'var(--text-secondary)' }}>BOQ total: {boqVersion.totalAmount === null ? 'Not available' : formatCurrency(boqVersion.totalAmount)}</p>
             <p style={{ margin: '0 0 6px', color: 'var(--text-secondary)' }}>{project.awardedBoqItems.length} project BOQ {project.awardedBoqItems.length === 1 ? 'item' : 'items'}</p>
@@ -242,49 +263,21 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
       {/* Middle Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '16px' }}>
         
-        {/* Collections */}
-        <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', transition: 'transform 0.2s', cursor: 'pointer' }}>
-          <div style={{ background: 'rgba(74, 222, 128, 0.1)', padding: '12px', borderRadius: '50%' }}>
-            <DollarSign size={24} color="#4ade80" />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Total Collections</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{formatCurrency(totalCollected)}</div>
-          </div>
-        </div>
-
-        {/* Variation Orders */}
-        <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', transition: 'transform 0.2s', cursor: 'pointer' }}>
-          <div style={{ background: 'rgba(251, 191, 36, 0.1)', padding: '12px', borderRadius: '50%' }}>
-            <FileText size={24} color="#fbbf24" />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Approved VOs</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{formatCurrency(approvedAdditive - approvedDeductive)}</div>
-          </div>
-        </div>
-
-        {/* Purchase Orders */}
-        <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', transition: 'transform 0.2s', cursor: 'pointer' }}>
-          <div style={{ background: 'rgba(56, 189, 248, 0.1)', padding: '12px', borderRadius: '50%' }}>
-            <Truck size={24} color="#38bdf8" />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Active Purchase Orders</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{activePOs}</div>
-          </div>
-        </div>
-
-        {/* Workforce */}
-        <div style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', transition: 'transform 0.2s', cursor: 'pointer' }}>
-          <div style={{ background: 'rgba(244, 114, 182, 0.1)', padding: '12px', borderRadius: '50%' }}>
-            <HardHat size={24} color="#f472b6" />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Active Site Workers</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{activeWorkers}</div>
-          </div>
-        </div>
+        {/* These cards looked clickable (pointer cursor) but went nowhere; each now opens where its number comes from. */}
+        {([
+          { href: `/projects/${projectId}?tab=billing`, label: 'Total Collections', value: formatCurrency(totalCollected), icon: <DollarSign size={24} color="#4ade80" />, tint: 'rgba(74, 222, 128, 0.1)' },
+          { href: `/projects/${projectId}?tab=variation-orders`, label: 'Approved VOs', value: formatCurrency(approvedAdditive - approvedDeductive), icon: <FileText size={24} color="#fbbf24" />, tint: 'rgba(251, 191, 36, 0.1)' },
+          { href: '/procurement/purchase-orders', label: 'Active Purchase Orders', value: String(activePOs), icon: <Truck size={24} color="#38bdf8" />, tint: 'rgba(56, 189, 248, 0.1)' },
+          { href: '/workers', label: 'Active Site Workers', value: String(activeWorkers), icon: <HardHat size={24} color="#f472b6" />, tint: 'rgba(244, 114, 182, 0.1)' },
+        ]).map(card => (
+          <Link key={card.label} href={card.href} className={styles.statCard} style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', color: 'inherit', textDecoration: 'none' }}>
+            <div style={{ background: card.tint, padding: '12px', borderRadius: '50%' }}>{card.icon}</div>
+            <div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{card.label}</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{card.value}</div>
+            </div>
+          </Link>
+        ))}
 
       </div>
 
@@ -320,7 +313,7 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
               <span style={{ fontWeight: 'bold' }}>{formatCurrency(totalExpenses)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Subcontractor Billings</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Subcontractor Billings (approved)</span>
               <span style={{ fontWeight: 'bold' }}>{formatCurrency(totalSubcontract)}</span>
             </div>
             <div style={{ padding: '16px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '10px' }}>

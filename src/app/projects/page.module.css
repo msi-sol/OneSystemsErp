@@ -189,27 +189,44 @@
 .actionGroupHeader { align-items: flex-start; margin: 0 0 0.8rem; }
 .actionGroupHeader h3 { margin: 0; font-size: 1rem; font-weight: 700; }
 .actionGroupHeader p { max-width: 780px; font-size: 0.82rem; }
-.actionList { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
-
-.actionCard {
-  min-width: 0;
-  padding: 1rem;
+/* One project per full-width row: project · BOQ / WPS status · actions. */
+.actionList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.16);
+  overflow: hidden;
 }
 
-.actionCardTop { align-items: flex-start; }
+.actionCard {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 2.5fr) minmax(0, 2.5fr) minmax(170px, auto);
+  grid-template-areas: "project facts links" "project schedule links";
+  align-items: center;
+  column-gap: 1.5rem;
+  row-gap: 0.2rem;
+  padding: 0.85rem 1rem;
+  transition: background-color 150ms ease-out;
+}
+.actionCard + .actionCard { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.actionCard:hover { background: rgba(255, 255, 255, 0.025); }
+
+.actionCardTop { grid-area: project; align-items: center; min-width: 0; }
 .actionProjectText { min-width: 0; }
-.actionProjectText h4 { margin: 0; color: var(--text-primary); font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
-.actionProjectText p { margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+.actionProjectText h4 { margin: 0; color: var(--text-primary); font-size: 0.95rem; font-weight: 700; overflow-wrap: anywhere; }
+.actionProjectText p { margin: 0.2rem 0 0; color: var(--text-muted); font-size: 0.8rem; overflow-wrap: anywhere; }
 .actionCardTop .badge { flex: 0 0 auto; white-space: nowrap; }
-.actionFacts { display: grid; gap: 0.55rem; margin: 1rem 0 0; }
-.actionFacts > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.5rem; }
-.actionFacts dt { color: var(--text-secondary); font-size: 0.78rem; }
+.actionFacts { grid-area: facts; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 0; align-self: end; }
+.actionFacts > div { display: grid; gap: 0.15rem; min-width: 0; }
+.actionFacts dt { color: var(--text-secondary); font-size: 0.72rem; }
 .actionFacts dd { margin: 0; color: var(--text-primary); font-size: 0.82rem; font-weight: 600; overflow-wrap: anywhere; }
-.scheduleName { margin: 0.65rem 0 0; color: var(--text-muted); font-size: 0.78rem; overflow-wrap: anywhere; }
-.actionCardLinks { align-items: flex-start; flex-wrap: wrap; margin-top: 1rem; }
+.scheduleName { grid-area: schedule; align-self: start; margin: 0; color: var(--text-muted); font-size: 0.76rem; overflow-wrap: anywhere; }
+.actionCardLinks { grid-area: links; flex-direction: column; align-items: flex-end; justify-content: center; gap: 0.35rem; margin: 0; text-align: right; }
 .primaryProjectAction { color: var(--accent-color); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .moduleLinks { display: flex; flex-wrap: wrap; gap: 0.85rem; font-size: 0.8rem; }
 .moduleLinks a { color: var(--text-secondary); text-decoration: underline; text-underline-offset: 3px; }
@@ -241,3 +258,11 @@
   .actionGroup { padding: 0.85rem; }
   .actionCard { padding: 0.85rem; }
 }
+
+/* Narrow screens: each row stacks its parts. */
+@media (max-width: 900px) {
+  .actionCard { grid-template-columns: minmax(0, 1fr); grid-template-areas: "project" "facts" "schedule" "links"; row-gap: 0.6rem; }
+  .actionCardTop { align-items: flex-start; }
+  .actionCardLinks { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) { .actionCard { transition: none; } }

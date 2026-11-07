@@ -54,6 +54,16 @@ describe('BOQ workspace response parsing', () => {
     });
   });
 
+  it('accepts the decimal-string total the confirm route actually returns', async () => {
+    const response = Response.json({
+      success: true, uploadId: 'upload-1', projectId: 'project-1', status: 'DRAFT_UPLOADED',
+      report: { fileUrl: '/source', grandTotal: '500000.00', validRowsCount: 7, warningRowsCount: 4, errorRowsCount: 0 },
+    });
+    await expect(readWorkspaceResponse(response, 'confirm')).resolves.toMatchObject({ success: true, projectId: 'project-1', report: { grandTotal: 500000 } });
+    const broken = Response.json({ success: true, uploadId: 'u', projectId: 'p', status: 'DRAFT', report: { fileUrl: '/s', grandTotal: 'n/a', validRowsCount: 1, warningRowsCount: 0, errorRowsCount: 0 } });
+    await expect(readWorkspaceResponse(broken, 'confirm')).rejects.toThrow(/draft could not be saved/i);
+  });
+
   it('preserves a useful JSON error for a non-success HTTP response', async () => {
     const response = Response.json({ success: false, error: 'The document token expired; analyze the workbook again.' }, { status: 409 });
     await expect(readWorkspaceResponse(response, 'confirm')).rejects.toThrow(/document token expired/i);

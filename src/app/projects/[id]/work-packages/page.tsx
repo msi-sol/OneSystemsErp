@@ -22,7 +22,7 @@ export default async function WorkPackagesModulePage({params,searchParams}:{para
   const capacity=await planningCapacity(actor,id);
   if(!capacity.canView)notFound();
   const [project,version,schedules]=await Promise.all([
-    prisma.project.findUnique({where:{id},select:{id:true,name:true,status:true,contractAmount:true,boqLocked:true,startDate:true,
+    prisma.project.findUnique({where:{id},select:{id:true,name:true,status:true,contractAmount:true,boqLocked:true,startDate:true,location:true,
       awardedBoqItems:{orderBy:{createdAt:'asc'},select:{id:true,itemCode:true,description:true,unit:true,quantity:true,totalCost:true}},
       userAssignments:{where:{assignmentStatus:'active'},select:{user:{select:{id:true,name:true}}}},
     }}),
@@ -78,7 +78,7 @@ export default async function WorkPackagesModulePage({params,searchParams}:{para
   const viewLabels:Record<string,string>={scope:'Scope',sequence:'Dates & sequence',locations:'Locations & constraints',constraints:'Locations & constraints',resources:'Resources & DUPA',review:'Review & approve','look-ahead':'Look-ahead',weekly:'Weekly commitments','site-logs':'Daily site logs','operational-constraints':'Site constraints'};
   const openPackage=query.package?selected?.activities.find(activity=>activity.id===query.package):undefined;
   const trail=openPackage?[{label:`${openPackage.activityCode?`${openPackage.activityCode} · `:''}${openPackage.name}`}]:query.view&&viewLabels[query.view]?[{label:viewLabels[query.view]}]:[];
-  return <PlanningModuleShell project={project} active="work-packages" trail={trail}><WorkPackageModuleClient key={`${selected?.id||'empty'}:${query.package||query.view||'schedule'}:${query.activity||''}`} projectId={id} projectStartDate={project.startDate?.toISOString()||null}
+  return <PlanningModuleShell project={project} active="work-packages" trail={trail}><WorkPackageModuleClient key={`${selected?.id||'empty'}:${query.package||''}:${query.activity||''}`} projectId={id} projectStartDate={project.startDate?.toISOString()||null} projectSite={project.location?.trim().slice(0,191)||'Project site'}
     approvedBOQ={project.boqLocked&&!!version&&['APPROVED','LOCKED'].includes(version.status)} boqItems={project.awardedBoqItems} schedule={schedule} summary={summary} capacity={{canEdit:capacity.canEditPlan,canEngineerReview:capacity.canReviewPlan,canApprove:capacity.canApprovePlan,canRecordSiteLogs:capacity.canRecordSiteLogs,canManageWeekly:capacity.canManageWeekly}}
-    members={project.userAssignments.map(assignment=>({id:assignment.user.id,name:assignment.user.name||'Project member'}))} initialView={query.view} initialPackage={query.package} initialPackageTab={query.tab} revisionComparison={revisionComparison} executionWarning={executionWarning} executionActivityId={query.activity} hasOpenDraft={!!draft}/>{activeBaseline && <p className={styles.muted} style={{marginTop:24}}>After the baseline: review the procurement budget, then generate package-linked materials. <Link className={styles.link} href={`/projects/${id}/benchmark`}>Open procurement benchmark review →</Link></p>}</PlanningModuleShell>;
+    members={project.userAssignments.map(assignment=>({id:assignment.user.id,name:assignment.user.name||'Project member'}))} initialView={query.view} initialPackage={query.package} initialPackageTab={query.tab} revisionComparison={revisionComparison} executionWarning={executionWarning} executionActivityId={query.activity} hasOpenDraft={!!draft}/>{activeBaseline && <p className={styles.muted} style={{marginTop:24}}>After the baseline: review the procurement budget, then generate package-linked materials. <Link className={styles.link} href={`/projects/${id}?tab=benchmark`}>Open Procurement Benchmark →</Link></p>}</PlanningModuleShell>;
 }

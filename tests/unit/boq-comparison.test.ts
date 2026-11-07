@@ -40,6 +40,16 @@ describe('BOQ file-to-system comparison', () => {
     expect(compareBOQLines([line()], [line({ unitCost: '550', amount: '55000' })])[0].changed).toEqual(['unitCost', 'amount']);
   });
 
+  it('does not count a rate recalculated from an unchanged amount as a difference', () => {
+    // File states 98,313.33 but its amount says 103,229 for 1 lot; the importer keeps the amount.
+    const file = line({ quantity: '1', unitCost: '98313.33', amount: '103229' });
+    const [rate] = compareBOQLines([file], [line({ quantity: '1', unitCost: '103229', amount: '103229' })]);
+    expect(rate.status).toBe('Matched');
+    expect(summarizeComparison([rate]).differences).toBe(0);
+    // A rate edited to something that is not amount ÷ quantity stays a real change.
+    expect(compareBOQLines([file], [line({ quantity: '1', unitCost: '90000', amount: '103229' })])[0].status).toBe('Changed');
+  });
+
   it('treats a quantity missing in the file as different from a stated one', () => {
     expect(compareBOQLines([line({ quantity: '' })], [line({ quantity: '0' })])[0].changed).toContain('quantity');
   });

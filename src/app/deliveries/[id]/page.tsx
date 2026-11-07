@@ -24,6 +24,17 @@ export default async function DeliveryDetailsPage({ params }: { params: Promise<
 
   if (!delivery) notFound();
 
+  // Ordered, already received (other approved receipts) and outstanding per material, so staggered deliveries and
+  // over-receipts are visible before approval. Over-delivery stays allowed (existing policy); it is only flagged.
+  const [orderLines, otherReceipts] = await Promise.all([
+    prisma.purchaseOrderItem.findMany({ where: { poId: delivery.poId }, select: { consolidatedBoqItemId: true, quantity: true } }),
+    prisma.deliveryItem.findMany({ where: { delivery: { poId: delivery.poId, id: { not: delivery.id }, status: { in: ['APPROVED', 'COMPLETED'] } } }, select: { consolidatedBoqItemId: true, quantity: true } }),
+  ]);
+  const sumBy = (rows: { consolidatedBoqItemId: string; quantity: number }[]) => rows.reduce((map, row) => map.set(row.consolidatedBoqItemId, (map.get(row.consolidatedBoqItemId) || 0) + Number(row.quantity)), new Map<string, number>());
+  const orderedByMaterial = sumBy(orderLines), receivedBefore = sumBy(otherReceipts);
+  const outstandingFor = (materialId: string) => Math.max(0, (orderedByMaterial.get(materialId) || 0) - (receivedBefore.get(materialId) || 0));
+  const overReceipts = delivery.items.filter(item => item.quantity > outstandingFor(item.consolidatedBoqItemId));
+
   const cookieStore = await cookies();
   const __session = await verifySession();
   const sessionId = __session?.id || '';
@@ -150,27 +161,44 @@ export default async function DeliveryDetailsPage({ params }: { params: Promise<
         )}
       </div>
 
+      {delivery.status === 'FOR_ACCOUNTANT_APPROVAL' && overReceipts.length > 0 && (
+        <div role="alert" style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#fcd34d' }}>
+          This receipt is more than the PO&apos;s outstanding quantity for {overReceipts.length} item{overReceipts.length === 1 ? '' : 's'}. The extra quantity will be recorded and costed at the PO rate if approved; check it with the supplier first.
+        </div>
+      )}
       <div className={styles.tableContainer}>
         <table className={styles.table}>
           <thead>
             <tr>
               <th>Category</th>
               <th>Item Description</th>
+              <th>Ordered</th>
+              <th>Received before</th>
+              <th>Outstanding</th>
               <th>DR Qty</th>
               <th>Actual Qty</th>
               <th>Remarks</th>
             </tr>
           </thead>
           <tbody>
-            {delivery.items.map(item => (
+            {delivery.items.map(item => {
+              const outstanding = outstandingFor(item.consolidatedBoqItemId);
+              const over = item.quantity > outstanding;
+              return (
               <tr key={item.id} style={{ background: item.drQuantity !== item.quantity ? 'rgba(239, 68, 68, 0.05)' : 'transparent' }}>
-                <td>{item.consolidatedBoqItem.category}</td>
+                <td>{item.consolidatedBoqItem.category || '-'}</td>
                 <td>{item.consolidatedBoqItem.description}</td>
+                <td>{orderedByMaterial.get(item.consolidatedBoqItemId) ?? 0}</td>
+                <td>{receivedBefore.get(item.consolidatedBoqItemId) ?? 0}</td>
+                <td>{outstanding}</td>
                 <td>{item.drQuantity !== null ? item.drQuantity : 'N/A'}</td>
-                <td style={{ fontWeight: 'bold', color: item.drQuantity !== item.quantity ? '#ef4444' : 'inherit' }}>{item.quantity}</td>
+                <td style={{ fontWeight: 'bold', color: item.drQuantity !== item.quantity ? '#ef4444' : over ? '#f59e0b' : 'inherit' }}>
+                  {item.quantity}{over && <span style={{ display: 'block', fontWeight: 'normal', fontSize: '0.8rem' }}>{item.quantity - outstanding} over outstanding</span>}
+                </td>
                 <td>{item.remarks || '-'}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

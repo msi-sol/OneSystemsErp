@@ -7,6 +7,7 @@ import { packageDurationDays, procurementLeadDays, laborCrew } from './work-pack
 import { groupSectionsIntoPackages } from './package-grouping';
 import { randomUUID } from 'node:crypto';
 import { assertWorkPackageExecutedScope } from './work-package-execution';
+import { ensureTopLevelProjectLocationInTransaction } from './work-package-project-locations';
 import {parseBOQReviewDocument,getBOQSectionIdentityByItemId}from'@/lib/boq/review-state';
 
 const EDITABLE = new Set<string>([
@@ -354,6 +355,9 @@ export async function runWorkPackagePlanningCommand(args: { projectId: string; a
   else if (action === 'clear-packages') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion']);
   else if (action === 'apply-suggested-dates') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'startDate']);
   else if (action === 'locate-unlocated') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'locationId']);
+  else if (action === 'apply-plan-dates') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'dates', 'links']);
+  else if (action === 'locate-all-at') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'name']);
+  else if (action === 'locate-package') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'activityId', 'locationId']);
   else if (action === 'apply-grouping') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'groups']);
   else if (action === 'create') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'name', 'activityCode', 'description', 'unit', 'plannedQuantity', 'plannedWeight', 'plannedStartDate', 'plannedFinishDate', 'plannedDuration']);
   else if (action === 'allocate') assertOnly(body, ['action', 'currentScheduleId', 'expectedRowVersion', 'boqItemId', 'activityId', 'allocatedQuantity','allocationId','locationId']);
@@ -421,6 +425,99 @@ export async function runWorkPackagePlanningCommand(args: { projectId: string; a
       await tx.projectSchedule.updateMany({ where: { id: schedule.id, rowVersion: expected + 1 }, data: { description: JSON.stringify(details) } });
       await audit(tx, args.actor, 'BOQ_WPS_SCOPE_LOCATED', schedule.id, null, { locationId, allocationIds: unlocated.map((row) => row.id), rowVersion: expected + 1 });
       return { scheduleId: schedule.id, rowVersion: expected + 1, located: unlocated.length };
+    }
+
+    if (action === 'locate-all-at') {
+      // One step for single-site projects: name the place where the work happens (for example the project
+      // site), and every scope line without a location gets it. The project location is created when no
+      // active top-level location has that name yet. Lines that already have a location keep it.
+      const name = text(body.name, 'LOCATION_NAME_REQUIRED');
+      const allocations = await tx.scheduleBOQAllocation.findMany({ where: { scheduleId: schedule.id }, select: { id: true } });
+      if (!allocations.length) conflict('NO_SCOPE_TO_LOCATE');
+      const locationId = await ensureTopLevelProjectLocationInTransaction(tx, { projectId: args.projectId, actorId: args.actor.id, name });
+      // Creating the location copies it into this draft and raises its rowVersion, so continue from the stored row.
+      const fresh = await tx.projectSchedule.findFirst({ where: { id: schedule.id, projectId: args.projectId } });
+      if (!fresh) conflict('SCHEDULE_VERSION_CONFLICT');
+      const details = readWorkPackagePlanDetails(fresh.description);
+      const unlocated = allocations.filter((row) => !details.allocationLocations[row.id]);
+      for (const row of unlocated) details.allocationLocations[row.id] = locationId;
+      await bump(tx, fresh, fresh.rowVersion, { description: JSON.stringify(details) });
+      await audit(tx, args.actor, 'BOQ_WPS_SCOPE_LOCATED', schedule.id, null, { locationId, name, allocationIds: unlocated.map((row) => row.id), rowVersion: fresh.rowVersion + 1 });
+      return { scheduleId: schedule.id, rowVersion: fresh.rowVersion + 1, locationId, located: unlocated.length };
+    }
+
+    if (action === 'apply-plan-dates') {
+      // Saves the planner's accepted (and possibly edited) AI Check suggestions for the Dates & sequence step in
+      // one change: start/finish dates for chosen packages and finish-to-start links. All or nothing.
+      const record = (value: unknown, code: string) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : fail(code));
+      const rawDates = body.dates === undefined ? [] : Array.isArray(body.dates) ? body.dates : fail('INVALID_DATES');
+      const rawLinks = body.links === undefined ? [] : Array.isArray(body.links) ? body.links : fail('INVALID_LINKS');
+      if (!rawDates.length && !rawLinks.length) fail('NOTHING_TO_APPLY');
+      if (rawDates.length > 500 || rawLinks.length > 200) fail('TOO_MANY_CHANGES');
+      const activityIds = new Set((await tx.scheduleActivity.findMany({ where: { scheduleId: schedule.id }, select: { id: true } })).map((row) => row.id));
+      const dayMs = 86_400_000;
+      const seenDates = new Set<string>();
+      const dates = rawDates.map((raw) => {
+        const row = record(raw, 'INVALID_DATES');
+        const activityId = text(row.activityId, 'ACTIVITY_ID_REQUIRED');
+        if (!activityIds.has(activityId)) fail('ACTIVITY_NOT_FOUND', 404);
+        if (seenDates.has(activityId)) fail('DUPLICATE_PACKAGE_DATES');
+        seenDates.add(activityId);
+        const start = parseDate(row.start, 'INVALID_START_DATE'), finish = parseDate(row.finish, 'INVALID_FINISH_DATE');
+        if (!start || !finish) fail('START_AND_FINISH_REQUIRED');
+        if (finish.getTime() < start.getTime()) conflict('FINISH_BEFORE_START');
+        const duration = Math.round((finish.getTime() - start.getTime()) / dayMs) + 1;
+        if (duration > 3650) fail('INVALID_PLANNED_DURATION');
+        return { activityId, start, finish, duration };
+      });
+      const existing = await tx.scheduleDependency.findMany({ where: { scheduleId: schedule.id }, select: { predecessorId: true, successorId: true, type: true } });
+      const outgoing = new Map<string, string[]>();
+      for (const link of existing) outgoing.set(link.predecessorId, [...(outgoing.get(link.predecessorId) ?? []), link.successorId]);
+      const links = rawLinks.map((raw) => {
+        const row = record(raw, 'INVALID_LINKS');
+        const predecessorId = text(row.predecessorId, 'PREDECESSOR_REQUIRED'), successorId = text(row.successorId, 'SUCCESSOR_REQUIRED');
+        if (predecessorId === successorId) fail('DEPENDENCY_SELF_LINK');
+        if (!activityIds.has(predecessorId) || !activityIds.has(successorId)) fail('DEPENDENCY_ACTIVITY_NOT_FOUND', 404);
+        const lagDays = row.lagDays === undefined ? 0 : row.lagDays;
+        if (typeof lagDays !== 'number' || !Number.isSafeInteger(lagDays) || lagDays < 0 || lagDays > 36500) fail('INVALID_DEPENDENCY_LAG');
+        const remarks = row.remarks === undefined || row.remarks === null || row.remarks === '' ? null : text(row.remarks, 'INVALID_DEPENDENCY_REMARKS', 500);
+        if (existing.some((link) => link.predecessorId === predecessorId && link.successorId === successorId && link.type === 'FS')) conflict('DEPENDENCY_ALREADY_EXISTS');
+        // Same loop check as a single link, counting the links accepted before this one.
+        const pending = [successorId]; const visited = new Set<string>();
+        while (pending.length) { const current = pending.pop()!; if (current === predecessorId) conflict('DEPENDENCY_CYCLE'); if (visited.has(current)) continue; visited.add(current); pending.push(...(outgoing.get(current) ?? [])); }
+        outgoing.set(predecessorId, [...(outgoing.get(predecessorId) ?? []), successorId]);
+        existing.push({ predecessorId, successorId, type: 'FS' });
+        return { predecessorId, successorId, lagDays, remarks };
+      });
+      // A revision's resources must be reviewed again when its dates move (same rule as editing one package).
+      const patch: Prisma.ProjectScheduleUpdateManyMutationInput = {};
+      if (schedule.previousBaselineId && dates.length) {
+        const details = readWorkPackagePlanDetails(schedule.description);
+        details.resourcesReviewNeeded = { ...details.resourcesReviewNeeded, ...Object.fromEntries(dates.map((row) => [row.activityId, true])) };
+        patch.description = JSON.stringify(details);
+      }
+      await bump(tx, schedule, expected, patch);
+      for (const row of dates) await tx.scheduleActivity.update({ where: { id: row.activityId }, data: { plannedStartDate: row.start, plannedFinishDate: row.finish, plannedDuration: row.duration } });
+      for (const link of links) await tx.scheduleDependency.create({ data: { scheduleId: schedule.id, predecessorId: link.predecessorId, successorId: link.successorId, type: 'FS', lagDays: link.lagDays, remarks: link.remarks } });
+      await audit(tx, args.actor, 'BOQ_WPS_PLAN_DATES_APPLIED', schedule.id, null, { dates: dates.map((row) => ({ activityId: row.activityId, start: row.start.toISOString().slice(0, 10), finish: row.finish.toISOString().slice(0, 10) })), links, rowVersion: expected + 1 });
+      return { scheduleId: schedule.id, rowVersion: expected + 1, dated: dates.length, linked: links.length };
+    }
+
+    if (action === 'locate-package') {
+      // Set (or clear, with an empty locationId) the location of every scope line in one package at once.
+      const activityId = text(body.activityId, 'ACTIVITY_ID_REQUIRED');
+      const locationId = body.locationId == null || body.locationId === '' ? null : text(body.locationId, 'INVALID_LOCATION_ID');
+      const details = readWorkPackagePlanDetails(schedule.description);
+      if (locationId && !details.locations.some((row) => row.id === locationId && row.isActive !== false)) fail('ACTIVE_LOCATION_REQUIRED');
+      const activity = await tx.scheduleActivity.findFirst({ where: { id: activityId, scheduleId: schedule.id }, select: { id: true } });
+      if (!activity) fail('ACTIVITY_NOT_FOUND', 404);
+      const allocations = await tx.scheduleBOQAllocation.findMany({ where: { scheduleId: schedule.id, activityId }, select: { id: true } });
+      if (!allocations.length) conflict('PACKAGE_HAS_NO_SCOPE');
+      const before = Object.fromEntries(allocations.map((row) => [row.id, details.allocationLocations[row.id] ?? null]));
+      for (const row of allocations) { if (locationId) details.allocationLocations[row.id] = locationId; else delete details.allocationLocations[row.id]; }
+      await bump(tx, schedule, expected, { description: JSON.stringify(details) });
+      await audit(tx, args.actor, 'BOQ_WPS_PACKAGE_LOCATED', activityId, before, { locationId, allocationIds: allocations.map((row) => row.id), rowVersion: expected + 1 });
+      return { scheduleId: schedule.id, rowVersion: expected + 1, located: allocations.length };
     }
 
     if (action === 'apply-suggested-dates') {

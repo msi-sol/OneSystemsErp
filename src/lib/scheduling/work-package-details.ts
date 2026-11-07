@@ -245,7 +245,7 @@ export async function updateWorkPackageDetails(args: { projectId: string; actor:
     'remove-resource': ['action', 'scheduleId', 'expectedRowVersion', 'id'],
     'allocation-location': ['action', 'scheduleId', 'expectedRowVersion', 'allocationId', 'locationId'],
     'suggest-resources': ['action', 'scheduleId', 'expectedRowVersion','activityId'],
-    'confirm-resources': ['action','scheduleId','expectedRowVersion','activityId'],
+    'confirm-resources': ['action','scheduleId','expectedRowVersion','activityId','activityIds'],
     'package-assumptions': ['action','scheduleId','expectedRowVersion','activityId','plannedStartDay','procurementLeadDays','laborCrew'],
     'apply-breakdown': ['action','scheduleId','expectedRowVersion','uploadId','categories','reason','acknowledgeExisting','replaceResourceIds'],
   };
@@ -396,13 +396,22 @@ export async function updateWorkPackageDetails(args: { projectId: string; actor:
     }
 
     if(action==='confirm-resources'){
-      const activityId=requiredText(body.activityId,'ACTIVITY_ID_REQUIRED');
-      if(!activities.some(row=>row.id===activityId))fail('ACTIVITY_NOT_FOUND',404);
-      const resources=details.resources.filter(row=>row.activityId===activityId);
-      if(!resources.length)fail('NO_RESOURCE_ALLOWANCES');
-      for(const resource of resources){resource.isSystemSuggested=false;resource.reviewedAt=new Date().toISOString();resource.reviewedById=args.actor.id;}
-      if(details.resourcesReviewNeeded)delete details.resourcesReviewNeeded[activityId];
-      return bumpAndSave(tx,schedule,expected,args.actor,'WPS_ALLOWANCES_REVIEWED',details,before,{activityId,resources});
+      // One package (activityId) or several at once (activityIds, the step's "Confirm all"), in one save.
+      if(body.activityIds!==undefined&&body.activityId!==undefined)fail('USE_ACTIVITY_ID_OR_ACTIVITY_IDS');
+      const ids=body.activityIds!==undefined
+        ?(Array.isArray(body.activityIds)&&body.activityIds.length>0&&body.activityIds.length<=500?[...new Set(body.activityIds.map(value=>requiredText(value,'ACTIVITY_ID_REQUIRED')))]:fail('INVALID_ACTIVITY_IDS'))
+        :[requiredText(body.activityId,'ACTIVITY_ID_REQUIRED')];
+      const reviewedAt=new Date().toISOString();
+      const confirmed:PlanResource[]=[];
+      for(const activityId of ids){
+        if(!activities.some(row=>row.id===activityId))fail('ACTIVITY_NOT_FOUND',404);
+        const resources=details.resources.filter(row=>row.activityId===activityId);
+        if(!resources.length)fail('NO_RESOURCE_ALLOWANCES');
+        for(const resource of resources){resource.isSystemSuggested=false;resource.reviewedAt=reviewedAt;resource.reviewedById=args.actor.id;}
+        if(details.resourcesReviewNeeded)delete details.resourcesReviewNeeded[activityId];
+        confirmed.push(...resources);
+      }
+      return bumpAndSave(tx,schedule,expected,args.actor,'WPS_ALLOWANCES_REVIEWED',details,before,ids.length===1?{activityId:ids[0],resources:confirmed}:{activityIds:ids,resources:confirmed});
     }
     if (!activities.length) conflict('SCHEDULE_ACTIVITIES_REQUIRED');
     const added: PlanResource[] = [];

@@ -1,10 +1,13 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
+import SideDrawer from '@/components/ui/SideDrawer';
 import Decimal from 'decimal.js';
 import { CONSTRAINT_TYPE_LABEL, CONSTRAINT_TYPES } from '@/lib/scheduling/work-package-constraints';
 import { formatLocationPath } from '@/lib/scheduling/work-package-location';
 import styles from '../planning/planning.module.css';
+import stepStyles from './locations-step.module.css';
+import { estimatePhPublicWorksBudget } from '@/lib/scheduling/work-package-budget';
 import type { WorkPackagePlanDetails } from '@/lib/scheduling/work-package-details-types';
 
 type Location = { id: string; name: string; parentId: string | null;code?:string;type?:string;isActive?:boolean };
@@ -33,6 +36,8 @@ type Props = {
   canEdit: boolean;
   view: View;
   packageScoped?: boolean;
+  /** The package's BOQ value (package view only): shows each type's original BOQ share next to its allowance. */
+  packageValue?: number;
   onSaved: () => void;
 };
 
@@ -88,7 +93,7 @@ function ActivitySelect({ id, value, activities, onChange, label = 'Work package
   </div>;
 }
 
-export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVersion, details, activities, members, canEdit, view, onSaved, packageScoped = false }: Props) {
+export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVersion, details, activities, members, canEdit, view, onSaved, packageScoped = false, packageValue }: Props) {
   const [versionOverride, setVersionOverride] = useState({ source: rowVersion, value: rowVersion });
   const version = versionOverride.source === rowVersion ? versionOverride.value : rowVersion;
   const [busy, setBusy] = useState(false);
@@ -97,9 +102,12 @@ export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVers
   const [location, setLocation] = useState<LocationFields>(emptyLocation);
   const [constraint, setConstraint] = useState<ConstraintFields>(emptyConstraint);
   const [resource, setResource] = useState<ResourceFields>(emptyResource);
-  const [confirmSuggest, setConfirmSuggest] = useState(false);
   const [removeLocationId, setRemoveLocationId] = useState('');
   const [removeResourceId, setRemoveResourceId] = useState('');
+  const [constraintFormOpen, setConstraintFormOpen] = useState(false);
+  const [resourceFormOpen, setResourceFormOpen] = useState(false);
+  const [resolving, setResolving] = useState<{ id: string; note: string } | null>(null);
+  const constraintOpener = useRef<HTMLElement | null>(null);
 
   const visibleLocations = useMemo(() => [...details.locations].sort((a, b) => a.name.localeCompare(b.name)), [details.locations]);
   const parentName = (parentId: string | null) => parentId ? details.locations.find((item) => item.id === parentId)?.name ?? 'Missing parent' : 'Project-wide';
@@ -132,7 +140,6 @@ export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVers
       const resultRecord = result && typeof result === 'object' ? result as Record<string, unknown> : {};
       if (typeof resultRecord.rowVersion === 'number' && Number.isSafeInteger(resultRecord.rowVersion)) setVersionOverride({ source: rowVersion, value: resultRecord.rowVersion });
       setSuccess(doneText);
-      setConfirmSuggest(false);
       setRemoveLocationId('');
       setRemoveResourceId('');
       onSaved();
@@ -154,41 +161,88 @@ export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVers
     setLocation({ id: item.id, name: item.name, parentId: item.parentId ?? '',code:item.code||'',type:item.type||'' });
     setError(''); setSuccess('');
   }
-  async function saveConstraint(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const saved = await mutate('constraint', {
-      id: constraint.id || undefined, activityId: constraint.activityId || null,
-      description: constraint.description.trim(), ownerId: constraint.ownerId || null,
-      neededBy: constraint.neededBy || null, blocking: constraint.blocking,
-      status: constraint.status, resolution: constraint.resolution.trim() || null,
-      type:constraint.type,title:constraint.title,
-    }, constraint.id ? 'Constraint updated.' : 'Constraint recorded.');
-    if (saved) setConstraint(emptyConstraint());
-  }
-  function editConstraint(item: Constraint) {
-    setConstraint({ id: item.id, activityId: item.activityId ?? '', description: item.description, ownerId: item.ownerId ?? '', neededBy: item.neededBy ?? '', blocking: item.blocking, status: item.status, resolution: item.resolution ?? '',type:item.type||'OTHER',title:item.title||item.description });
+  // Constraints are optional: the form opens on demand (a side panel; inline inside a package panel, which is itself a side panel).
+  function openConstraintForm(next: ConstraintFields, opener: HTMLElement) {
+    constraintOpener.current = opener;
+    setConstraint(next); setConstraintFormOpen(true); setResolving(null);
     setError(''); setSuccess('');
   }
+  function openNewConstraint(opener: HTMLElement) {
+    openConstraintForm({ ...emptyConstraint(), activityId: packageScoped && activities.length === 1 ? activities[0].id : '' }, opener);
+  }
+  function closeConstraintForm() {
+    setConstraintFormOpen(false); setConstraint(emptyConstraint()); setError('');
+    const opener = constraintOpener.current;
+    constraintOpener.current = null;
+    if (opener) setTimeout(() => { if (opener.isConnected) opener.focus(); }, 0);
+  }
+  async function saveConstraint(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const title = constraint.title.trim();
+    const saved = await mutate('constraint', {
+      id: constraint.id || undefined, activityId: constraint.activityId || null,
+      description: constraint.description.trim() || title, ownerId: constraint.ownerId || null,
+      neededBy: constraint.neededBy || null, blocking: constraint.blocking,
+      status: constraint.status, resolution: constraint.resolution.trim() || null,
+      type:constraint.type,title,
+    }, constraint.id ? 'Constraint updated.' : 'Constraint recorded.');
+    if (saved) closeConstraintForm();
+  }
+  function editConstraint(item: Constraint, opener: HTMLElement) {
+    const title = item.title || item.description;
+    openConstraintForm({ id: item.id, activityId: item.activityId ?? '', description: item.description === title ? '' : item.description, ownerId: item.ownerId ?? '', neededBy: item.neededBy ?? '', blocking: item.blocking, status: item.status, resolution: item.resolution ?? '',type:item.type||'OTHER',title }, opener);
+  }
+  async function resolveConstraint(item: Constraint, note: string) {
+    const saved = await mutate('constraint', {
+      id: item.id, activityId: item.activityId, description: item.description, ownerId: item.ownerId,
+      neededBy: item.neededBy, blocking: item.blocking, status: 'RESOLVED', resolution: note.trim(),
+      type: item.type || 'OTHER', title: item.title || item.description,
+    }, 'Constraint resolved.');
+    if (saved) setResolving(null);
+  }
+  const constraintTypeLabel = (type?: string) => (CONSTRAINT_TYPE_LABEL as Record<string, string>)[type || 'OTHER'] ?? 'Other';
+  const constraintForm = <form onSubmit={saveConstraint}>
+    {packageScoped && <h4>{constraint.id ? 'Edit constraint' : 'Add a constraint'}</h4>}
+    {error && <p className={styles.error} role="alert">{error}</p>}
+    <div className={styles.fields}>
+      <div><label htmlFor="wp-constraint-type">What kind?</label><select id="wp-constraint-type" value={constraint.type} onChange={e=>setConstraint({...constraint,type:e.target.value})}>{CONSTRAINT_TYPES.map(type=><option key={type} value={type}>{CONSTRAINT_TYPE_LABEL[type]}</option>)}</select></div>
+      <div><label htmlFor="wp-constraint-title">What could hold up the work?</label><input id="wp-constraint-title" type="text" required maxLength={191} placeholder="e.g. Barangay permit for road closure" value={constraint.title} onChange={e=>setConstraint({...constraint,title:e.target.value})}/></div>
+      <ActivitySelect id="wp-constraint-activity" label="Which package does it affect?" value={constraint.activityId} activities={activities} onChange={(activityId) => setConstraint({ ...constraint, activityId })} />
+      <div><label htmlFor="wp-constraint-owner">Who will clear it?</label><select id="wp-constraint-owner" value={constraint.ownerId} onChange={(event) => setConstraint({ ...constraint, ownerId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></div>
+      <div><label htmlFor="wp-constraint-needed-by">Needed by</label><input id="wp-constraint-needed-by" type="date" value={constraint.neededBy} onChange={(event) => setConstraint({ ...constraint, neededBy: event.target.value })} /></div>
+      {constraint.id && <div><label htmlFor="wp-constraint-status">Status</label><select id="wp-constraint-status" value={constraint.status} onChange={(event) => setConstraint({ ...constraint, status: event.target.value as ConstraintFields['status'] })}><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option></select></div>}
+    </div>
+    {constraint.status === 'RESOLVED' && <div className={styles.fields}><div style={{ gridColumn: '1 / -1' }}><label htmlFor="wp-constraint-resolution">How was it resolved? (required)</label><textarea id="wp-constraint-resolution" rows={2} maxLength={10000} value={constraint.resolution} onChange={(event) => setConstraint({ ...constraint, resolution: event.target.value })} /></div></div>}
+    <details className={stepStyles.moreOptions} open={!!constraint.description}>
+      <summary>More detail (optional)</summary>
+      <div className={styles.fields}>
+        <div style={{ gridColumn: '1 / -1' }}><label htmlFor="wp-constraint-description">Notes or required action</label><textarea id="wp-constraint-description" maxLength={10000} rows={3} value={constraint.description} onChange={(event) => setConstraint({ ...constraint, description: event.target.value })} /></div>
+        <label style={{ gridColumn: '1 / -1' }}><input type="checkbox" checked={constraint.blocking} onChange={(event) => setConstraint({ ...constraint, blocking: event.target.checked })} /> It must be cleared before the package can start. An open one needs an owner and a needed-by date before the plan can be approved.</label>
+      </div>
+    </details>
+    <div className={styles.actions}><button className={styles.button} type="submit" disabled={busy || !constraint.title.trim() || (constraint.status === 'RESOLVED' && !constraint.resolution.trim())}>{busy ? 'Saving…' : constraint.id ? 'Save constraint' : 'Add constraint'}</button><button className={styles.secondary} type="button" disabled={busy} onClick={closeConstraintForm}>Cancel</button></div>
+  </form>;
   async function saveResource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const saved = await mutate('resource', {
       id: resource.id || undefined, activityId: resource.activityId || null,
       kind: resource.kind, description: resource.description.trim(), unit: resource.unit.trim(),
       quantity: resource.quantity.trim(), unitCost: resource.unitCost.trim(),
-    }, resource.id ? 'Resource updated.' : 'Resource added.');
-    if (saved) setResource(emptyResource());
+    }, resource.id ? 'Line updated.' : 'Line added.');
+    if (saved) { setResource(emptyResource()); setResourceFormOpen(false); }
   }
   function editResource(item: Resource) {
-    setResource({ ...item, activityId: item.activityId ?? '' });
+    setResource({ id: item.id, activityId: item.activityId ?? '', kind: item.kind, description: item.description, unit: item.unit, quantity: item.quantity, unitCost: item.unitCost, amount: item.amount });
+    setResourceFormOpen(true);
     setError(''); setSuccess('');
   }
 
-  const title = view === 'locations' ? 'Locations' : view === 'constraints' ? 'Constraints' : 'Resources and allowances';
+  const title = view === 'locations' ? 'Locations' : view === 'constraints' ? 'Constraints (optional)' : packageScoped ? 'Allowance lines' : 'Resources and allowances';
   const intro = view === 'locations'
     ? 'Group scope by work area or site location. Locations describe where work takes place.'
     : view === 'constraints'
-      ? 'Record access, approvals, interfaces, and other conditions that affect the plan.'
-      : 'Record planned materials, labor, equipment, and explicit BOQ budget allowances. These are planning references, not actual costs.';
+      ? 'Anything that could hold up a package (site access, permits, approvals, deliveries), who will clear it and by when. Skip this if there is nothing yet.'
+      : packageScoped ? 'Planned materials, labor and equipment for this package. Amount = quantity × rate. These are planning budgets, not actual costs.' : 'Record planned materials, labor, equipment, and explicit BOQ budget allowances. These are planning references, not actual costs.';
 
   return <section className={styles.panel} aria-labelledby={`details-${view}-heading`}>
     <div className={styles.titleRow}>
@@ -199,7 +253,7 @@ export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVers
       {!canEdit && <span className={styles.muted}>Read only</span>}
     </div>
 
-    {error && <p className={styles.error} role="alert">{error}</p>}
+    {error && !(view === 'constraints' && constraintFormOpen) && <p className={styles.error} role="alert">{error}</p>}
     {success && <p className={styles.success} role="status">{success}</p>}
 
     {view === 'locations' && <>
@@ -215,50 +269,81 @@ export default function WorkPackageDetailsPanel({ projectId, scheduleId, rowVers
     </>}
 
     {view === 'constraints' && <>
-      {canEdit && <form onSubmit={saveConstraint}>
-        <h4>{constraint.id ? 'Edit constraint' : 'Record a constraint'}</h4>
-        <div className={styles.fields}>
-          <div><label htmlFor="wp-constraint-type">Constraint type</label><select id="wp-constraint-type" value={constraint.type} onChange={e=>setConstraint({...constraint,type:e.target.value})}>{CONSTRAINT_TYPES.map(type=><option key={type} value={type}>{CONSTRAINT_TYPE_LABEL[type]}</option>)}</select></div><div><label htmlFor="wp-constraint-title">Constraint title</label><input id="wp-constraint-title" required maxLength={191} value={constraint.title} onChange={e=>setConstraint({...constraint,title:e.target.value})}/></div><ActivitySelect id="wp-constraint-activity" value={constraint.activityId} activities={activities} onChange={(activityId) => setConstraint({ ...constraint, activityId })} />
-          <div><label htmlFor="wp-constraint-owner">Owner</label><select id="wp-constraint-owner" value={constraint.ownerId} onChange={(event) => setConstraint({ ...constraint, ownerId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></div>
-          <div><label htmlFor="wp-constraint-description">Constraint or required action</label><textarea id="wp-constraint-description" required maxLength={10000} rows={3} value={constraint.description} onChange={(event) => setConstraint({ ...constraint, description: event.target.value })} /></div>
-          <div><label htmlFor="wp-constraint-needed-by">Needed by</label><input id="wp-constraint-needed-by" type="date" value={constraint.neededBy} onChange={(event) => setConstraint({ ...constraint, neededBy: event.target.value })} /></div>
-          <div><label htmlFor="wp-constraint-status">Status</label><select id="wp-constraint-status" value={constraint.status} onChange={(event) => setConstraint({ ...constraint, status: event.target.value as ConstraintFields['status'] })}><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option></select></div>
-          <div><label htmlFor="wp-constraint-resolution">Resolution note {constraint.status === 'RESOLVED' && <span>(required)</span>}</label><textarea id="wp-constraint-resolution" rows={2} maxLength={10000} value={constraint.resolution} onChange={(event) => setConstraint({ ...constraint, resolution: event.target.value })} /></div>
-          <label><input type="checkbox" checked={constraint.blocking} onChange={(event) => setConstraint({ ...constraint, blocking: event.target.checked })} /> Blocks readiness to start; an owned, dated constraint may remain open at approval</label>
-        </div>
-        <div className={styles.actions}><button className={styles.button} type="submit" disabled={busy || !constraint.description.trim() || (constraint.status === 'RESOLVED' && !constraint.resolution.trim())}>{busy ? 'Saving…' : constraint.id ? 'Save constraint' : 'Add constraint'}</button>{constraint.id && <button className={styles.secondary} type="button" disabled={busy} onClick={() => setConstraint(emptyConstraint())}>Cancel edit</button>}</div>
-      </form>}
-      {details.constraints.length === 0 ? <p className={styles.empty}>No constraints recorded. Add known access, interface, approval, or delivery conditions.</p> : <div className={styles.scroll} tabIndex={0} role="region" aria-label="Plan constraints"><table className={styles.table}><caption className="sr-only">Plan constraints and resolutions</caption><thead><tr><th scope="col">Constraint</th><th scope="col">Package</th><th scope="col">Owner</th><th scope="col">Needed by</th><th scope="col">Status</th>{canEdit && <th scope="col">Actions</th>}</tr></thead><tbody>{details.constraints.map((item) => <tr key={item.id}><th scope="row">{item.description}{item.blocking && <span className={styles.muted}> · Blocks readiness to start</span>}{item.resolution && <p className={styles.muted}>Resolution: {item.resolution}</p>}</th><td>{activityName(item.activityId)}</td><td>{memberName(item.ownerId)}</td><td>{item.neededBy || 'Not set'}</td><td>{item.status === 'RESOLVED' ? 'Resolved' : 'Open'}</td>{canEdit && <td><button className={styles.secondary} type="button" disabled={busy || item.status==="RESOLVED"} onClick={() => editConstraint(item)}>Edit</button></td>}</tr>)}</tbody></table></div>}
+      {details.constraints.length === 0
+        ? <div className={`${styles.empty} ${stepStyles.emptyState}`}><p>No constraints yet — this is optional.</p><p className={styles.muted}>Add one only when something could hold up a package, such as site access, a permit, an approval or a late delivery.</p></div>
+        : <div className={styles.scroll} tabIndex={0} role="region" aria-label="Plan constraints"><table className={styles.table}><caption className="sr-only">Plan constraints and resolutions</caption><thead><tr><th scope="col">Constraint</th><th scope="col">Package</th><th scope="col">Owner</th><th scope="col">Needed by</th><th scope="col">Status</th>{canEdit && <th scope="col">Actions</th>}</tr></thead><tbody>{details.constraints.map((item) => <tr key={item.id}>
+          <th scope="row">{item.title || item.description}<span className={styles.muted}> · {constraintTypeLabel(item.type)}{item.blocking ? ' · Must clear before start' : ''}</span>{item.title && item.description && item.description !== item.title && <p className={styles.muted}>{item.description}</p>}{item.resolution && <p className={styles.muted}>Resolution: {item.resolution}</p>}</th>
+          <td>{activityName(item.activityId)}</td><td>{memberName(item.ownerId)}</td><td>{item.neededBy || 'Not set'}</td><td>{item.status === 'RESOLVED' ? 'Resolved' : 'Open'}</td>
+          {canEdit && <td>{resolving?.id === item.id
+            ? <div className={stepStyles.resolveRow}><input type="text" aria-label="How was it resolved?" placeholder="How was it resolved?" maxLength={10000} value={resolving.note} onChange={(event) => setResolving({ id: item.id, note: event.target.value })} /><button className={styles.button} type="button" disabled={busy || !resolving.note.trim()} onClick={() => void resolveConstraint(item, resolving.note)}>Mark resolved</button><button className={styles.secondary} type="button" disabled={busy} onClick={() => setResolving(null)}>Cancel</button></div>
+            : item.status === 'RESOLVED' ? <span className={styles.muted}>Resolved</span>
+            : <div className={stepStyles.rowActions}><button className={styles.secondary} type="button" disabled={busy} onClick={(event) => editConstraint(item, event.currentTarget)}>Edit</button><button className={styles.secondary} type="button" disabled={busy} onClick={() => { setResolving({ id: item.id, note: '' }); setError(''); setSuccess(''); }}>Resolve</button></div>}</td>}
+        </tr>)}</tbody></table></div>}
+      {canEdit && (!constraintFormOpen || !packageScoped) && <div className={styles.actions} style={{ marginTop: 16 }}><button className={styles.secondary} type="button" disabled={busy} onClick={(event) => openNewConstraint(event.currentTarget)}>+ Add constraint</button></div>}
+      {canEdit && constraintFormOpen && (packageScoped
+        ? constraintForm
+        : <SideDrawer title={constraint.id ? 'Edit constraint' : 'Add a constraint'} meta="Something that could hold up the work, who will clear it, and by when." onClose={closeConstraintForm}>{constraintForm}</SideDrawer>)}
     </>}
 
-    {view === 'resources' && <><div className={styles.status}><p>Budget amounts are quantity × rate. All packages need materials, labor and equipment allowances. Suggested lines must be accepted by a person; dates or scope changes in a revision require another resource review.</p>{activities.map(activity=><div key={activity.id} className={styles.actions}><span>{activity.activityCode} · {activity.name}{details.resourcesReviewNeeded?.[activity.id]?' · Review needed':''}{details.resources.some(row=>row.activityId===activity.id&&row.isSystemSuggested)?' · System suggestions unreviewed':''}</span>{canEdit&&<button className={styles.secondary} disabled={busy} onClick={()=>void mutate('confirm-resources',{activityId:activity.id},'Allowances reviewed and accepted.')}>Confirm allowances</button>}</div>)}</div>
-      {canEdit && <>
-        {!packageScoped && !confirmSuggest && <div>
-          <h4>Create BOQ budget allowances</h4>
-          <p className={styles.muted}>This creates explicit planning references from the approved BOQ. Allowances are not actual costs, commitments, or proof of spending.</p>
-          <button className={styles.secondary} type="button" disabled={busy} onClick={() => setConfirmSuggest(true)}>Review allowance creation</button>
+    {view === 'resources' && (() => {
+      const kindLabel = { MATERIAL: 'Materials', LABOR: 'Labor', EQUIPMENT: 'Equipment', ALLOWANCE: 'Budget allowance' } as const;
+      const peso = (value: string) => { const amount = Number(value); return Number.isFinite(amount) ? new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount) : value; };
+      // Suggested lines are stored as "System suggested material allowance" / "Suggested labor allowance for <package>".
+      const lineName = (item: { description: string; kind: keyof typeof kindLabel }) => /^(System suggested|Suggested) (material|labor|equipment) allowance/i.test(item.description) ? `${kindLabel[item.kind]} allowance` : item.description;
+      const withoutLines = activities.filter((activity) => !details.resources.some((row) => row.activityId === activity.id));
+      const toConfirm = activities.filter((activity) => details.resources.some((row) => row.activityId === activity.id) && (details.resources.some((row) => row.activityId === activity.id && row.isSystemSuggested) || details.resourcesReviewNeeded?.[activity.id]));
+      const total = details.resources.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      // Original = this type's share of the package's BOQ value, before the direct-cost factor (e.g. 84%) is applied.
+      // Shown when the package has a single line of that type (the suggested lines); several DUPA lines share one type.
+      const ratios = packageScoped && packageValue != null && activities.length === 1 ? estimatePhPublicWorksBudget(packageValue, activities[0].name).ratios : null;
+      const ratioKey = { MATERIAL: 'materials', LABOR: 'labor', EQUIPMENT: 'equipment' } as const;
+      const original = (item: { kind: keyof typeof kindLabel }) => !ratios || packageValue == null || item.kind === 'ALLOWANCE' || details.resources.filter((row) => row.kind === item.kind).length !== 1 ? null : packageValue * ratios[ratioKey[item.kind]];
+      const originals = details.resources.map((item) => original(item));
+      const originalTotal = originals.every((value) => value !== null) && originals.length ? (originals as number[]).reduce((sum, value) => sum + value, 0) : null;
+      const isLumpSum = (item: { quantity: string; unit: string }) => Number(item.quantity) === 1 && ['lot', 'allowance', 'ls', 'lump sum'].includes(item.unit.trim().toLowerCase());
+      return <>
+        {toConfirm.length > 0 && <div className={styles.status}>
+          <p>{packageScoped ? 'These lines are system suggestions (or the package changed since they were checked). Check the amounts, then confirm them.' : `${toConfirm.length} ${toConfirm.length === 1 ? 'package has' : 'packages have'} suggested lines to check.`}</p>
+          {canEdit && <div className={styles.actions} style={{ marginTop: 10 }}>{toConfirm.map((activity) => <button key={activity.id} className={styles.button} type="button" disabled={busy} onClick={() => void mutate('confirm-resources', { activityId: activity.id }, 'Allowances confirmed.')}>{packageScoped ? 'Confirm these allowances' : `Confirm ${activity.activityCode || activity.name}`}</button>)}</div>}
         </div>}
-        {!packageScoped && confirmSuggest && <div>
-          <h4>Confirm BOQ allowance creation</h4>
-          <p>Missing package budgets receive the source app’s suggested materials, labor and equipment split. These are labeled suggestions and require your review before approval. Existing resource lines are preserved.</p>
-          <div className={styles.actions}><button className={styles.button} type="button" disabled={busy} onClick={() => void mutate('suggest-resources', undefined, 'BOQ budget allowance references created.')}>{busy ? 'Creating…' : 'Create BOQ budget allowances'}</button><button className={styles.secondary} type="button" disabled={busy} onClick={() => setConfirmSuggest(false)}>Cancel</button></div>
+        {canEdit && withoutLines.length > 0 && <div className={`${styles.empty} ${stepStyles.emptyState}`} style={{ marginBottom: 16 }}>
+          <p>{packageScoped ? 'This package has no allowance lines yet.' : `${withoutLines.length} ${withoutLines.length === 1 ? 'package has' : 'packages have'} no allowance lines yet.`}</p>
+          <p className={styles.muted}>Let the system split the BOQ value into materials, labor and equipment, or add your own lines.</p>
+          <div className={styles.actions} style={{ marginTop: 12 }}><button className={styles.button} type="button" disabled={busy} onClick={() => void mutate('suggest-resources', packageScoped && activities.length === 1 ? { activityId: activities[0].id } : undefined, 'Suggested allowances added. Check them, then confirm.')}>{busy ? 'Working…' : 'Suggest from BOQ value'}</button></div>
         </div>}
-        <form onSubmit={saveResource}>
-          <h4>{resource.id ? 'Edit resource' : 'Add a planned resource'}</h4>
+        {details.resources.length === 0
+          ? (!canEdit && <p className={styles.empty}>No allowance lines recorded.</p>)
+          : <div className={styles.scroll} tabIndex={0} role="region" aria-label="Allowance lines"><table className={`${styles.table} ${stepStyles.lineTable}`}><caption className="sr-only">Planned resource quantities and amounts</caption>
+            <thead><tr><th scope="col">Line</th>{!packageScoped && <th scope="col">Package</th>}<th scope="col">Type</th><th scope="col">Qty</th><th scope="col">Original</th><th scope="col">Allowance</th>{canEdit && <th scope="col"><span className="sr-only">Actions</span></th>}</tr></thead>
+            <tbody>{details.resources.map((item) => <tr key={item.id}>
+              <th scope="row">{lineName(item)}{item.isSystemSuggested && <span className={stepStyles.optional}>suggested</span>}
+                {item.breakdownUploadId && <p className={styles.muted}><a className={styles.link} href={`/projects/${projectId}/work-packages/${item.activityId}#package-breakdown`}>From DUPA · row {item.sourceRowNumber}</a></p>}</th>
+              {!packageScoped && <td>{activityName(item.activityId)}</td>}
+              <td>{kindLabel[item.kind]}</td>
+              <td>{item.quantity} {item.unit}{!isLumpSum(item) && <span className={styles.muted}> × {peso(item.unitCost)}</span>}</td>
+              <td>{(() => { const value = original(item); return value === null ? <span className={styles.muted}>—</span> : peso(value.toFixed(2)); })()}</td>
+              <td><strong>{peso(item.amount)}</strong>{(() => { const value = original(item); return value ? <small className={stepStyles.split}>{Math.round((Number(item.amount) / value) * 100)}% of original</small> : null; })()}</td>
+              {canEdit && <td className={stepStyles.actionsCell}><div className={stepStyles.rowActions}>{removeResourceId === item.id
+                ? <><span className={styles.muted}>Remove?</span><button className={`${styles.secondary} ${stepStyles.small}`} type="button" disabled={busy} onClick={() => void mutate('remove-resource', { id: item.id }, 'Line removed.')}>Remove</button><button className={`${styles.secondary} ${stepStyles.small}`} type="button" onClick={() => setRemoveResourceId('')}>Keep</button></>
+                : <><button className={`${styles.secondary} ${stepStyles.small}`} type="button" disabled={busy} onClick={() => editResource(item)}>Edit</button><button className={`${styles.secondary} ${stepStyles.small}`} type="button" disabled={busy} onClick={() => setRemoveResourceId(item.id)}>Remove</button></>}</div></td>}
+            </tr>)}</tbody>
+            <tfoot><tr><th scope="row" colSpan={packageScoped ? 3 : 4}>Total</th><td>{originalTotal === null ? <span className={styles.muted}>—</span> : peso(originalTotal.toFixed(2))}</td><td><strong>{peso(total.toFixed(2))}</strong>{originalTotal ? <small className={stepStyles.split}>{Math.round((total / originalTotal) * 100)}% of original</small> : null}</td>{canEdit && <td className={stepStyles.actionsCell} />}</tr></tfoot>
+          </table></div>}
+        {canEdit && !resourceFormOpen && <div className={styles.actions} style={{ marginTop: 16 }}><button className={styles.secondary} type="button" disabled={busy} onClick={() => { setResource({ ...emptyResource(), activityId: packageScoped && activities.length === 1 ? activities[0].id : '' }); setResourceFormOpen(true); setError(''); setSuccess(''); }}>+ Add a line</button></div>}
+        {canEdit && resourceFormOpen && <form onSubmit={saveResource} className={stepStyles.lineForm}>
+          <h4>{resource.id ? 'Edit line' : 'Add a line'}</h4>
           <div className={styles.fields}>
-            <ActivitySelect id="wp-resource-activity" value={resource.activityId} activities={activities} onChange={(activityId) => setResource({ ...resource, activityId })} />
-            <div><label htmlFor="wp-resource-kind">Resource type</label><select id="wp-resource-kind" value={resource.kind} onChange={(event) => setResource({ ...resource, kind: event.target.value as ResourceFields['kind'] })}><option value="MATERIAL">Material</option><option value="LABOR">Labor</option><option value="EQUIPMENT">Equipment</option></select></div>
-            <div><label htmlFor="wp-resource-description">Description</label><input id="wp-resource-description" required maxLength={191} value={resource.description} onChange={(event) => setResource({ ...resource, description: event.target.value })} /></div>
-            <div><label htmlFor="wp-resource-unit">Unit</label><input id="wp-resource-unit" required maxLength={191} value={resource.unit} onChange={(event) => setResource({ ...resource, unit: event.target.value })} /></div>
-            <div><label htmlFor="wp-resource-quantity">Planned quantity</label><input id="wp-resource-quantity" required inputMode="decimal" value={resource.quantity} onChange={(event) => setResource({ ...resource, quantity: event.target.value })} /></div>
-            <div><label htmlFor="wp-resource-unit-cost">Reference unit rate</label><input id="wp-resource-unit-cost" required inputMode="decimal" value={resource.unitCost} onChange={(event) => setResource({ ...resource, unitCost: event.target.value })} /></div>
-            <div><label htmlFor="wp-resource-amount">Amount (quantity × rate)</label><output id="wp-resource-amount">{(()=>{try{return new Decimal(resource.quantity||0).mul(resource.unitCost||0).toDecimalPlaces(2).toFixed(2)}catch{return "Enter quantity and rate"}})()}</output></div>
+            {!packageScoped && <ActivitySelect id="wp-resource-activity" value={resource.activityId} activities={activities} onChange={(activityId) => setResource({ ...resource, activityId })} />}
+            <div><label htmlFor="wp-resource-kind">Type</label><select id="wp-resource-kind" value={resource.kind} onChange={(event) => setResource({ ...resource, kind: event.target.value as ResourceFields['kind'] })}><option value="MATERIAL">Materials</option><option value="LABOR">Labor</option><option value="EQUIPMENT">Equipment</option></select></div>
+            <div><label htmlFor="wp-resource-description">What is it?</label><input id="wp-resource-description" type="text" required maxLength={191} placeholder="e.g. Copper pipe 3/8&quot;, Aircon technicians" value={resource.description} onChange={(event) => setResource({ ...resource, description: event.target.value })} /></div>
+            <div><label htmlFor="wp-resource-quantity">Quantity</label><input id="wp-resource-quantity" type="text" required inputMode="decimal" value={resource.quantity} onChange={(event) => setResource({ ...resource, quantity: event.target.value })} /></div>
+            <div><label htmlFor="wp-resource-unit">Unit</label><input id="wp-resource-unit" type="text" required maxLength={191} placeholder="e.g. m, pcs, man-day, lot" value={resource.unit} onChange={(event) => setResource({ ...resource, unit: event.target.value })} /></div>
+            <div><label htmlFor="wp-resource-unit-cost">Rate per unit (₱)</label><input id="wp-resource-unit-cost" type="text" required inputMode="decimal" value={resource.unitCost} onChange={(event) => setResource({ ...resource, unitCost: event.target.value })} /></div>
+            <div><label htmlFor="wp-resource-amount">Amount</label><output id="wp-resource-amount" className={stepStyles.amountOut}>{(() => { try { return peso(new Decimal(resource.quantity || 0).mul(resource.unitCost || 0).toDecimalPlaces(2).toFixed(2)); } catch { return 'Enter quantity and rate'; } })()}</output></div>
           </div>
-          {resource.kind === 'ALLOWANCE' && <p className={styles.muted}>An allowance is a planning reference from BOQ budget information, not an actual cost or transaction.</p>}
-          <div className={styles.actions}><button className={styles.button} type="submit" disabled={busy || !resource.description.trim() || !resource.unit.trim() || !resource.quantity.trim() || !resource.unitCost.trim()}>{busy ? 'Saving…' : resource.id ? 'Save resource' : 'Add resource'}</button>{resource.id && <button className={styles.secondary} type="button" disabled={busy} onClick={() => setResource(emptyResource())}>Cancel edit</button>}</div>
-        </form>
-      </>}
-      {details.resources.length === 0 ? <p className={styles.empty}>No planned resources are recorded. Add a resource or explicitly create BOQ budget allowance references.</p> : <div className={styles.scroll} tabIndex={0} role="region" aria-label="Planned resources and budget allowances"><table className={styles.table}><caption className="sr-only">Planned resource quantities and stated values</caption><thead><tr><th scope="col">Resource</th><th scope="col">Package</th><th scope="col">Type</th><th scope="col">Quantity</th><th scope="col">Reference rate</th><th scope="col">Stated amount</th>{canEdit && <th scope="col">Actions</th>}</tr></thead><tbody>{details.resources.map((item) => <tr key={item.id}><th scope="row">{item.description}<span className={styles.muted}>{item.unit}</span>{item.breakdownUploadId && <p className={styles.muted}><a className={styles.link} href={`/projects/${projectId}/work-packages/${item.activityId}#package-breakdown`}>Uploaded breakdown · source row {item.sourceRowNumber}</a></p>}{item.kind === 'ALLOWANCE' && <p className={styles.muted}>Budget reference · not actual cost</p>}</th><td>{activityName(item.activityId)}</td><td>{{ MATERIAL: 'Material', LABOR: 'Labor', EQUIPMENT: 'Equipment', ALLOWANCE: 'Budget allowance' }[item.kind]}</td><td>{item.quantity}</td><td>{item.unitCost}</td><td>{item.amount}</td>{canEdit && <td><div className={styles.actions}><button className={styles.secondary} type="button" disabled={busy} onClick={() => editResource(item)}>Edit</button>{removeResourceId === item.id ? <><span>Remove this resource?</span><button className={styles.secondary} type="button" disabled={busy} onClick={() => void mutate('remove-resource', { id: item.id }, 'Resource removed.')}>Remove</button><button className={styles.secondary} type="button" onClick={() => setRemoveResourceId('')}>Keep</button></> : <button className={styles.secondary} type="button" disabled={busy} onClick={() => setRemoveResourceId(item.id)}>Archive…</button>}</div></td>}</tr>)}</tbody></table></div>}
-    </>}
+          <div className={styles.actions}><button className={styles.button} type="submit" disabled={busy || !resource.description.trim() || !resource.unit.trim() || !resource.quantity.trim() || !resource.unitCost.trim() || (!packageScoped && !resource.activityId)}>{busy ? 'Saving…' : resource.id ? 'Save line' : 'Add line'}</button><button className={styles.secondary} type="button" disabled={busy} onClick={() => { setResourceFormOpen(false); setResource(emptyResource()); }}>Cancel</button></div>
+        </form>}
+      </>;
+    })()}
   </section>;
 }

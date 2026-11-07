@@ -65,6 +65,20 @@ export async function approveDelivery(deliveryId: string) {
   return result;
 }
 
+/** Rejects a delivery still awaiting approval (e.g. wrong quantities encoded); nothing was posted to stock yet. */
+export async function rejectDelivery(deliveryId: string, reason: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await fetchWithAuth(`/api/delivery/${deliveryId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+    revalidatePath(`/deliveries/${deliveryId}`);
+    revalidatePath('/deliveries');
+    return { success: true };
+  } catch (cause) {
+    const text = cause instanceof Error ? cause.message : '';
+    const match = /"error":"([^"]+)"/.exec(text);
+    return { success: false, error: match?.[1] || 'The delivery could not be rejected.' };
+  }
+}
+
 export async function encodeDeliveryWithFile(formData: FormData) {
   try {
     const poId = formData.get('poId') as string;

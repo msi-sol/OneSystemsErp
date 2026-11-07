@@ -6,6 +6,9 @@ import { addSupplierQuotation, updateSupplierQuotation, autoGeneratePOFromCanvas
 import { uploadAndAnalyzeQuotationsBulk } from '@/app/actions/aiQuotationActions';
 import PrintableCanvass from './PrintableCanvass';
 import { isFullQuotationCoverage } from '@/lib/procurement/quotation-validation';
+import { benchmarkRate, compareQuoteToBenchmark } from '@/lib/procurement/benchmark-quote-comparison';
+
+const peso = (value: number) => `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any, suppliers: any[] }) {
   const router = useRouter();
@@ -334,7 +337,8 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
         </button>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
-          {canvass.status === 'DRAFT' && canvass.recommendedSupplierId && (
+          {/* RETURNED = sent back from its PO for further canvassing; the backend endorses it like a draft. */}
+          {(canvass.status === 'DRAFT' || canvass.status === 'RETURNED') && canvass.recommendedSupplierId && (
             <button 
               onClick={handleEndorse}
               disabled={isEndorsing}
@@ -396,16 +400,23 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
               <th style={{ padding: '8px' }}>Item Code</th>
               <th style={{ padding: '8px' }}>Description</th>
               <th style={{ padding: '8px' }}>Req. Quantity</th>
+              <th style={{ padding: '8px', textAlign: 'right' }}>Benchmark rate</th>
+              <th style={{ padding: '8px', textAlign: 'right' }}>Benchmark amount</th>
             </tr>
           </thead>
           <tbody>
-            {canvass.items.map((item: any) => (
+            {canvass.items.map((item: any) => {
+              const rate = benchmarkRate(item.consolidatedBoqItem);
+              return (
               <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <td style={{ padding: '12px 8px', color: '#fff' }}>{item.consolidatedBoqItem.itemCode}</td>
                 <td style={{ padding: '12px 8px', color: 'var(--text-secondary)' }}>{item.consolidatedBoqItem.description}</td>
                 <td style={{ padding: '12px 8px' }}>{item.quantityRequired} {item.consolidatedBoqItem.unit}</td>
+                <td style={{ padding: '12px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>{rate === null ? 'Not set' : peso(rate)}</td>
+                <td style={{ padding: '12px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>{rate === null ? '—' : peso(rate * item.quantityRequired)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -467,7 +478,10 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                 <tbody>
                   {canvass.items.map((item: any) => (
                     <tr key={item.id}>
-                      <td style={{ padding: '8px', color: '#fff' }}>{item.consolidatedBoqItem.description}</td>
+                      <td style={{ padding: '8px', color: '#fff' }}>
+                        {item.consolidatedBoqItem.description}
+                        {benchmarkRate(item.consolidatedBoqItem) !== null && <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Benchmark rate {peso(benchmarkRate(item.consolidatedBoqItem)!)}</span>}
+                      </td>
                       <td style={{ padding: '8px' }}>{item.quantityRequired}</td>
                       <td style={{ padding: '8px' }}>
                         <input
@@ -517,6 +531,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
               {canvass.quotations.map((q: any) => {
                 const coversFullRequest = isFullQuotationCoverage(canvass.items, q.items);
+                const vsBenchmark = compareQuoteToBenchmark(canvass.items, q.items);
                 return (
                 <div key={q.id} style={{ 
                   background: 'rgba(255,255,255,0.02)', 
@@ -528,6 +543,18 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                   </h4>
                   <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}>Total: <strong style={{ color: '#fff' }}>₱{q.totalAmount.toLocaleString()}</strong></p>
                   {!coversFullRequest && <p style={{ margin: '5px 0', color: '#fbbf24', fontSize: '0.85rem' }}>Partial availability — not compared as full fulfillment.</p>}
+                  {vsBenchmark.lines.length > 0 && (
+                    <div style={{ margin: '8px 0', fontSize: '0.85rem' }}>
+                      <p style={{ margin: 0, color: vsBenchmark.overBudget ? '#f87171' : '#6ee7b7' }}>
+                        Vs benchmark ({peso(vsBenchmark.benchmarkTotal)}): {vsBenchmark.difference === 0 ? 'equal' : `${peso(Math.abs(vsBenchmark.difference))} ${vsBenchmark.overBudget ? 'over' : 'under'} (${vsBenchmark.percent > 0 ? '+' : ''}${vsBenchmark.percent.toFixed(1)}%)`}
+                      </p>
+                      {vsBenchmark.overBudgetLines.map(line => (
+                        <p key={line.canvassItemId} style={{ margin: '3px 0 0', color: '#fbbf24' }}>
+                          Above benchmark rate: {line.description.slice(0, 60)} — {peso(line.quotedRate)} vs {peso(line.benchmarkRate)} per {line.unit || 'unit'}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                   <p style={{ margin: '5px 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Delivery: {q.deliveryPeriod || 'N/A'} | Payment: {q.paymentTerms || 'N/A'}</p>
                   <p style={{ margin: '5px 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Status: {q.status}</p>
                   {q.aiRationale && <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{q.aiRationale}</p>}

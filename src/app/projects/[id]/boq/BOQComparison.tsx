@@ -14,6 +14,7 @@ const PAGE_SIZE = 25;
 
 type Filter = 'differences' | 'all' | ComparisonStatus;
 const STATUS_CLASS: Record<ComparisonStatus, string> = { Matched: 'matched', Changed: 'changed', 'Only in file': 'onlyFile', 'Only in system': 'onlySystem' };
+const isDifference = (row: ComparisonRow) => row.status !== 'Matched';
 
 function show(field: ComparisonField, line: BOQComparisonLine): string {
   if (field === 'quantity') return isStated(line.quantity) ? qty(decimal(line.quantity)) : 'Not stated';
@@ -56,7 +57,7 @@ export default function BOQComparison({ sourceAvailable, sourceName, sourceRows,
     <p>This BOQ came from an earlier import that did not keep the original file reading, so there is nothing to compare against. The recorded BOQ is still available under BOQ items.</p>
   </section>;
 
-  const filtered = rows.filter(row => (filter === 'all' || (filter === 'differences' ? row.status !== 'Matched' : row.status === filter))
+  const filtered = rows.filter(row => (filter === 'all' || (filter === 'differences' ? isDifference(row) : row.status === filter))
     && (section === 'all' || summary.sectionOf(row) === section));
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);

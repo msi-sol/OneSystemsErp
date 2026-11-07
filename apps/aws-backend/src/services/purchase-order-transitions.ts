@@ -220,6 +220,51 @@ export async function approvePurchaseOrderInTransaction(tx: Transaction, poId: s
   await approveTransaction(actor.userId, actor.userRole, 'PURCHASE_ORDER', poId, 'Approved PO digitally', actor.simulatedRole, tx);
 }
 
+const INACTIVE_PO_STATUSES = ['CANCELLED', 'CANCELED', 'REJECTED', 'RETURNED', 'VOIDED'];
+
+/**
+ * "Return for further canvassing" (meeting minutes, PO step): a canvass PO that is still a draft or under review
+ * is set aside (RETURNED, which every quantity check already ignores), its canvass reopens as RETURNED so
+ * quotations can be added or corrected and a new recommendation endorsed, and the request's procured status is
+ * recomputed from its remaining active orders. Approved POs carry budget commitments and cannot be returned here.
+ */
+export async function returnPurchaseOrderToCanvassingInTransaction(tx: Transaction, poId: string, actor: Actor, reason: string) {
+  const trimmed = typeof reason === 'string' ? reason.trim() : '';
+  if (trimmed.length < 5 || trimmed.length > 500) throw new PurchaseOrderInputError('Give a reason of 5 to 500 characters for returning this order to canvassing.');
+  const po = await tx.purchaseOrder.findUnique({ where: { id: poId }, select: { id: true, status: true, canvassFormId: true, mrId: true } });
+  if (!po) throw new PurchaseOrderTransitionConflict('Purchase order not found.');
+  if (!po.canvassFormId) throw new PurchaseOrderTransitionConflict('Only a purchase order created from a canvass can be returned to canvassing.');
+  if (!['DRAFT', 'FOR_REVIEW'].includes(po.status)) {
+    throw new PurchaseOrderTransitionConflict('Only a draft or under-review purchase order can be returned to canvassing. Approved orders already carry budget commitments.');
+  }
+
+  const claimed = await tx.purchaseOrder.updateMany({ where: { id: poId, status: po.status }, data: { status: 'RETURNED' } });
+  if (claimed.count !== 1) throw new PurchaseOrderTransitionConflict('Another user changed this PO. Refresh before retrying.');
+  await tx.transactionWorkflow.updateMany({ where: { moduleName: 'PURCHASE_ORDER', transactionId: poId }, data: { currentStatus: 'RETURNED', remarks: trimmed } });
+
+  const reopened = await tx.canvassForm.updateMany({
+    where: { id: po.canvassFormId, status: 'COMPLETED' },
+    data: { status: 'RETURNED', aiSummary: null, recommendedSupplierId: null },
+  });
+  if (reopened.count !== 1) throw new PurchaseOrderTransitionConflict('The linked canvass is not in its completed state. Refresh before retrying.');
+  await tx.supplierQuotation.updateMany({ where: { canvassFormId: po.canvassFormId }, data: { isRecommended: false, aiRank: null, aiRationale: null } });
+
+  const request = await tx.materialRequest.findUnique({ where: { id: po.mrId }, select: { status: true, items: { select: { consolidatedBoqItemId: true, quantity: true, approvedQuantity: true } } } });
+  if (request && ['APPROVED', 'PARTIALLY_PROCURED', 'FULLY_PROCURED'].includes(request.status)) {
+    const approved = new Map<string, Prisma.Decimal>();
+    for (const item of request.items) if (item.consolidatedBoqItemId) approved.set(item.consolidatedBoqItemId, (approved.get(item.consolidatedBoqItemId) || new Prisma.Decimal(0)).plus(String(item.approvedQuantity ?? item.quantity)));
+    const active = await tx.purchaseOrder.findMany({ where: { mrId: po.mrId, status: { notIn: INACTIVE_PO_STATUSES } }, select: { items: { select: { consolidatedBoqItemId: true, quantity: true } } } });
+    const ordered = new Map<string, Prisma.Decimal>();
+    for (const item of active.flatMap(order => order.items)) ordered.set(item.consolidatedBoqItemId, (ordered.get(item.consolidatedBoqItemId) || new Prisma.Decimal(0)).plus(String(item.quantity)));
+    const status = ordered.size === 0 ? 'APPROVED'
+      : [...approved].every(([materialId, quantity]) => (ordered.get(materialId) || new Prisma.Decimal(0)).gte(quantity)) ? 'FULLY_PROCURED' : 'PARTIALLY_PROCURED';
+    if (status !== request.status) await tx.materialRequest.updateMany({ where: { id: po.mrId, status: request.status }, data: { status } });
+  }
+
+  await tx.auditLog.create({ data: { userId: actor.userId, userRole: actor.userRole, moduleName: 'PURCHASE_ORDER', transactionId: poId, actionType: 'RETURN_TO_CANVASSING', oldValue: po.status, newValue: 'RETURNED', remarks: trimmed } });
+  return { poId, canvassFormId: po.canvassFormId };
+}
+
 export async function submitPurchaseOrderInTransaction(tx: Transaction, poId: string, actor: Actor) {
   const po = await tx.purchaseOrder.findUnique({ where: { id: poId }, select: { id: true, status: true, mr: { select: { status: true } } } });
   if (!po || po.status !== 'DRAFT') {

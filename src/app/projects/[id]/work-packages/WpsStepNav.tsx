@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, Check } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { WPS_SITE_VIEWS, wpsStepStatus, type WpsCheck } from '@/lib/scheduling/wps-overview';
 import styles from './WpsOverview.module.css';
 
@@ -19,7 +19,7 @@ export default function WpsStepNav({ view, checks, packageCount, readOnly, showS
             <button type="button" aria-current={active ? 'step' : undefined} className={active ? styles.stepActive : styles.step} onClick={() => onSelect(step.view)}
               title={!readOnly && step.firstGap ? step.firstGap : undefined}>
               <span className={status === 'done' ? styles.markerDone : status === 'attention' ? styles.markerWarn : styles.marker} aria-hidden="true">
-                {status === 'done' ? <Check size={13} strokeWidth={2.5} /> : status === 'attention' ? <AlertCircle size={13} /> : index + 1}
+                {status === 'done' ? <Check size={13} strokeWidth={2.5} /> : status === 'attention' ? '!' : index + 1}
               </span>
               <span className={styles.stepText}>
                 <span>{step.label}</span>

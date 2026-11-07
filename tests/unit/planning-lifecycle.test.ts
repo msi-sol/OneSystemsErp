@@ -1,4 +1,16 @@
-import { deriveBoqLifecycle, deriveIntakeLifecycle, deriveWpsLifecycle, type BoqLifecycleInput, type WpsLifecycleInput } from '@/lib/planning/lifecycle';
+import { deriveBoqLifecycle, deriveIntakeLifecycle, deriveWpsLifecycle, projectBoardStage, type BoqLifecycleInput, type WpsLifecycleInput } from '@/lib/planning/lifecycle';
+
+describe('BOQ Workspace board', () => {
+  const project = { id: 'p1', boqLocked: false, boqStatus: 'DRAFT', hasBOQ: true, uploadId: null, uploadStatus: null, planStage: 'none' as const };
+  it('puts each project in the stage it is in, with one next action', () => {
+    expect(projectBoardStage(project)).toMatchObject({ group: 'boq', cta: { href: '/projects/p1/boq' } });
+    expect(projectBoardStage({ ...project, hasBOQ: false, uploadId: 'u1', uploadStatus: 'PENDING' }).cta.href).toBe('/boq?upload=u1');
+    const approved = { ...project, boqLocked: true, boqStatus: 'APPROVED' };
+    expect(projectBoardStage(approved)).toMatchObject({ group: 'packages', next: 'Next: create work packages from the BOQ' });
+    expect(projectBoardStage({ ...approved, planStage: 'draft' })).toMatchObject({ group: 'packages', cta: { label: 'Continue packages' } });
+    expect(projectBoardStage({ ...approved, planStage: 'approved' }).group).toBe('approved');
+  });
+});
 
 const boq = (overrides: Partial<BoqLifecycleInput> = {}): BoqLifecycleInput => ({
   projectId: 'p1', hasVersion: true, draft: true, approved: false, reviewPrepared: true, openFindings: 0,

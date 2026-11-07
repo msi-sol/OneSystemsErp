@@ -8,7 +8,7 @@ export default function ActiveProjectSelector({
   assignments, 
   activeProjectId 
 }: { 
-  assignments: { projectId: string; project: { name: string; contractAmount?: number; originalContractDuration?: number | null }; projectRole: string; accessLevel: string }[];
+  assignments: { projectId: string; project: { name: string; contractAmount?: number; originalContractDuration?: number | null; plannedSpan?: { days: number; start: string; finish: string } | null }; projectRole: string; accessLevel: string }[];
   activeProjectId: string | null;
 }) {
   const router = useRouter();
@@ -91,15 +91,19 @@ export default function ActiveProjectSelector({
               <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Access: {currentAssignment.accessLevel.replace(/_/g, ' ').toUpperCase()}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2, borderLeft: '1px solid var(--glass-border)', paddingLeft: '15px' }}>
-              <span style={{ fontSize: '0.7rem', color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                Cost: ₱{(currentAssignment.project.contractAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {/* This is the contract (BOQ) amount, not a cost. */}
+              <span style={{ fontSize: '0.7rem', color: 'var(--accent-color)', fontWeight: 'bold' }} title="Contract amount from the approved BOQ">
+                Contract: ₱{(currentAssignment.project.contractAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                {/* An unset duration is "not set", not a zero-day contract. */}
-                Duration: {currentAssignment.project.originalContractDuration
-                  ? `${currentAssignment.project.originalContractDuration} ${currentAssignment.project.originalContractDuration === 1 ? 'Day' : 'Days'}`
-                  : 'Not set'}
-              </span>
+              {(() => {
+                // Contract duration when recorded; otherwise the approved work-package plan's span; "Not set" only when neither exists.
+                const contractDays = currentAssignment.project.originalContractDuration;
+                const plan = currentAssignment.project.plannedSpan;
+                const day = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+                const text = contractDays ? `${contractDays} ${contractDays === 1 ? 'Day' : 'Days'}` : plan ? `${plan.days} ${plan.days === 1 ? 'Day' : 'Days'} (plan)` : 'Not set';
+                const title = contractDays ? 'Contract duration' : plan ? `From the approved work-package plan: ${day(plan.start)} – ${day(plan.finish)}. No contract duration is recorded; set it in the Project Summary.` : 'No contract duration or approved plan dates yet. Set it in the Project Summary.';
+                return <span style={{ fontSize: '0.7rem', color: 'var(--accent-color)', fontWeight: 'bold' }} title={title}>Duration: {text}</span>;
+              })()}
             </div>
           </div>
         )}

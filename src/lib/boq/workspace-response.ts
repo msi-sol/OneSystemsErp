@@ -66,11 +66,19 @@ function isWorkspaceAnalysis(value: unknown): value is WorkspaceAnalysis {
     && typeof value.suggestedProjectName === 'string';
 }
 
+/** The server sends the BOQ total as a decimal string ("500000.00"); accept that as well as a number. */
+function numericTotal(value: unknown): number | null {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
 function isConfirmSuccess(value: Record<string, unknown>): boolean {
   if (typeof value.uploadId !== 'string' || typeof value.projectId !== 'string' || typeof value.status !== 'string' || !isRecord(value.report)) return false;
   const report = value.report;
+  // A string total used to fail this check, so every saved draft was reported as "could not be saved" although the
+  // project had been created; retrying then created a duplicate project.
   return typeof report.fileUrl === 'string'
-    && typeof report.grandTotal === 'number'
+    && numericTotal(report.grandTotal) !== null
     && typeof report.validRowsCount === 'number'
     && typeof report.warningRowsCount === 'number'
     && typeof report.errorRowsCount === 'number';
@@ -124,6 +132,6 @@ export async function readWorkspaceResponse(
     uploadId: data.uploadId as string,
     projectId: data.projectId as string,
     status: data.status as string,
-    report: data.report as ConfirmReport,
+    report: { ...(data.report as ConfirmReport), grandTotal: numericTotal((data.report as Record<string, unknown>).grandTotal)! },
   };
 }

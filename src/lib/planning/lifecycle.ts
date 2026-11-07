@@ -97,6 +97,35 @@ export function deriveIntakeLifecycle(input: IntakeLifecycleInput): PlanningLife
 }
 
 // ---------------------------------------------------------------------------
+// BOQ Workspace project board — one group and one next action per project
+// ---------------------------------------------------------------------------
+
+export type BoardGroup = 'boq' | 'packages' | 'approved';
+export const BOARD_GROUPS: { key: BoardGroup; title: string; empty: string }[] = [
+  { key: 'boq', title: 'BOQ to review & approve', empty: 'No BOQs are waiting for review.' },
+  { key: 'packages', title: 'Work packages to prepare', empty: 'No approved BOQs are waiting for work packages.' },
+  { key: 'approved', title: 'Work packages approved', empty: 'Projects with an approved work-package plan appear here.' },
+];
+
+export function projectBoardStage(project: {
+  id: string; boqLocked: boolean; boqStatus: string; hasBOQ: boolean; uploadId: string | null; uploadStatus: string | null;
+  planStage: 'none' | 'draft' | 'approved';
+}): { group: BoardGroup; next: string; cta: { label: string; href: string } } {
+  const approvedBOQ = project.boqLocked && ['APPROVED', 'LOCKED'].includes(project.boqStatus);
+  const packages = `/projects/${project.id}/work-packages`;
+  if (!approvedBOQ) {
+    if (!project.hasBOQ && project.uploadId && project.uploadStatus !== 'COMMITTED') {
+      return { group: 'boq', next: 'Next: review the uploaded file', cta: { label: 'Review import', href: `/boq?upload=${project.uploadId}` } };
+    }
+    if (!project.hasBOQ) return { group: 'boq', next: 'No BOQ recorded yet', cta: { label: 'Open project', href: `/projects/${project.id}/boq` } };
+    return { group: 'boq', next: 'Next: review and approve the BOQ', cta: { label: 'Continue BOQ review', href: `/projects/${project.id}/boq` } };
+  }
+  if (project.planStage === 'approved') return { group: 'approved', next: 'Packages approved · plan the site work', cta: { label: 'Open work packages', href: packages } };
+  if (project.planStage === 'draft') return { group: 'packages', next: 'Next: finish and approve the package plan', cta: { label: 'Continue packages', href: packages } };
+  return { group: 'packages', next: 'Next: create work packages from the BOQ', cta: { label: 'Start work packages', href: packages } };
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2 — BOQ review and baseline
 // ---------------------------------------------------------------------------
 
@@ -231,7 +260,9 @@ export function deriveWpsLifecycle(input: WpsLifecycleInput): PlanningLifecycle 
   } else if (approved) {
     next = input.hasOpenRevision
       ? { title: 'A plan revision is open', detail: 'The approved baseline stays active until the revision is reviewed and approved.', cta: { label: 'Open revision proposal', href: base } }
-      : { title: 'Work-package baseline approved', detail: 'Plan the coming weeks, then review the procurement budget and generate package-linked materials.', cta: { label: 'Open look-ahead', href: `${base}?view=look-ahead&baseline=active` } };
+      // Planning is finished, so the next stop is the project summary (procurement benchmark next). Site look-ahead
+      // is optional until work starts on site and stays reachable under "Site work" on this page.
+      : { title: 'Work-package baseline approved', detail: 'Planning is done. Next, from the project summary, open the Procurement Benchmark to review the budget and generate the master material list. Site look-ahead, weekly targets and daily logs are under Site work below once work starts.', cta: { label: 'Go to project summary', href: `/projects/${input.projectId}?tab=summary` } };
   } else if (!input.hasPlan || !input.adopted) {
     next = prepare('Next: start the work-package plan', `Select “${input.hasPlan ? 'Prepare existing draft' : 'Start work-package plan'}” below. You can then generate suggested packages from the approved BOQ sections or add packages yourself.`);
   } else if (input.packageCount === 0) {

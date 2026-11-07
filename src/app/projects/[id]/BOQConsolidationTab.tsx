@@ -62,7 +62,7 @@ export default async function BOQConsolidationTab({
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'SYSTEM_ADMIN' || currentUser?.userRoles?.some(ur => ur.role.roleCode === 'SUPER_ADMIN' || ur.role.roleCode === 'SYSTEM_ADMIN');
 
   if (consolidatedItems.length === 0) {
-    if (reviewState) return <section><h3>Reviewed benchmark materials</h3><p>Generate material rows from the reviewed benchmark. Labor, equipment and other allowances remain budget evidence.</p><Link href={`/projects/${projectId}/benchmark`}>Open benchmark review →</Link></section>;
+    if (reviewState) return <section><h3>Reviewed benchmark materials</h3><p>Generate material rows from the reviewed benchmark. Labor, equipment and other allowances remain budget evidence.</p><Link href={`/projects/${projectId}?tab=benchmark`}>Open Procurement Benchmark →</Link></section>;
     if (isPurchasingOfficer) {
       return (
         <div style={{ textAlign: 'center', padding: '40px', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>

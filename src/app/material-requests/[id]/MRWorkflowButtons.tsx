@@ -13,7 +13,8 @@ interface Props {
 export default function MRWorkflowButtons({ mrId, status, currentUser, capabilities }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState('');
-  
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
   const role = currentUser?.role || '';
   if (role === 'GUEST_USER') return null;
 
@@ -81,7 +82,11 @@ export default function MRWorkflowButtons({ mrId, status, currentUser, capabilit
             </button>
           </>
         )}
-        {capabilities.canCancel && ['DRAFT','AI_CHECKING','SUBMITTED','FOR_REVIEW','RETURNED','APPROVED'].includes(status) && <button className="btn-danger" disabled={isPending} onClick={() => handleStatusUpdate('CANCELLED')}>Cancel request</button>}
+        {/* Cancelling is final (it releases the reserved allowance), so it takes a second click. */}
+        {capabilities.canCancel && ['DRAFT','AI_CHECKING','SUBMITTED','FOR_REVIEW','RETURNED','APPROVED'].includes(status) && <>
+          <button className="btn-danger" disabled={isPending} onClick={() => { if (confirmCancel) { setConfirmCancel(false); handleStatusUpdate('CANCELLED'); } else setConfirmCancel(true); }}>{confirmCancel ? 'Confirm: cancel this request' : 'Cancel request'}</button>
+          {confirmCancel && <button type="button" disabled={isPending} onClick={() => setConfirmCancel(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>Keep request</button>}
+        </>}
       </div>
 
       <style>{`

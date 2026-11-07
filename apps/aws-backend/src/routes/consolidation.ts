@@ -193,6 +193,24 @@ router.post('/:projectId/auto-consolidate', async (req, res) => {
     })));
     const benchmarkItemsById = new Map(benchmarkItems.map(item => [item.id, item]));
 
+    // Benchmark-line → BOQ-item links saved from the Procurement Benchmark AI Check (latest state; see
+    // src/lib/boq/benchmark-boq-links.ts). Each generated mapping records its line's BOQ item when the link
+    // points to a BOQ item of this project; unlinked lines keep no BOQ item, as before.
+    const linkState = await prisma.auditLog.findFirst({
+      where: { moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: 'PROCUREMENT_BENCHMARK_BOQ_LINKS' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { newValue: true },
+    });
+    let savedLinks: Record<string, string> = {};
+    try {
+      const parsed = JSON.parse(linkState?.newValue || '{}') as { links?: Record<string, unknown> };
+      savedLinks = Object.fromEntries(Object.entries(parsed.links ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+    } catch { savedLinks = {}; }
+    const linkedBoqIds = [...new Set(Object.values(savedLinks))];
+    const validBoqIds = new Set(linkedBoqIds.length
+      ? (await prisma.awardedBOQItem.findMany({ where: { projectId, id: { in: linkedBoqIds } }, select: { id: true } })).map(item => item.id)
+      : []);
+    const boqItemFor = (benchmarkItemId: string) => (validBoqIds.has(savedLinks[benchmarkItemId]) ? savedLinks[benchmarkItemId] : null);
+
     let index = 1;
 
     // Use a transaction for safety with a longer timeout since there are thousands of BOQ mappings
@@ -237,6 +255,7 @@ router.post('/:projectId/auto-consolidate', async (req, res) => {
               mappingType: group.sourceIds.length > 1 ? 'MANY_TO_ONE' : 'ONE_TO_ONE',
               aiConfidenceScore: null,
               procurementBenchmarkItemId: item.id,
+              awardedBoqItemId: boqItemFor(item.id),
               consolidatedBoqItemId: consolidated.id
             }
           });

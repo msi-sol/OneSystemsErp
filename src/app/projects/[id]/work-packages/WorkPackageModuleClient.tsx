@@ -1,5 +1,5 @@
 'use client';
-import { useState, useTransition, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, useTransition, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Decimal from 'decimal.js';
@@ -7,7 +7,10 @@ import WorkPackageWorkspace from '../scheduling/WorkPackageWorkspace';
 import WorkPackageDetailsPanel from './WorkPackageDetailsPanel';
 import PackageBreakdownPanel from './PackageBreakdownPanel';
 import WorkPackageLocationsPanel from './WorkPackageLocationsPanel';
+import WorkPackageLocationsStep from './WorkPackageLocationsStep';
+import SideDrawer from '@/components/ui/SideDrawer';
 import AiCheckPanel from '@/components/ai/AiCheckPanel';
+import AiDatesPanel from './AiDatesPanel';
 import WorkPackageExecutionPanel from './WorkPackageExecutionPanel';
 import WorkPackageCapacities from './WorkPackageCapacities';
 import WorkPackageMaterialsPanel from './WorkPackageMaterialsPanel';
@@ -21,7 +24,7 @@ import { deriveWpsLifecycle } from '@/lib/planning/lifecycle';
 import { WPS_VIEW_ALIASES } from '@/lib/scheduling/wps-overview';
 import WpsStepNav from './WpsStepNav';
 import WpsPlanSummary from './WpsPlanSummary';
-import DupaGuide from './DupaGuide';
+import WorkPackageResourcesStep from './WorkPackageResourcesStep';
 
 const RULES = 'BOQ_WPS_WORKSPACE_V1';
 const PACKAGE_TABS = ['scope', 'schedule', 'resources', 'dupa'] as const;
@@ -38,9 +41,12 @@ const humanError = (value: unknown) => typeof value === 'string' ? ({
   SCHEDULE_NOT_IN_BOQ_WORKSPACE:'Prepare this draft in the Work Packages module before editing it.',
 } as Record<string,string>)[value] || value.replaceAll('_',' ').toLowerCase() : 'The change could not be saved.';
 
-export default function WorkPackageModuleClient({ projectId, projectStartDate, approvedBOQ, boqItems, schedule, summary, capacity, members, initialView = 'schedule', initialPackage, initialPackageTab, revisionComparison = [], executionWarning = '', executionActivityId, hasOpenDraft = false }: WorkPackageModuleProps) {
+export default function WorkPackageModuleClient({ projectId, projectStartDate, projectSite, approvedBOQ, boqItems, schedule, summary, capacity, members, initialView = 'schedule', initialPackage, initialPackageTab, revisionComparison = [], executionWarning = '', executionActivityId, hasOpenDraft = false }: WorkPackageModuleProps) {
   const router = useRouter();
-  const [view, setView] = useState(WPS_VIEW_ALIASES[initialView] ?? initialView);
+  // A package opens in a side panel over the current step (the package list by default), so the list stays in place.
+  // A direct package link (initialView 'package') shows the package list with that package's panel open.
+  const [view, setView] = useState(() => { const start = WPS_VIEW_ALIASES[initialView] ?? initialView; return start === 'package' ? 'schedule' : start; });
+  const [packagePanelOpen, setPackagePanelOpen] = useState(initialView === 'package' && !!initialPackage);
   const [packageTab, setPackageTab] = useState<PackageTab>(PACKAGE_TABS.includes(initialPackageTab as PackageTab) ? initialPackageTab as PackageTab : 'scope');
   const [selectedId, setSelectedId] = useState(initialPackage || '');
   const [busy, setBusy] = useState(false);
@@ -50,7 +56,6 @@ export default function WorkPackageModuleClient({ projectId, projectStartDate, a
   const [showCreate, setShowCreate] = useState(false);
   const [suggestConfirm, setSuggestConfirm] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
-  const [bulkLocation, setBulkLocation] = useState('');
   const [suggestedStart, setSuggestedStart] = useState(() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; });
   const [reviewComments, setReviewComments] = useState('');
   const [approvalConfirm, setApprovalConfirm] = useState(false);
@@ -72,9 +77,9 @@ export default function WorkPackageModuleClient({ projectId, projectStartDate, a
   const selected = schedule?.activities.find(activity=>activity.id===selectedId);
   const refresh = () => startRefresh(()=>router.refresh());
   function openPackage(activity: ModuleActivity, tab: PackageTab = 'scope') {
-    // The tab travels in the URL so it survives the package page loading.
-    router.push(`/projects/${projectId}/work-packages/${activity.id}${tab === 'scope' ? '' : `?tab=${tab}`}`);
-    setSelectedId(activity.id); setView('package'); setError(''); setRemovePackage(false);
+    // The package URL is updated in place (no page load), so refreshing or sharing it reopens this package's panel.
+    window.history.pushState(null, '', `/projects/${projectId}/work-packages/${activity.id}${tab === 'scope' ? '' : `?tab=${tab}`}`);
+    setSelectedId(activity.id); setPackagePanelOpen(true); setError(''); setRemovePackage(false);
     setPackageTab(tab);
     setEditedPackage({id:activity.id,activityCode:activity.activityCode || '',name:activity.name,start:activity.plannedStartDate?.slice(0,10)||'',finish:activity.plannedFinishDate?.slice(0,10)||'',weight:String(Number((activity.plannedWeight*100).toFixed(6))),duration:String(activity.plannedDuration)});
   }
@@ -102,7 +107,21 @@ export default function WorkPackageModuleClient({ projectId, projectStartDate, a
     const result=await request(`/api/projects/${projectId}/scheduling/activities/${editedPackage.id}`,{expectedRowVersion:schedule.rowVersion,activityCode:editedPackage.activityCode||null,name:editedPackage.name,plannedStartDate:editedPackage.start||null,plannedFinishDate:editedPackage.finish||null,plannedDuration:Number(editedPackage.duration),plannedWeight:Number(editedPackage.weight)/100},'PUT');
     if(result){setEditedPackage(null);router.push(`/projects/${projectId}/work-packages`);setView('schedule');}
   }
-  const goView = (next:string) => {setView(next);setError('');setApprovalConfirm(false);router.push(`/projects/${projectId}/work-packages?view=${encodeURIComponent(next)}${immutable?'&baseline=active':''}`);};
+  const closePackagePanel = () => {
+    setPackagePanelOpen(false); setRemovePackage(false);
+    window.history.pushState(null, '', `/projects/${projectId}/work-packages${view !== 'schedule' ? `?view=${encodeURIComponent(view)}` : ''}${immutable ? `${view !== 'schedule' ? '&' : '?'}baseline=active` : ''}`);
+  };
+  // Keep the step bar where it was on screen when switching steps (or bring it to the top if it had scrolled away).
+  const stepBarTop = useRef<number|null>(null);
+  useLayoutEffect(() => {
+    const before = stepBarTop.current; stepBarTop.current = null;
+    const bar = document.querySelector('nav[aria-label="Work-package steps"]');
+    if (before === null || !bar) return;
+    const now = bar.getBoundingClientRect().top;
+    if (before < 0) window.scrollTo({ top: window.scrollY + now - 90 });
+    else if (now !== before) window.scrollBy(0, now - before);
+  }, [view]);
+  const goView = (next:string) => {stepBarTop.current = document.querySelector('nav[aria-label="Work-package steps"]')?.getBoundingClientRect().top ?? null;setPackagePanelOpen(false);setView(next);setError('');setApprovalConfirm(false);router.push(`/projects/${projectId}/work-packages?view=${encodeURIComponent(next)}${immutable?'&baseline=active':''}`,{scroll:false});}; // stay in place when switching steps
   const openById = (id: string, tab: PackageTab = 'scope') => { const activity = schedule?.activities.find(item => item.id === id); if (activity) openPackage(activity, tab); };
   const boqTotal = boqItems.reduce((sum, item) => sum + Number(item.totalCost || 0), 0);
   const readiness=schedule?deriveWorkPackageReadiness({activities:schedule.activities.map(activity=>({...activity,boqAllocations:schedule.allocations.filter(row=>row.activityId===activity.id)})),dependencies:schedule.dependencies,details:schedule.details,contractAmount:summary?.contractAmount||'0',scopeReconciled:!!summary&&summary.coverage.every(row=>row.status==='planned')}):null;
@@ -129,6 +148,8 @@ export default function WorkPackageModuleClient({ projectId, projectStartDate, a
           checksPassed={readiness.checks.filter(check=>check.passed).length} checksTotal={readiness.checks.length} statusLabel={immutable?`Approved baseline${schedule.baselineCode?` · ${schedule.baselineCode}`:''}`:schedule.previousBaselineId?`Revision draft${schedule.revisionCode?` · ${schedule.revisionCode}`:''}`:'Draft plan'}/>}
         <WpsStepNav view={view} checks={readiness?.checks||[]} packageCount={schedule.activities.length} readOnly={!!immutable} showSiteWork={!!immutable||!!schedule.previousBaselineId} onSelect={goView}/>
       </>}
+      {/* At least one screen tall, so switching to a shorter step never pulls the page (and the step bar) upward. */}
+      <div style={{minHeight:'calc(100vh - 96px)'}}>
       {view!=='package'&&['look-ahead','weekly','site-logs','operational-constraints'].includes(view)&&<WorkPackageExecutionPanel projectId={projectId} view={view==='operational-constraints'?'constraints':view as 'look-ahead'|'weekly'|'site-logs'} canPrepare={capacity.canEdit} canWeekly={capacity.canManageWeekly} canRecord={capacity.canRecordSiteLogs} members={members} activityId={executionActivityId}/>}
       {view!=='package'&&showCreate&&canEdit&&<form className={styles.panel} onSubmit={createPackage}><h3>New work package</h3><div className={styles.fields}><div><label htmlFor="new-package-code">Package code</label><input id="new-package-code" required value={newPackage.activityCode} onChange={e=>setNewPackage({...newPackage,activityCode:e.target.value})} maxLength={40}/></div><div><label htmlFor="new-package-name">Package name</label><input id="new-package-name" required minLength={3} value={newPackage.name} onChange={e=>setNewPackage({...newPackage,name:e.target.value})} maxLength={180}/></div><div><label htmlFor="new-package-start">Planned start</label><input id="new-package-start" type="date" value={newPackage.plannedStartDate} onChange={e=>setNewPackage({...newPackage,plannedStartDate:e.target.value})}/></div><div><label htmlFor="new-package-finish">Planned finish</label><input id="new-package-finish" type="date" min={newPackage.plannedStartDate} value={newPackage.plannedFinishDate} onChange={e=>setNewPackage({...newPackage,plannedFinishDate:e.target.value})}/></div><div><label htmlFor="new-package-weight">Completion weight (%)</label><input id="new-package-weight" type="number" required min="0.0001" max="100" step="any" value={newPackage.weight} onChange={e=>setNewPackage({...newPackage,weight:e.target.value})}/></div></div><div className={styles.actions}><button className={styles.button} disabled={pending}>Create work package</button><button type="button" className={styles.secondary} onClick={()=>setShowCreate(false)}>Cancel</button></div></form>}
       {view==='schedule'&&<>{readiness&&<details className={styles.history}><summary>Package readiness · {readiness.packages.filter(row=>row.state==='blocked').length} blocked · {readiness.packages.filter(row=>row.state==='attention').length} need attention</summary>{readiness.packages.map(row=><div key={row.id} className={styles.status}><strong>{schedule.activities.find(activity=>activity.id===row.id)?.activityCode} · {row.state}</strong><ul>{row.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul></div>)}</details>}
@@ -137,15 +158,18 @@ export default function WorkPackageModuleClient({ projectId, projectStartDate, a
         {canEdit&&schedule.activities.some(activity=>!activity.plannedStartDate||!activity.plannedFinishDate)&&<div className={styles.panel}><h3>Fill missing package dates</h3><p className={styles.muted}>{schedule.activities.filter(activity=>!activity.plannedStartDate||!activity.plannedFinishDate).length} of {schedule.activities.length} packages have no planned dates. Set them in one step from the project start, using each package&apos;s suggested start offset and duration. Dates you already entered are kept, and every date stays editable.</p><div className={styles.actions}><label>Project start <input type="date" value={suggestedStart} onChange={event=>setSuggestedStart(event.target.value)} /></label><button className={styles.button} disabled={pending||!suggestedStart} onClick={()=>void plan('apply-suggested-dates',{startDate:suggestedStart})}>Apply suggested dates</button></div></div>}
         {/* Start over: clears every package of an unreviewed draft so suggestions can be regenerated (BOQ unaffected). */}
         {canEdit&&schedule.activities.length>0&&(schedule.workflowStatus==='AI_GENERATED_DRAFT'||schedule.workflowStatus==='INVALID_GENERATED_DRAFT')&&<details className={styles.panel}><summary>Start the package plan over</summary><p className={styles.muted}>Removes all {schedule.activities.length} draft packages with their scope, budgets and sequence links so you can generate suggestions again or add packages yourself. The approved BOQ is not changed. Not available once a package has progress, procurement or DUPA records.</p><div className={styles.actions}><button className={styles.secondary} disabled={pending} onClick={()=>{if(clearConfirm){void plan('clear-packages');setClearConfirm(false);}else setClearConfirm(true);}}>{clearConfirm?`Confirm: remove all ${schedule.activities.length} draft packages`:'Clear all draft packages'}</button>{clearConfirm&&<button className={styles.secondary} onClick={()=>setClearConfirm(false)}>Cancel</button>}</div></details>}
-        {/* Optional AI Check: grouping, sequence and plan insights; nothing changes unless accepted. */}
-        <AiCheckPanel projectId={projectId} scope="work-packages"/>
-        {summary&&<WorkPackageWorkspace projectId={projectId} summary={summary} workflowStatus={schedule.workflowStatus} baselineCode={schedule.baselineCode} boqLocked onPlan={()=>goView('scope')} onReview={()=>goView('review')} canEditDraft={canEdit} rowVersion={schedule.rowVersion} onRefresh={refresh} moduleMode onOpenPackage={id=>{const activity=schedule.activities.find(item=>item.id===id);if(activity)openPackage(activity);}} completionWeights={Object.fromEntries(schedule.activities.map(activity=>[activity.id,activity.plannedWeight]))}/>}
       </>}
-      {view === 'package' && selected && <section className={styles.packageWorkspace} aria-label={`Work package details for ${packageName}`}>
-        <div className={styles.packageHeading}>
-          <div><p className={styles.packageEyebrow}>Selected work package</p><h3>{packageName}</h3><p className={styles.muted}>{selected.plannedStartDate?.slice(0, 10) || 'Not dated'} – {selected.plannedFinishDate?.slice(0, 10) || 'Not dated'} · completion weight {Number((selected.plannedWeight * 100).toFixed(4))}%</p></div>
-          <button type="button" className={styles.secondary} onClick={() => goView('schedule')}>Back to package list</button>
-        </div>
+      {/* Optional AI Check: grouping, sequence and plan insights; nothing changes unless accepted. Kept mounted (only
+          hidden) on other steps, so a running check or its result is not lost when the user switches steps. */}
+      <div hidden={view!=='schedule'}><AiCheckPanel projectId={projectId} scope="work-packages"/></div>
+      {view==='schedule'&&<>
+        {summary&&<WorkPackageWorkspace projectId={projectId} summary={summary} workflowStatus={schedule.workflowStatus} baselineCode={schedule.baselineCode} boqLocked onPlan={()=>goView('scope')} onReview={()=>goView('review')} canEditDraft={canEdit} rowVersion={schedule.rowVersion} onRefresh={refresh} moduleMode onOpenPackage={id=>{const activity=schedule.activities.find(item=>item.id===id);if(activity)openPackage(activity);}} completionWeights={Object.fromEntries(schedule.activities.map(activity=>[activity.id,activity.plannedWeight]))}
+          allowances={Object.fromEntries(schedule.activities.map(activity=>[activity.id,schedule.details.resources.filter(row=>row.activityId===activity.id).reduce((sum,row)=>sum+Number(row.amount||0),0)]))}/>}
+      </>}
+      {/* Package details open in a panel on the right; the page behind keeps its place. */}
+      {packagePanelOpen && selected && <SideDrawer wide onClose={closePackagePanel} title={packageName}
+        meta={`${selected.plannedStartDate?.slice(0, 10) || 'Not dated'} – ${selected.plannedFinishDate?.slice(0, 10) || 'Not dated'} · completion weight ${Number((selected.plannedWeight * 100).toFixed(4))}%`}>
+      <section className={styles.packageWorkspace} aria-label={`Work package details for ${packageName}`}>
         <nav className={styles.packageTabs} role="tablist" aria-label={`${packageName} workspace`}>
           {([ ['scope', 'Scope'], ['schedule', 'Schedule'], ['resources', 'Resources & budgets'], ['dupa', 'DUPA'] ] as const).map(([key, label]) => <button key={key} type="button" role="tab" id={`package-tab-${key}`} aria-controls={`package-panel-${key}`} aria-selected={packageTab === key} className={packageTab === key ? styles.button : styles.secondary} onClick={() => setPackageTab(key)}>{label}</button>)}
         </nav>
@@ -179,7 +203,7 @@ export default function WorkPackageModuleClient({ projectId, projectStartDate, a
 
         <section className={styles.packagePanel} role="tabpanel" id="package-panel-resources" aria-labelledby="package-tab-resources" hidden={packageTab !== 'resources'}>
           <p className={styles.muted}>Resources and allowances for this package. Open the plan’s Resources & budgets view to review all packages or create plan-wide suggestions.</p>
-          <WorkPackageDetailsPanel key={`resources-${selected.id}`} projectId={projectId} scheduleId={schedule.id} rowVersion={schedule.rowVersion} details={{...schedule.details, resources: schedule.details.resources.filter(row => row.activityId === selected.id)}} activities={[selected]} members={members} canEdit={!!canEdit} view="resources" packageScoped onSaved={refresh}/>
+          <WorkPackageDetailsPanel key={`resources-${selected.id}`} projectId={projectId} scheduleId={schedule.id} rowVersion={schedule.rowVersion} details={{...schedule.details, resources: schedule.details.resources.filter(row => row.activityId === selected.id)}} activities={[selected]} members={members} canEdit={!!canEdit} view="resources" packageScoped packageValue={schedule.allocations.filter(row => row.activityId === selected.id).reduce((sum, row) => sum + Number(row.allocatedAmount || 0), 0)} onSaved={refresh}/>
           {immutable && <WorkPackageMaterialsPanel projectId={projectId} activityId={selected.id}/>}
           {immutable && <div className={styles.actions}>
             <a className={styles.link} href="#package-materials">Review material requirements</a>
@@ -189,38 +213,33 @@ export default function WorkPackageModuleClient({ projectId, projectStartDate, a
         </section>
 
         <section className={styles.packagePanel} role="tabpanel" id="package-panel-dupa" aria-labelledby="package-tab-dupa" hidden={packageTab !== 'dupa'}>
-          <PackageBreakdownPanel key={`breakdown-${selected.id}`} projectId={projectId} scheduleId={schedule.id} activityId={selected.id} packageName={`${selected.activityCode || ''} ${selected.name}`} rowVersion={schedule.rowVersion} uploads={(schedule.details.breakdownUploads || []).filter(upload => upload.activityId === selected.id)} existingResourceCount={schedule.details.resources.filter(resource => resource.activityId === selected.id).length} existingResources={schedule.details.resources.filter(resource => resource.activityId === selected.id)} canEdit={!!canEdit} onSaved={refresh}/>
+          <PackageBreakdownPanel key={`breakdown-${selected.id}`} packageAmount={Number(selected.allocatedAmount || 0)} projectId={projectId} scheduleId={schedule.id} activityId={selected.id} packageName={`${selected.activityCode || ''} ${selected.name}`} rowVersion={schedule.rowVersion} uploads={(schedule.details.breakdownUploads || []).filter(upload => upload.activityId === selected.id)} existingResourceCount={schedule.details.resources.filter(resource => resource.activityId === selected.id).length} existingResources={schedule.details.resources.filter(resource => resource.activityId === selected.id)} canEdit={!!canEdit} onSaved={refresh}/>
         </section>
-      </section>}
+      </section>
+      </SideDrawer>}
       {view==='scope'&&<section><div className={styles.titleRow}><div><h3>BOQ scope planner</h3><p>Allocate every approved BOQ pay item across work packages. A quantity can be split between packages.</p></div></div>{canEdit&&<form className={styles.panel} onSubmit={async e=>{e.preventDefault();const result=await plan('allocate',{boqItemId:allocation.boqItemId,activityId:allocation.activityId,allocatedQuantity:allocation.quantity,locationId:allocation.locationId||null});if(result)setAllocation({...allocation,quantity:''});}}><div className={styles.fields}><div><label htmlFor="scope-boq">BOQ pay item</label><select id="scope-boq" required value={allocation.boqItemId} onChange={e=>setAllocation({...allocation,boqItemId:e.target.value})}>{boqItems.map(item=><option value={item.id} key={item.id}>{item.itemCode} · {item.description}</option>)}</select></div><div><label htmlFor="scope-package">Work package</label><select id="scope-package" required value={allocation.activityId} onChange={e=>setAllocation({...allocation,activityId:e.target.value})}><option value="">Choose package</option>{schedule.activities.map(activity=><option value={activity.id} key={activity.id}>{activity.activityCode} · {activity.name}</option>)}</select></div><div><label htmlFor="scope-location">Location</label><select id="scope-location" value={allocation.locationId} onChange={e=>setAllocation({...allocation,locationId:e.target.value})}><option value="">Not stated</option>{schedule.details.locations.filter(row=>row.isActive!==false).map(row=><option key={row.id} value={row.id}>{formatLocationPath(schedule.details.locations,row.id)}</option>)}</select></div><div><label htmlFor="scope-quantity">Total quantity for this item in this package</label><input id="scope-quantity" type="number" min="0" step="any" required value={allocation.quantity} onChange={e=>setAllocation({...allocation,quantity:e.target.value})}/></div></div><button className={styles.button} disabled={pending||!schedule.activities.length}>Save allocation</button></form>}
         <div className={styles.scroll} role="region" aria-label="BOQ quantity coverage" tabIndex={0}><table className={styles.table}><thead><tr><th>BOQ item</th><th>Approved quantity</th><th>Planned</th><th>Unplanned</th><th>Standing</th></tr></thead><tbody>{summary?.coverage.map(line=><tr key={line.id}><th scope="row">{line.itemCode}<br/>{line.description}</th><td>{line.approvedQuantity} {line.unit}</td><td>{line.allocatedQuantity}</td><td>{line.remainingQuantity}</td><td>{line.status==='planned'?'Fully planned':line.status==='overallocated'?'Overallocated':'Scope remaining'}</td></tr>)}</tbody></table></div>
         <h3 style={{marginTop:28}}>Package allocations</h3><div className={styles.scroll}><table className={styles.table}><thead><tr><th>BOQ item</th><th>Work package</th><th>Quantity</th><th>Value</th><th>Location</th><th>Action</th></tr></thead><tbody>{schedule.allocations.map(row=><tr key={row.id}><th scope="row">{boqItems.find(item=>item.id===row.awardedBoqItemId)?.itemCode}</th><td>{schedule.activities.find(activity=>activity.id===row.activityId)?.name}</td><td>{row.allocatedQuantity}</td><td>{money(row.allocatedAmount)}</td><td>{canEdit?<select aria-label={`Location for allocation ${row.id}`} disabled={pending} value={schedule.details.allocationLocations[row.id]||''} onChange={e=>request(`/api/projects/${projectId}/work-packages/details`,{scheduleId:schedule.id,expectedRowVersion:schedule.rowVersion,action:'allocation-location',allocationId:row.id,locationId:e.target.value||null})}><option value="">No location</option>{schedule.details.locations.filter(location=>location.isActive!==false).map(location=><option value={location.id} key={location.id}>{location.name}</option>)}</select>:schedule.details.locations.find(location=>location.id===schedule.details.allocationLocations[row.id])?.name||'Not set'}</td><td>{canEdit&&<button className={styles.secondary} disabled={pending} onClick={()=>plan('remove-allocation',{allocationId:row.id})}>Remove allocation</button>}</td></tr>)}</tbody></table></div>
       </section>}
+      {/* Optional AI dates & sequence suggestions; kept mounted (hidden) on other steps so a running check survives. */}
+      {!immutable&&<div hidden={view!=='sequence'}><AiDatesPanel projectId={projectId} scheduleId={schedule.id} rowVersion={schedule.rowVersion} canEdit={!!canEdit} onSaved={refresh}/></div>}
       {view==='sequence'&&<section className={styles.panel} aria-labelledby="package-dates-heading"><h3 id="package-dates-heading">Package dates and weights</h3><p className={styles.muted}>Every package needs a start and finish date, and completion weights must total 100% (now {weightTotal}%). Open a package to change them.</p>
         <div className={styles.scroll} role="region" aria-label="Package dates and weights" tabIndex={0}><table className={styles.table}><thead><tr><th scope="col">Package</th><th scope="col">Start</th><th scope="col">Finish</th><th scope="col">Weight</th><th scope="col">Open</th></tr></thead><tbody>{schedule.activities.map(activity=><tr key={activity.id}><th scope="row">{activity.activityCode?`${activity.activityCode} · `:''}{activity.name}</th><td>{activity.plannedStartDate?.slice(0,10)||<span className={styles.warningText}>Not set</span>}</td><td>{activity.plannedFinishDate?.slice(0,10)||<span className={styles.warningText}>Not set</span>}</td><td>{Number((activity.plannedWeight*100).toFixed(4))}%</td><td><button type="button" className={styles.secondary} onClick={()=>openPackage(activity,'schedule')}>{canEdit?'Edit dates':'View'}</button></td></tr>)}</tbody></table></div>
       </section>}
       {view==='sequence'&&<section className={styles.panel}><h3>Package sequence</h3><p className={styles.muted}>Record package relationships explicitly. These links describe planning intent and do not claim actual progress.</p>{canEdit&&<form onSubmit={e=>{e.preventDefault();void plan('dependency',{predecessorId:sequence.predecessorId,successorId:sequence.successorId,dependencyType:sequence.type,lagDays:Number(sequence.lag)});}}><div className={styles.fields}><div><label htmlFor="sequence-before">Predecessor package</label><select id="sequence-before" required value={sequence.predecessorId} onChange={e=>setSequence({...sequence,predecessorId:e.target.value})}><option value="">Choose package</option>{schedule.activities.map(activity=><option value={activity.id} key={activity.id}>{activity.activityCode} · {activity.name}</option>)}</select></div><div><label htmlFor="sequence-after">Successor package</label><select id="sequence-after" required value={sequence.successorId} onChange={e=>setSequence({...sequence,successorId:e.target.value})}><option value="">Choose package</option>{schedule.activities.map(activity=><option value={activity.id} key={activity.id}>{activity.activityCode} · {activity.name}</option>)}</select></div><div><label htmlFor="sequence-type">Relationship</label><select id="sequence-type" value={sequence.type} onChange={e=>setSequence({...sequence,type:e.target.value})}><option value="FS">Finish to start</option><option value="SS">Start to start</option><option value="FF">Finish to finish</option><option value="SF">Start to finish</option></select></div><div><label htmlFor="sequence-lag">Lag days</label><input id="sequence-lag" type="number" min="0" value={sequence.lag} onChange={e=>setSequence({...sequence,lag:e.target.value})}/></div></div><button className={styles.button} disabled={pending}>Add sequence link</button></form>}<ul>{schedule.dependencies.map(row=><li key={row.id} className={styles.muted}>{schedule.activities.find(activity=>activity.id===row.predecessorId)?.name} → {schedule.activities.find(activity=>activity.id===row.successorId)?.name} · {row.type} +{row.lagDays} days {canEdit&&<button className={styles.secondary} disabled={pending} onClick={()=>plan('dependency',{remove:true,dependencyId:row.id})}>Remove link</button>}</li>)}</ul></section>}
       {view==='locations'&&<>
-        <p className={styles.muted}>Say where each package’s work happens, and record anything that could hold it up, with an owner and a needed-by date.</p>
-        <WorkPackageLocationsPanel projectId={projectId} canEdit={capacity.canEdit} onSaved={refresh}/>
-        {canEdit&&(()=>{
-          // Bulk location: assigning a location line by line was the only option (326 lines for the PGH BOQ).
-          const unlocated=schedule.allocations.filter(row=>!schedule.details.allocationLocations[row.id]).length;
-          const active=schedule.details.locations.filter(row=>row.isActive!==false);
-          if(!unlocated)return null;
-          return <div className={styles.panel}><h3>Assign a location to all unlocated scope</h3><p className={styles.muted}>{unlocated} of {schedule.allocations.length} BOQ scope lines have no location. For a single-site project, assign one location to all of them; lines that already have a location keep it, and you can still change any line in the Scope planner.</p>{active.length?<div className={styles.actions}><select aria-label="Location for unlocated scope" value={bulkLocation||active[0].id} onChange={event=>setBulkLocation(event.target.value)}>{active.map(row=><option key={row.id} value={row.id}>{row.code?`${row.code} · `:''}{row.name}</option>)}</select><button className={styles.button} disabled={pending} onClick={()=>void plan('locate-unlocated',{locationId:bulkLocation||active[0].id})}>Assign to {unlocated} lines</button></div>:<p className={styles.muted}>Add a project location above first.</p>}</div>;
-        })()}
-        <WorkPackageDetailsPanel projectId={projectId} scheduleId={schedule.id} rowVersion={schedule.rowVersion} details={schedule.details} activities={schedule.activities} members={members} canEdit={!!canEdit} view="constraints" onSaved={refresh}/>
+        <p className={styles.muted}>Say where each package’s work happens. Recording what could hold a package up is optional.</p>
+        <WorkPackageLocationsStep projectId={projectId} schedule={schedule} members={members} projectSite={projectSite} canEdit={!!canEdit} canEditProjectLocations={capacity.canEdit} pending={pending} plan={plan} onSaved={refresh}/>
       </>}
       {view==='resources'&&<>
-        <DupaGuide schedule={schedule} onOpenPackage={id=>openById(id,'dupa')}/>
-        <WorkPackageDetailsPanel projectId={projectId} scheduleId={schedule.id} rowVersion={schedule.rowVersion} details={schedule.details} activities={schedule.activities} members={members} canEdit={!!canEdit} view="resources" onSaved={refresh}/>
+        <WorkPackageResourcesStep projectId={projectId} schedule={schedule} members={members} canEdit={!!canEdit} onSaved={refresh} onOpenDupa={id=>openById(id,'dupa')}/>
       </>}
       {view==='review'&&<section id="plan-review" className={styles.panel}><h3>Engineer review → PM approval</h3>{readiness&&<ul className={styles.muted}>{readiness.checks.map(check=><li key={check.key}>{check.passed?'Passed':'Action required'}: {check.label}{!check.passed&&check.detail?` · ${check.detail}`:''}</li>)}</ul>}<p className={styles.muted}>The engineering review covers the exact package scope, dates, weights, sequence, constraints and resource assumptions. Any edit requires a fresh review before approval.</p><div className={styles.status}><strong>{immutable?'Approved, locked baseline':schedule.review?.current?'Engineering review is current':schedule.review?'Plan changed — engineering review is stale':'Engineering review required'}</strong>{schedule.review&&<p>{schedule.review.reviewerName} · {new Date(schedule.review.decidedAt).toLocaleString('en-PH')}<br/>{schedule.review.comments}</p>}{schedule.activatedAt&&<p>Baseline approved {new Date(schedule.activatedAt).toLocaleString('en-PH')} · {schedule.baselineCode}</p>}</div>
         {!immutable&&<><ul className={styles.muted}><li>{schedule.activities.length} packages · {summary?.datedCount||0} fully dated</li><li>{summary?.coverage.filter(row=>row.status!=='planned').length||0} BOQ items still need scope review</li><li>Completion weights total {weightTotal}%</li><li>{schedule.details.constraints.filter(row=>row.blocking&&row.status==='OPEN').length} open constraints (owner and needed-by required)</li></ul>{capacity.canEngineerReview&&<><label htmlFor="plan-review-comments">Engineering review comments</label><textarea id="plan-review-comments" rows={4} maxLength={500} value={reviewComments} onChange={e=>setReviewComments(e.target.value)}/><button className={styles.secondary} disabled={pending||reviewComments.trim().length<5||!readiness?.ready} onClick={async()=>{const result=await review('review',{comments:reviewComments});if(result)setReviewComments('');}}>Record engineering review</button></>}{capacity.canApprove&&<div><label htmlFor='pm-approval-reason'>PM approval reason (5–300 characters)</label><textarea id='pm-approval-reason' value={approvalReason} maxLength={300} onChange={e=>setApprovalReason(e.target.value)}/><div className={styles.actions} style={{marginTop:20}}><button className={styles.button} disabled={pending||!schedule.review?.current||!readiness?.ready||approvalReason.trim().length<5} onClick={async()=>{if(!approvalConfirm){setApprovalConfirm(true);return;}const result=await review('approve',{reason:approvalReason});if(result){setApprovalConfirm(false);router.push(`/projects/${projectId}/work-packages`);setView('schedule');}}}>{approvalConfirm?'Confirm PM approval & lock':'Approve work-package baseline'}</button>{approvalConfirm&&<button className={styles.secondary} onClick={()=>setApprovalConfirm(false)}>Cancel approval</button>}</div></div>}</>}
         {immutable&&(capacity.canEdit||capacity.canApprove)&&schedule.workflowStatus==='ACTIVE_BASELINE'&&!hasOpenDraft&&<><label htmlFor="revision-reason">Reason for plan revision</label><textarea id="revision-reason" rows={3} minLength={5} maxLength={500} value={revisionReason} onChange={e=>setRevisionReason(e.target.value)}/><button className={styles.button} disabled={pending||revisionReason.trim().length<5} onClick={async()=>{const result=await review('start-revision',{reason:revisionReason});if(result){setRevisionReason('');router.push(`/projects/${projectId}/work-packages`);setView('schedule');}}}>Start plan revision</button></>}
         {!immutable&&schedule.previousBaselineId&&<><h3 style={{marginTop:28}}>Revision impact</h3><p className={styles.muted}>Compare the draft with the previous approved baseline. The baseline remains active during this review.</p>{revisionComparison.length?<div className={styles.scroll}><table className={styles.table}><thead><tr><th>Package / scope</th><th>Approved baseline</th><th>Revision draft</th></tr></thead><tbody>{revisionComparison.map((row,index)=><tr key={index}><th scope="row">{row.name}</th><td>{row.before}</td><td>{row.after}</td></tr>)}</tbody></table></div>:<p className={styles.muted}>No package or allocation changes recorded yet.</p>}<button className={styles.secondary} disabled={pending} onClick={async()=>{if(!cancelRevision){setCancelRevision(true);return;}const result=await review('cancel-revision',{reason:revisionReason||'Revision cancelled by preparer.'});if(result){setCancelRevision(false);setView('schedule');}}}>{cancelRevision?'Confirm cancellation':'Cancel revision'}</button></>}
       </section>}
+      </div>
     </>}
   </>;
 }

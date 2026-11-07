@@ -53,6 +53,13 @@
 .packageFacts { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: .8rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .packageFacts strong { color: var(--text-primary); }
 .scope { margin-top: 16px; }
+/* Package card: "Review BOQ scope" on the left, "Open package" on the right of the same row */
+.cardActions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.scopeButton { background: none; border: none; padding: 6px 0; font: inherit; font-size: .875rem; color: var(--accent-color); cursor: pointer; text-align: left; }
+.scopeButton::before { content: '▸ '; }
+.scopeButton:hover, .scopeButton:focus-visible { text-decoration: underline; outline: none; }
+.scopeButton span { color: var(--text-secondary); margin-left: 12px; font-weight: 400; font-size: .8rem; }
+.footerLink { background: none; border: none; padding: 0; font: inherit; color: var(--accent-color); cursor: pointer; }
 .scope summary { font-size: .875rem; color: var(--accent-color); }
 .scope summary span, .coverage summary span { color: var(--text-secondary); margin-left: 12px; font-weight: 400; font-size: .8rem; }
 .tableScroll { overflow-x: auto; margin-top: 12px; max-width: 100%; scrollbar-color: var(--text-secondary) var(--bg-tertiary); }

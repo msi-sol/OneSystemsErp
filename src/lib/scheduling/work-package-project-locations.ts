@@ -191,6 +191,32 @@ export async function mutateWorkPackageProjectLocation(args: { projectId: string
   });
 }
 
+/**
+ * For callers already inside a serializable transaction (the planning "use one location for all packages" step):
+ * returns the active top-level project location with this name, creating it when there is none. Creating it
+ * also copies the locations into editable drafts, which raises their rowVersion, so callers must re-read their schedule.
+ */
+export async function ensureTopLevelProjectLocationInTransaction(tx: Tx, args: { projectId: string; actorId: string; name: string }): Promise<string> {
+  const name = text(args.name, 'LOCATION_NAME_REQUIRED');
+  const parts = await readParts(tx, args.projectId);
+  if (parts.project.status === 'ARCHIVED') conflict('PROJECT_ARCHIVED');
+  const expected = parts.state?.rowVersion ?? 0;
+  const before = expected === 0 ? parts.locations : parts.doc.locations ?? parts.locations;
+  const existing = before.find(item => item.parentId === null && item.isActive !== false && item.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+  if (existing) {
+    await syncEditableDrafts(tx, before, parts.schedules);
+    return existing.id;
+  }
+  uniqueName(before, name, null);
+  const id = randomUUID();
+  const locations = [...before, { id, name, parentId: null, isActive: true }];
+  const doc = structuredClone(parts.doc);
+  doc.locations = locations;
+  await saveState(tx, args.projectId, args.actorId, parts.state ? { id: parts.state.id, rowVersion: parts.state.rowVersion, dataJson: parts.state.dataJson } : null, expected, doc, before);
+  await syncEditableDrafts(tx, locations, parts.schedules);
+  return id;
+}
+
 /** Helper for planner creation before the first execution-data GET. */
 export async function projectLocationsForPlanning(projectId: string): Promise<PlanLocation[]> {
   const result = await getWorkPackageProjectLocations(projectId);

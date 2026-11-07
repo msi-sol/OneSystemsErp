@@ -117,7 +117,8 @@ export default async function ProjectBOQModule({ params, searchParams }: { param
       ['overview', 'Overview'], ['sections', `Sections · ${sections.length}`], ['items', `BOQ items · ${project.awardedBoqItems.length}`],
       ['compare', comparisonSummary ? `Compare with file${comparisonSummary.differences ? ` · ${comparisonSummary.differences} differ` : ' · matches'}` : 'Compare with file'],
       ['source', 'Source file'], ['history', 'History'],
-    ] as const).map(([key, label]) => <Link key={key} aria-current={view === key ? 'page' : undefined} className={view === key ? styles.button : styles.secondary} href={`/projects/${id}/boq${key === 'overview' ? '' : `?view=${key}`}`}>{label}</Link>)}</nav>}
+    // scroll={false}: switching views keeps the page where it is instead of jumping back to the top.
+    ] as const).map(([key, label]) => <Link key={key} scroll={false} aria-current={view === key ? 'page' : undefined} className={view === key ? styles.button : styles.secondary} href={`/projects/${id}/boq${key === 'overview' ? '' : `?view=${key}`}`}>{label}</Link>)}</nav>}
     {view === 'overview' && <>
     {approved && version
       ? <BOQBaselineCard projectId={id} total={total.toFixed(2)} contractAmount={String(project.contractAmount)} sectionCount={sections.length} itemCount={project.awardedBoqItems.length}
@@ -129,7 +130,9 @@ export default async function ProjectBOQModule({ params, searchParams }: { param
     {version && project.awardedBoqItems.length > 0 && <AiCheckPanel projectId={id} scope="boq" />}
     {draft && version && (persistedReview ? <BOQEngineeringReview projectId={id} versionId={version.id} checksum={checksum} canReview={capacity.canEngineerReview} canApprove={capacity.canApprove} review={review} reconciliation={{ contractAmount: String(project.contractAmount), boqTotal: total.toFixed(2), difference: total.minus(String(project.contractAmount)).abs().toFixed(2), matches: total.equals(String(project.contractAmount)) }} reviewState={{ rowVersion: persistedReview.rowVersion, findings: persistedReview.document.findings, contract: persistedReview.document.contract, revisions: persistedReview.document.revisions, readingHistory: persistedReview.document.readingHistory, correctedSources: persistedReview.document.correctedSources, provenance: persistedReview.document.source.provenance, firstReadAvailable: persistedReview.document.source.firstReadAvailable }} /> : <BOQReviewPreparation projectId={id} versionId={version.id} canPrepare={capacity.canEdit} />)}
     </>}
-    {view === 'sections' && <BOQSections projectId={id} sections={sections} />}
+    {view === 'sections' && <BOQSections projectId={id} sections={sections} locked={approved}
+      edit={draft && version && capacity.canEdit ? { versionId: version.id, checksum, reviewRowVersion: persistedReview?.rowVersion } : null}
+      items={project.awardedBoqItems.map(line => ({ id: line.id, itemCode: line.itemCode, category: line.category, description: line.description, unit: line.unit, quantity: Number(line.quantity), unitCost: Number(line.combinedUnitCost), amount: Number(line.totalCost) }))} />}
     {view === 'compare' && <BOQComparison sourceAvailable={firstReadAvailable} sourceName={persistedReview?.document.source.fileName ?? sourceFile?.originalFilename ?? null} sourceRows={sourceRows} currentRows={currentRows} originalHref={originalHref} />}
     {view === 'source' && <>
       <p className={styles.muted}>The original file as uploaded, how it was read, and the tools to correct the reading. The original file is never changed.</p>

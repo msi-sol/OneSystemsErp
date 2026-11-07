@@ -16,6 +16,8 @@ import ProjectVariationOrdersTab from './ProjectVariationOrdersTab';
 import ModuleKnowledgeTab from '@/app/knowledge-center/ModuleKnowledgeTab';
 import ProfitabilityTab from './ProfitabilityTab';
 import ProcurementBenchmarkTab from './ProcurementBenchmarkTab';
+import type { Prisma } from '@prisma/client';
+import { readBenchmarkBoqLinks } from '@/lib/boq/benchmark-boq-links';
 import ProjectCostLedgerTab from './ProjectCostLedgerTab';
 import ProjectTeamClient from './ProjectTeamClient';
 import ProjectSummaryTab from './ProjectSummaryTab';
@@ -105,6 +107,15 @@ export default async function ProjectDetailsPage({
     where: { projectId: id }, orderBy: { versionNumber: 'desc' },
   }) : null;
   const isDraftBoq = boqVersion?.status === 'DRAFT';
+  // Procurement Benchmark tab: the saved benchmark-line → BOQ-item links, shown as a BOQ item column.
+  const benchmarkBoqLinks: Record<string, string> = {};
+  if (tab === 'benchmark') {
+    const links = await readBenchmarkBoqLinks(prisma as unknown as Prisma.TransactionClient, id);
+    const boqIds = [...new Set(Object.values(links))];
+    const boqItems = boqIds.length ? await prisma.awardedBOQItem.findMany({ where: { projectId: id, id: { in: boqIds } }, select: { id: true, itemCode: true, description: true } }) : [];
+    const labels = new Map(boqItems.map(item => [item.id, `${item.itemCode} · ${item.description.replace(/\s+/g, ' ').slice(0, 60)}`]));
+    for (const [rowId, boqId] of Object.entries(links)) { const label = labels.get(boqId); if (label) benchmarkBoqLinks[rowId] = label; }
+  }
   const [boqEditAccess, boqApprovalAccess] = isDraftBoq ? await Promise.all([
     checkSchedulingAccess(actor.id, actor.role, id, 'canEditDraft'),
     checkSchedulingAccess(actor.id, actor.role, id, 'canApprove'),
@@ -260,8 +271,10 @@ export default async function ProjectDetailsPage({
       <div style={{ marginBottom: '30px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', paddingBottom: '15px', borderBottom: '1px solid var(--glass-border)' }}>
           {PROJECT_TABS.map((t) => (
-            <Link 
-              key={t.id} 
+            <Link
+              key={t.id}
+              // Tabs on this same page keep the scroll position; BOQ and Work Packages open their own pages from the top.
+              scroll={t.id === 'awarded-boq' || t.id === 'work-packages'}
               href={t.id === 'awarded-boq' ? `/projects/${project.id}/boq` : t.id === 'work-packages' ? `/projects/${project.id}/work-packages` : `/projects/${project.id}?tab=${t.id}`}
               style={{ 
                 padding: '8px 14px', 
@@ -356,12 +369,13 @@ export default async function ProjectDetailsPage({
       )}
 
       {tab === 'benchmark' && (
-        <ProcurementBenchmarkTab 
+        <ProcurementBenchmarkTab
           projectId={project.id} 
           isLocked={project.procurementBenchmarkLocked}
           items={project.procurementBenchmarkItems || []}
           totalItems={(project.procurementBenchmarkItems || []).length}
           totalAmount={(project.procurementBenchmarkItems || []).reduce((acc: number, cur: any) => acc + cur.totalCost, 0)}
+          boqLinks={benchmarkBoqLinks}
         />
       )}
 

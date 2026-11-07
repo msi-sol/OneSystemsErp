@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import SideDrawer from '@/components/ui/SideDrawer';
 import { ArrowRight, BookOpen, CalendarDays, LockKeyhole, Search } from 'lucide-react';
 import type { buildWorkPackageSummary } from '@/lib/scheduling/work-package-summary';
 import styles from './work-packages.module.css';
@@ -22,6 +23,8 @@ export interface WorkPackageWorkspaceProps {
   moduleMode?: boolean;
   onOpenPackage?: (id: string) => void;
   completionWeights?: Record<string, number>;
+  /** Materials, labor and equipment allowances per package, in pesos. */
+  allowances?: Record<string, number>;
 }
 
 // Group the decimal string without converting financial values to binary floats.
@@ -53,9 +56,13 @@ const workflowLabels: Record<string, string> = {
   ARCHIVED_BASELINE: 'Archived baseline',
 };
 
-export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, onReview, canEditDraft = false, rowVersion = 0, onRefresh, moduleMode = false, onOpenPackage, completionWeights }: WorkPackageWorkspaceProps) {
+export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, onReview, canEditDraft = false, rowVersion = 0, onRefresh, moduleMode = false, onOpenPackage, completionWeights, allowances }: WorkPackageWorkspaceProps) {
   const [query, setQuery] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
+  // Package whose BOQ scope is open in the side panel; focus returns to its "Review BOQ scope" button on close.
+  const [scopeId, setScopeId] = useState<string | null>(null);
+  const scopeOpener = useRef<HTMLButtonElement | null>(null);
+  const closeScope = useCallback(() => { setScopeId(null); requestAnimationFrame(() => scopeOpener.current?.focus()); }, []);
   const canEditScope = !moduleMode && canEditDraft && !summary.isImmutable && boqLocked
     && ['AI_GENERATED_DRAFT', 'INVALID_GENERATED_DRAFT', 'TECHNICAL_REVISIONS_REQUIRED'].includes(workflowStatus);
   const search = query.trim().toLocaleLowerCase();
@@ -76,6 +83,10 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
   const windowStart = starts.length ? new Date(starts[0]).getTime() : null;
   const windowFinish = finishes.length ? new Date(finishes[finishes.length - 1]).getTime() : null;
   const windowSize = windowStart !== null && windowFinish !== null ? Math.max(86400000, windowFinish - windowStart + 86400000) : 0;
+
+  // The package's BOQ scope table, shown in the side panel.
+  const scopeItem = scopeId ? summary.packages.find(entry => entry.id === scopeId) ?? null : null;
+  const scopeTable = (item: Summary['packages'][number]) => (item.scope.length === 0 ? <p className={styles.empty}>No BOQ quantities are linked to this package. Review its scope in the existing planning workflow.</p> : <div className={styles.tableScroll} tabIndex={0} role="region" aria-label={`${item.code} BOQ scope`}><table><caption className={styles.srOnly}>BOQ quantities allocated to {item.name}</caption><thead><tr><th scope="col">BOQ item</th><th scope="col">Unit</th><th scope="col">BOQ quantity</th><th scope="col">Package quantity</th><th scope="col">Allocation value</th></tr></thead><tbody>{item.scope.map(line => <tr key={line.id}><th scope="row"><strong>{line.itemCode}</strong><span>{line.description}</span></th><td>{line.unit}</td><td>{numberText(line.approvedQuantity)}</td><td>{canEditScope && onRefresh && !line.legacyQuantity ? <DraftAllocationEditor projectId={projectId} allocationId={line.id} itemCode={line.itemCode} quantity={line.allocatedQuantity} rowVersion={rowVersion} onSaved={onRefresh} /> : numberText(line.allocatedQuantity)}{line.legacyQuantity && <small className={styles.warning}>Legacy mapping · verify quantity</small>}</td><td>{money(line.amount)}</td></tr>)}</tbody></table></div>);
 
   return (
     <section className={styles.workspace} aria-labelledby="work-package-heading">
@@ -148,14 +159,15 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
                 {completionWeights && <span>Completion weight: <strong>{Number(((completionWeights[item.id] || 0) * 100).toFixed(4))}%</strong></span>}
                 <span>{item.startDate && item.finishDate ? `${dateText(item.startDate)} – ${dateText(item.finishDate)}` : 'Dates need review'}</span>
                 <span><strong>{item.weightPercent === null ? 'Not available' : `${numberText(item.weightPercent)}%`}</strong> BOQ value share</span>
-                <span>{money(item.amount)}</span>
+                <span>Value: <strong>{money(item.amount)}</strong></span>
+                {allowances && <span>Allowances: <strong>{allowances[item.id] ? `₱${allowances[item.id].toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'None yet'}</strong></span>}
                 <span>{moduleMode?'Measured progress':'Recorded progress'}: <strong>{item.recordedProgressPercent === null ? (summary.isImmutable?'Not available for this baseline':'See active baseline') : `${item.recordedProgressPercent}%`}</strong></span>
               </div>
-              <details className={styles.scope}>
-                <summary>Review BOQ scope <span>{item.scope.length} linked {item.scope.length === 1 ? 'item' : 'items'}</span></summary>
-                {item.scope.length === 0 ? <p className={styles.empty}>No BOQ quantities are linked to this package. Review its scope in the existing planning workflow.</p> : <div className={styles.tableScroll} tabIndex={0} role="region" aria-label={`${item.code} BOQ scope`}><table><caption className={styles.srOnly}>BOQ quantities allocated to {item.name}</caption><thead><tr><th scope="col">BOQ item</th><th scope="col">Unit</th><th scope="col">BOQ quantity</th><th scope="col">Package quantity</th><th scope="col">Allocation value</th></tr></thead><tbody>{item.scope.map(line => <tr key={line.id}><th scope="row"><strong>{line.itemCode}</strong><span>{line.description}</span></th><td>{line.unit}</td><td>{numberText(line.approvedQuantity)}</td><td>{canEditScope && onRefresh && !line.legacyQuantity ? <DraftAllocationEditor projectId={projectId} allocationId={line.id} itemCode={line.itemCode} quantity={line.allocatedQuantity} rowVersion={rowVersion} onSaved={onRefresh} /> : numberText(line.allocatedQuantity)}{line.legacyQuantity && <small className={styles.warning}>Legacy mapping · verify quantity</small>}</td><td>{money(line.amount)}</td></tr>)}</tbody></table></div>}
-              </details>
-              {onOpenPackage && <button type="button" className={styles.action} onClick={() => onOpenPackage(item.id)}>Open package <ArrowRight size={15} /></button>}
+              {/* One row: the BOQ scope opens in a panel on the right; Open package stays on the right of the same row. */}
+              <div className={styles.cardActions}>
+                <button type="button" className={styles.scopeButton} aria-haspopup="dialog" onClick={event => { scopeOpener.current = event.currentTarget; setScopeId(item.id); }}>Review BOQ scope <span>{item.scope.length} linked {item.scope.length === 1 ? 'item' : 'items'}</span></button>
+                {onOpenPackage && <button type="button" className={styles.action} onClick={() => onOpenPackage(item.id)}>Open package <ArrowRight size={15} /></button>}
+              </div>
             </li>;
           })}
         </ul>
@@ -163,9 +175,14 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
 
       <details className={styles.coverage}>
         <summary>BOQ quantity coverage <span>{scopeIssues ? `${scopeIssues} items need review` : 'View all BOQ items'}</span></summary>
-        <p>Across this schedule, allocated quantities should cover each BOQ item exactly once in total. This comparison supports review; it does not replace the server’s approval checks.</p>
-        {coverage.length === 0 ? <p className={styles.empty}>{summary.coverage.length ? 'No BOQ items match these filters.' : 'No contract BOQ items are available. Open Contract Value & BOQ to review the source.'}</p> : <div className={styles.tableScroll} tabIndex={0} role="region" aria-label="BOQ quantity coverage"><table><caption className={styles.srOnly}>BOQ quantities compared with work package allocations</caption><thead><tr><th scope="col">BOQ item</th><th scope="col">Unit</th><th scope="col">BOQ quantity</th><th scope="col">Allocated quantity</th><th scope="col">Remaining quantity</th><th scope="col">Scope standing</th></tr></thead><tbody>{coverage.map(line => <tr key={line.id}><th scope="row"><strong>{line.itemCode}</strong><span>{line.description}</span></th><td>{line.unit}</td><td>{numberText(line.approvedQuantity)}</td><td>{numberText(line.allocatedQuantity)}</td><td>{numberText(line.remainingQuantity)}</td><td className={line.status === 'planned' ? styles.planned : styles.warning}>{{planned:'Fully planned',unplanned:'Scope remaining',overallocated:'Overallocated',unknown:'Quantity needs review'}[line.status]}</td></tr>)}</tbody></table></div>}
+        <p>Across this schedule, allocated quantities should cover each BOQ item exactly once in total. This comparison supports review; it does not replace the server’s approval checks.</p>        {coverage.length === 0 ? <p className={styles.empty}>{summary.coverage.length ? 'No BOQ items match these filters.' : 'No contract BOQ items are available. Open Contract Value & BOQ to review the source.'}</p> : <div className={styles.tableScroll} tabIndex={0} role="region" aria-label="BOQ quantity coverage"><table><caption className={styles.srOnly}>BOQ quantities compared with work package allocations</caption><thead><tr><th scope="col">BOQ item</th><th scope="col">Unit</th><th scope="col">BOQ quantity</th><th scope="col">Allocated quantity</th><th scope="col">Remaining quantity</th><th scope="col">Scope standing</th></tr></thead><tbody>{coverage.map(line => <tr key={line.id}><th scope="row"><strong>{line.itemCode}</strong><span>{line.description}</span></th><td>{line.unit}</td><td>{numberText(line.approvedQuantity)}</td><td>{numberText(line.allocatedQuantity)}</td><td>{numberText(line.remainingQuantity)}</td><td className={line.status === 'planned' ? styles.planned : styles.warning}>{{planned:'Fully planned',unplanned:'Scope remaining',overallocated:'Overallocated',unknown:'Quantity needs review'}[line.status]}</td></tr>)}</tbody></table></div>}
       </details>
+      {scopeItem && <SideDrawer onClose={closeScope} wide={canEditScope}
+        title={`${scopeItem.code} · ${scopeItem.name}`}
+        meta={`${scopeItem.scope.length} linked BOQ ${scopeItem.scope.length === 1 ? 'item' : 'items'} · ${money(scopeItem.amount)}`}
+        footer={<><span>Package value · {money(scopeItem.amount)}</span>{onOpenPackage && <button type="button" className={styles.footerLink} onClick={() => { const id = scopeItem.id; setScopeId(null); onOpenPackage(id); }}>Open package →</button>}</>}>
+        {scopeTable(scopeItem)}
+      </SideDrawer>}
     </section>
   );
 }

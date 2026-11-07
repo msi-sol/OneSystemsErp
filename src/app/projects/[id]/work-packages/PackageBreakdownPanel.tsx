@@ -6,10 +6,18 @@ import type { PlanResource } from '@/lib/scheduling/work-package-details-types';
 import styles from '../planning/planning.module.css';
 
 type Props = { projectId: string; scheduleId: string; activityId: string; packageName: string; rowVersion: number;
-  uploads: PackageBreakdownUpload[]; existingResourceCount: number; existingResources?: PlanResource[]; canEdit: boolean; onSaved: () => void };
+  uploads: PackageBreakdownUpload[]; existingResourceCount: number; existingResources?: PlanResource[]; canEdit: boolean; onSaved: () => void;
+  /** The package's allocated BOQ value, to show how an uploaded DUPA reconciles with it. */
+  packageAmount?: number };
 const fields = ['itemCode', 'description', 'unit', 'quantity', 'unitCost', 'amount'] as const;
 const labels = ['Item code (optional)', 'Description', 'Unit', 'Quantity', 'Unit rate (optional)', 'Amount'];
 const money = (value: number | string) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(value));
+/** A DUPA usually groups rows under Materials / Labor / Equipment headings; start each row in that category (still editable). */
+function suggestedKind(section: string | null | undefined): BreakdownKind | undefined {
+  const text = (section || '').toLowerCase();
+  const kind = /material/.test(text) ? 'MATERIAL' : /labou?r|manpower|crew/.test(text) ? 'LABOR' : /equipment|tool/.test(text) ? 'EQUIPMENT' : undefined;
+  return kind && (RESOURCE_KINDS as readonly string[]).includes(kind) ? kind as BreakdownKind : undefined;
+}
 
 export default function PackageBreakdownPanel(props: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -27,6 +35,11 @@ export default function PackageBreakdownPanel(props: Props) {
   const [replacements, setReplacements] = useState<Record<string, string[]>>({});
   const [version, setVersion] = useState({ source: props.rowVersion, value: props.rowVersion });
   const currentVersion = version.source === props.rowVersion ? version.value : props.rowVersion;
+  // The user's choice wins; otherwise the category suggested by the row's DUPA section heading.
+  const chosenCategories = (upload: PackageBreakdownUpload) => Object.fromEntries(upload.rows.flatMap(row => {
+    const kind = categories[upload.id]?.[row.sourceRowNumber] ?? suggestedKind(row.section);
+    return kind ? [[String(row.sourceRowNumber), kind]] : [];
+  })) as Record<string, BreakdownKind>;
   const endpoint = `/api/projects/${encodeURIComponent(props.projectId)}/work-packages/breakdown`;
   const current = analysis && analysis.selectedSheet === sheet && JSON.stringify(analysis.mapping) === JSON.stringify(mapping);
 
@@ -61,7 +74,7 @@ export default function PackageBreakdownPanel(props: Props) {
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(props.projectId)}/work-packages/details`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'apply-breakdown', scheduleId: props.scheduleId,
-          expectedRowVersion: currentVersion, fields: { uploadId: upload.id, categories: categories[upload.id] || {}, reason: reasons[upload.id] || '', acknowledgeExisting: acknowledged[upload.id] === true, replaceResourceIds: replacements[upload.id] || [] } }),
+          expectedRowVersion: currentVersion, fields: { uploadId: upload.id, categories: chosenCategories(upload), reason: reasons[upload.id] || '', acknowledgeExisting: acknowledged[upload.id] === true, replaceResourceIds: replacements[upload.id] || [] } }),
       });
       const result = await response.json(); if (!response.ok) throw new Error(result.error || 'The component costs could not be added.');
       setVersion({ source: props.rowVersion, value: result.rowVersion });
@@ -72,7 +85,7 @@ export default function PackageBreakdownPanel(props: Props) {
   function itemTable(items: WorkspaceItem[], upload?: PackageBreakdownUpload) {
     return <div className={styles.scroll} role="region" aria-label="Complete package breakdown rows" tabIndex={0}><table className={styles.table}>
       <thead><tr><th>Source row / section</th><th>Code / description</th><th>Quantity</th><th>Source rate</th><th>Amount</th>{upload && <th>Resource category</th>}</tr></thead>
-      <tbody>{items.map(row => <tr key={row.sourceRowNumber}><td>{row.sourceRowNumber} · {row.section}</td><th scope="row">{row.itemCode}<br/>{row.description}</th><td>{row.quantity} {row.unit}{(row.quantityDefaulted || row.unitDefaulted) && <p>Quantity or unit needs correction before adding costs.</p>}</td><td>{row.sourceUnitCost === null ? 'Not stated' : money(row.sourceUnitCost)}</td><td>{money(row.amount)}</td>{upload && <td>{upload.appliedAt ? upload.categories[String(row.sourceRowNumber)] : <select aria-label={`Category for source row ${row.sourceRowNumber}`} disabled={busy || !props.canEdit} value={categories[upload.id]?.[row.sourceRowNumber] || ''} onChange={event => setCategories({ ...categories, [upload.id]: { ...categories[upload.id], [row.sourceRowNumber]: event.target.value as BreakdownKind } })}><option value="">Choose category</option>{RESOURCE_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select>}</td>}</tr>)}</tbody>
+      <tbody>{items.map(row => <tr key={row.sourceRowNumber}><td>{row.sourceRowNumber} · {row.section}</td><th scope="row">{row.itemCode}<br/>{row.description}</th><td>{row.quantity} {row.unit}{(row.quantityDefaulted || row.unitDefaulted) && <p>Quantity or unit needs correction before adding costs.</p>}</td><td>{row.sourceUnitCost === null ? 'Not stated' : money(row.sourceUnitCost)}</td><td>{money(row.amount)}</td>{upload && <td>{upload.appliedAt ? upload.categories[String(row.sourceRowNumber)] : <select aria-label={`Category for source row ${row.sourceRowNumber}`} disabled={busy || !props.canEdit} value={chosenCategories(upload)[String(row.sourceRowNumber)] || ''} onChange={event => setCategories({ ...categories, [upload.id]: { ...categories[upload.id], [row.sourceRowNumber]: event.target.value as BreakdownKind } })}><option value="">Choose category</option>{RESOURCE_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select>}</td>}</tr>)}</tbody>
     </table></div>;
   }
   return <section className={styles.panel} id="package-breakdown"><h3>Package breakdown / DUPA</h3>
@@ -87,6 +100,16 @@ export default function PackageBreakdownPanel(props: Props) {
       {analysis && <><p>{rows.length} component rows · {money(analysis.total)} · entire selected worksheet</p>{analysis.errors.map((issue, index) => <p className={styles.error} key={index}>Row {issue.row}: {issue.message}</p>)}{analysis.warnings.map((issue, index) => <p className={styles.muted} key={index}>Row {issue.row}: {issue.message}</p>)}{itemTable(rows)}</>}
     </>}
     <h4 style={{ marginTop: 24 }}>Preserved package uploads</h4>{!props.uploads.length && <p className={styles.muted}>No breakdown uploaded for this package yet.</p>}
+    {/* How each uploaded DUPA compares with the package's BOQ value. Display only: nothing is scaled or changed. */}
+    {props.packageAmount !== undefined && props.packageAmount > 0 && props.uploads.map(upload => {
+      const total = upload.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      const share = total / props.packageAmount! * 100;
+      const off = Math.abs(share - 100) > 5;
+      return <p key={`reconcile-${upload.id}`} role="note" className={styles.muted} style={off ? { color: '#fcd34d' } : undefined}>
+        {upload.fileName}: DUPA total {money(total)} vs package BOQ value {money(props.packageAmount!)} ({share.toFixed(1)}%).
+        {off ? ' The DUPA does not cover the package value. Check that its quantities are for this whole package (they are not scaled automatically) or record the difference as an allowance.' : ' The DUPA reconciles with the package value.'}
+      </p>;
+    })}
     {props.uploads.map(upload => <details key={upload.id} className={styles.history}><summary>{upload.fileName} · {upload.sheetName} · {upload.rows.length} rows · {upload.appliedAt ? 'Added to draft resources' : 'Evidence only'}</summary>
       <p className={styles.muted}>Preserved {new Date(upload.uploadedAt).toLocaleString('en-PH')}. Source quantities and financial values remain available below.</p>
       <a className={styles.link} href={`${endpoint}?scheduleId=${encodeURIComponent(props.scheduleId)}&uploadId=${encodeURIComponent(upload.id)}`}>Download preserved original</a>
@@ -96,7 +119,7 @@ export default function PackageBreakdownPanel(props: Props) {
         {!!props.existingResources?.length && <fieldset><legend>Draft rows to replace (optional)</legend>{props.existingResources.map(resource => <label key={resource.id} style={{display:'block',marginBottom:8}}><input type="checkbox" disabled={busy} checked={(replacements[upload.id] || []).includes(resource.id)} onChange={event => setReplacements(current => ({...current,[upload.id]: event.target.checked ? [...current[upload.id] || [],resource.id] : (current[upload.id] || []).filter(id => id !== resource.id)}))}/>{resource.kind} · {resource.description} · {resource.quantity} {resource.unit} · {money(resource.amount)}</label>)}</fieldset>}
         <label htmlFor={`breakdown-reason-${upload.id}`}>Reason / relationship to generated or existing package costs</label><textarea id={`breakdown-reason-${upload.id}`} maxLength={500} value={reasons[upload.id] || ''} disabled={busy} onChange={event => setReasons({ ...reasons, [upload.id]: event.target.value })}/>
         {props.existingResourceCount > 0 && <label><input type="checkbox" checked={acknowledged[upload.id] || false} disabled={busy} onChange={event => setAcknowledged({ ...acknowledged, [upload.id]: event.target.checked })}/> I reviewed the {props.existingResourceCount} existing resource rows. I checked the selected replacements and the additional costs that will remain.</label>}
-        <button className={styles.button} disabled={busy || upload.rows.some(row => !categories[upload.id]?.[row.sourceRowNumber]) || (reasons[upload.id]?.trim().length || 0) < 5 || (props.existingResourceCount > 0 && !acknowledged[upload.id])} onClick={() => void apply(upload)}>Add reviewed component rows to draft resources</button>
+        <button className={styles.button} disabled={busy || upload.rows.some(row => !chosenCategories(upload)[String(row.sourceRowNumber)]) || (reasons[upload.id]?.trim().length || 0) < 5 || (props.existingResourceCount > 0 && !acknowledged[upload.id])} onClick={() => void apply(upload)}>Add reviewed component rows to draft resources</button>
       </>}
     </details>)}
   </section>;

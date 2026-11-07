@@ -112,7 +112,7 @@ export default async function PurchaseOrderDetailsPage({ params }: { params: Pro
           )}
 
           {/* Action buttons */}
-          <POWorkflowButtons poId={po.id} status={po.status} currentUser={currentUser} permissions={permissions} />
+          <POWorkflowButtons poId={po.id} status={po.status} currentUser={currentUser} permissions={permissions} canvassFormId={po.canvassFormId} />
         </div>
       </div>
     </div>

@@ -13,6 +13,11 @@ type Requirement = {
 };
 type PackageMaterials = { requirements: Requirement[]; canCreate: boolean; benchmarkMaterialBudget: string | null; projectMaterialLimits: Awaited<ReturnType<typeof readMaterialAllowanceUsage>> };
 
+// Readable messages for the API's error codes (shown before as "REQUEST EXCEEDS CONFIRMED MATERIAL SHORTAGE").
+const REQUEST_ERRORS: Record<string, string> = {
+  REQUEST_EXCEEDS_CONFIRMED_MATERIAL_SHORTAGE: 'A requested quantity is more than the remaining allowance for this package. Lower it to the "Remaining shortage" shown, or wait for a cancelled request to release quantity.',
+};
+
 export default function PackageMaterialRequestForm({ projectId, packages }: {
   projectId: string; packages: { id: string; name: string; activityCode?: string | null }[];
 }) {
@@ -51,7 +56,7 @@ export default function PackageMaterialRequestForm({ projectId, packages }: {
       const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create-request', activityId, purpose, dateNeeded, locationOfUse, items }) });
       const result = await response.json();
-      if (!response.ok || !result.recordId) throw new Error(result.error || 'Could not create this package request.');
+      if (!response.ok || !result.recordId) throw new Error(REQUEST_ERRORS[result.error] || result.error || 'Could not create this package request.');
       router.push(`/material-requests/${result.recordId}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create this package request.'); setSaving(false); }
   }
@@ -82,7 +87,7 @@ export default function PackageMaterialRequestForm({ projectId, packages }: {
           <td><input aria-label={`Request quantity for ${row.description}`} type="number" min="0" max={row.shortage} step="0.0001" disabled={saving || !data.canCreate || Number(row.shortage) <= 0} value={quantities[row.materialId] ?? ''} onChange={event => setQuantities(current => ({ ...current, [row.materialId]: event.target.value }))} style={{ width: 120 }} /></td>
         </tr>)}</tbody>
       </table></div>
-      {!data.requirements.length && <p>No material requirements are approved for this package. <Link className={styles.actionLink} href={`/projects/${projectId}/benchmark`}>Review benchmark mappings</Link></p>}
+      {!data.requirements.length && <p>No material requirements are approved for this package. <Link className={styles.actionLink} href={`/projects/${projectId}?tab=benchmark`}>Review benchmark mappings</Link></p>}
       <label htmlFor="package-request-purpose">Purpose<input id="package-request-purpose" value={purpose} minLength={3} required disabled={saving} onChange={event => setPurpose(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 8 }} /></label>
       <label htmlFor="package-request-date">Date needed<input id="package-request-date" type="date" value={dateNeeded} required disabled={saving} onChange={event => setDateNeeded(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 8 }} /></label>
       <label htmlFor="package-request-location">Location of use<input id="package-request-location" value={locationOfUse} required disabled={saving} onChange={event => setLocation(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 8 }} /></label>
