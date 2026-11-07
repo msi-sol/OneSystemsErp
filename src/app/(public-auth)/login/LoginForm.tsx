@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { login } from '@/app/actions/auth';
 
 /** defaultEmail/defaultPassword come from page.tsx: always on the dev server, elsewhere only when explicitly enabled. */
-export default function LoginForm({ defaultEmail = '', defaultPassword = '', prefillNotice = false }: { defaultEmail?: string; defaultPassword?: string; prefillNotice?: boolean }) {
+export default function LoginForm({ defaultEmail = '', defaultPassword = '' }: { defaultEmail?: string; defaultPassword?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -41,12 +41,6 @@ export default function LoginForm({ defaultEmail = '', defaultPassword = '', pre
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
-          {prefillNotice && (
-            <div role="note" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', color: '#fcd34d', padding: '10px', borderRadius: '6px', fontSize: '13px', border: '1px solid rgba(245, 158, 11, 0.3)', textAlign: 'center' }}>
-              Demo sign-in is pre-filled on this server. Turn off LOGIN_PREFILL_ENABLED after the demo.
-            </div>
-          )}
-
           {error && (
             <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '10px', borderRadius: '6px', fontSize: '14px', border: '1px solid rgba(239, 68, 68, 0.3)', textAlign: 'center' }}>
               {error}

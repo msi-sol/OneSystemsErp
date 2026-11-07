@@ -11,7 +11,7 @@ export default function LoginPage() {
   const development = process.env.NODE_ENV === 'development';
   const enabled = development || process.env.LOGIN_PREFILL_ENABLED === 'true';
   const prefill = enabled
-    ? { defaultEmail: process.env.LOCAL_DEMO_EMAIL ?? '', defaultPassword: process.env.LOCAL_DEMO_PASSWORD ?? '', prefillNotice: !development && !!process.env.LOCAL_DEMO_PASSWORD }
+    ? { defaultEmail: process.env.LOCAL_DEMO_EMAIL ?? '', defaultPassword: process.env.LOCAL_DEMO_PASSWORD ?? '' }
     : {};
   return <LoginForm {...prefill} />;
 }
