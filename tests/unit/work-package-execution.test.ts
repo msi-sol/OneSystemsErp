@@ -60,6 +60,11 @@ function setup(document: WorkPackageExecutionDocument = emptyExecutionDocument()
 const command = (body: Record<string, unknown>) => runWorkPackageExecutionCommand({ projectId, actor, body: { expectedRowVersion: 0, ...body } });
 
 describe('Work Package execution transactions', () => {
+  // The fixtures use the week of 2026-11-02 to 2026-11-08, and weekly targets are refused once their week has ended
+  // (Manila date). Pin "today" inside that week so the tests do not start failing as the calendar moves on.
+  // Only Date is faked; timers stay real.
+  beforeAll(() => jest.useFakeTimers({ now: new Date('2026-11-05T02:00:00Z'), doNotFake: ['nextTick', 'setImmediate', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'clearImmediate', 'queueMicrotask', 'hrtime', 'performance'] }));
+  afterAll(() => jest.useRealTimers());
   beforeEach(() => jest.clearAllMocks());
 
   it('keeps the complete execution snapshot available beyond the default five-second transaction limit', async () => {

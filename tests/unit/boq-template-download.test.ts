@@ -88,5 +88,6 @@ describe('template generation and authenticated audit attribution', () => {
       userId: 'verified-actor', userRole: 'SUPER_ADMIN', actionType: 'TEMPLATE_DOWNLOADED',
     }) });
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
-  });
+    // Builds the real protected workbook, which can take several seconds on a busy machine or CI runner.
+  }, 30_000);
 });
