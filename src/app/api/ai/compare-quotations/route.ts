@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getComparableQuotationTotal, getMinimumPositiveQuotationTotal } from '@/lib/procurement/quotation-validation';
+import { deliveryScore, paymentScore } from '@/lib/procurement/quotation-terms-score';
 
 export async function POST(req: Request) {
   try {
@@ -62,39 +63,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'Quotation totals must be finite and positive before comparison.' }, { status: 400 });
     }
 
-    // Simulate AI Processing Time
-    await new Promise(resolve => setTimeout(resolve, 3500));
-
-    // Find the cheapest quotation
-    // Helper functions for scoring
-    const parseDeliveryScore = (d: string | null) => {
-      if (!d) return 50;
-      if (d.includes('On-hand')) return 100;
-      if (d.includes('7 Days')) return 90;
-      if (d.includes('14 Days')) return 80;
-      if (d.includes('30 Days')) return 60;
-      if (d.includes('45 Days')) return 40;
-      return 50;
-    };
-
-    const parsePaymentScore = (p: string | null) => {
-      if (!p) return 50;
-      if (p.includes('60 Days')) return 100;
-      if (p.includes('30 Days')) return 90;
-      if (p.includes('15 Days')) return 80;
-      if (p.includes('50%')) return 70;
-      if (p.includes('COD')) return 50;
-      return 50;
-    };
-
     // Calculate score for each
     const scoredQuotations = fullCoverageQuotes.map(({ quotation: q, comparableTotal }) => {
       const priceScore = (minPrice / comparableTotal) * 100;
-      const deliveryScore = parseDeliveryScore(q.deliveryPeriod);
-      const paymentScore = parsePaymentScore(q.paymentTerms);
-      
-      const totalScore = (priceScore * 0.6) + (deliveryScore * 0.2) + (paymentScore * 0.2);
-      return { ...q, comparableTotal, score: totalScore, priceScore, deliveryScore, paymentScore };
+      // Quotations encoded without payment terms use the supplier's saved terms.
+      const paymentTerms = q.paymentTerms || q.supplier.paymentTerms || null;
+      const delivery = deliveryScore(q.deliveryPeriod);
+      const payment = paymentScore(paymentTerms);
+
+      const totalScore = (priceScore * 0.6) + (delivery * 0.2) + (payment * 0.2);
+      return { ...q, paymentTerms, comparableTotal, score: totalScore, priceScore, deliveryScore: delivery, paymentScore: payment };
     });
 
     // Sort by score descending

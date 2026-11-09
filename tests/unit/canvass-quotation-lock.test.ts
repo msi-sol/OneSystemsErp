@@ -2,8 +2,12 @@ import express from 'express';
 import type { Server } from 'node:http';
 
 jest.mock('../../apps/aws-backend/src/lib/prisma', () => ({ prisma: {
-  canvassForm: { findUnique: jest.fn(), updateMany: jest.fn() },
+  canvassForm: { findUnique: jest.fn(), updateMany: jest.fn(), delete: jest.fn() },
   supplierQuotation: { findFirst: jest.fn() },
+  supplier: { findUnique: jest.fn() },
+  user: { findUnique: jest.fn() },
+  auditLog: { create: jest.fn(), findFirst: jest.fn() },
+  purchaseOrder: { count: jest.fn() },
   $transaction: jest.fn(),
 } }));
 
@@ -44,7 +48,13 @@ describe('canvass quotation mutation state guard', () => {
     tx.supplierQuotation.create.mockResolvedValue({ id: 'quotation-new' });
     tx.supplierQuotation.update.mockResolvedValue({ id: 'quotation-1' });
     tx.quotationItem.deleteMany.mockResolvedValue({ count: 1 });
-    (prisma.supplierQuotation.findFirst as jest.Mock).mockResolvedValue({ id: 'quotation-1' });
+    // The quotation being edited exists; no other quotation from the same supplier unless a test says so.
+    (prisma.supplierQuotation.findFirst as jest.Mock).mockImplementation(({ where }) => Promise.resolve(where.supplierId ? null : { id: 'quotation-1' }));
+    (prisma.supplier.findUnique as jest.Mock).mockResolvedValue({ id: 'supplier-1', name: 'Supplier One', paymentTerms: 'PDC 30' });
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'user-1', role: 'PROCUREMENT' });
+    (prisma.auditLog.findFirst as jest.Mock).mockResolvedValue(null);
+    (prisma.auditLog.create as jest.Mock).mockResolvedValue({});
+    (prisma.purchaseOrder.count as jest.Mock).mockResolvedValue(0);
   });
 
   function canvass(status: string) {
@@ -178,5 +188,46 @@ describe('canvass quotation mutation state guard', () => {
     const response = await post('/canvass-1/quotations', quotationBody);
     expect(response.status).toBe(409);
     expect(tx.supplierQuotation.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a second quotation from the same supplier and keeps the supplier terms', async () => {
+    canvass('DRAFT');
+    (prisma.supplierQuotation.findFirst as jest.Mock).mockResolvedValue({ id: 'quotation-1' });
+    const duplicate = await post('/canvass-1/quotations', quotationBody);
+    expect(duplicate.status).toBe(409);
+    expect((await duplicate.json()).error).toMatch(/already has a quotation/i);
+
+    (prisma.supplierQuotation.findFirst as jest.Mock).mockResolvedValue(null);
+    const created = await post('/canvass-1/quotations', { ...quotationBody, deliveryPeriod: ' 7 days ' });
+    expect(created.status).toBe(200);
+    expect(tx.supplierQuotation.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ deliveryPeriod: '7 days', paymentTerms: 'PDC 30' }),
+    }));
+  });
+
+  it('records the endorser and blocks them from approving their own endorsement', async () => {
+    (prisma.canvassForm.findUnique as jest.Mock).mockResolvedValue({ id: 'canvass-1', status: 'DRAFT', recommendedSupplierId: 'supplier-1' });
+    await fetch(base + '/canvass-1/endorse', { method: 'POST', headers: { 'x-user-session': 'user-1' } });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actionType: 'CANVASS_ENDORSED', userId: 'user-1' }) }));
+
+    (prisma.canvassForm.findUnique as jest.Mock).mockResolvedValue({ id: 'canvass-1', status: 'ENDORSED', recommendedSupplierId: 'supplier-1' });
+    (prisma.auditLog.findFirst as jest.Mock).mockResolvedValue({ userId: 'user-1' });
+    (prisma.canvassForm.updateMany as jest.Mock).mockClear();
+    const self = await fetch(base + '/canvass-1/approve', { method: 'POST', headers: { 'x-user-session': 'user-1' } });
+    expect(self.status).toBe(403);
+    expect(prisma.canvassForm.updateMany).not.toHaveBeenCalled();
+
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'user-1', role: 'ADMIN' });
+    const admin = await fetch(base + '/canvass-1/approve', { method: 'POST', headers: { 'x-user-session': 'user-1' } });
+    expect(admin.status).toBe(200);
+  });
+
+  it('keeps a canvass that already has purchase orders', async () => {
+    (prisma.canvassForm.findUnique as jest.Mock).mockResolvedValue({ id: 'canvass-1', status: 'COMPLETED', preparedById: 'user-1', items: [], quotations: [] });
+    (prisma.purchaseOrder.count as jest.Mock).mockResolvedValue(1);
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'user-1', role: 'SUPER_ADMIN' });
+    const response = await fetch(base + '/canvass-1', { method: 'DELETE', headers: { 'x-user-session': 'user-1' } });
+    expect(response.status).toBe(409);
+    expect(prisma.canvassForm.delete).not.toHaveBeenCalled();
   });
 });

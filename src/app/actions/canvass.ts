@@ -26,6 +26,12 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (!res.ok) {
     const errorText = await res.text();
+    // Return the backend's own message (e.g. "Self-approval is not allowed…") as { success: false, error }.
+    // Thrown server-action errors are replaced by a generic message in production builds.
+    try {
+      const body = JSON.parse(errorText);
+      if (body && typeof body === 'object' && typeof body.error === 'string') return { ...body, success: false };
+    } catch {}
     throw new Error(`Backend Error: ${res.status} ${errorText}`);
   }
   return res.json();
@@ -38,10 +44,12 @@ export async function createCanvassForm(mrId: string) {
   });
 }
 
-export async function addSupplierQuotation(canvassId: string, supplierId: string, items: any[]) {
+export type QuotationTerms = { deliveryPeriod?: string; paymentTerms?: string };
+
+export async function addSupplierQuotation(canvassId: string, supplierId: string, items: any[], terms: QuotationTerms = {}) {
   return await fetchWithAuth(`/api/canvass/${canvassId}/quotations`, {
     method: 'POST',
-    body: JSON.stringify({ supplierId, items })
+    body: JSON.stringify({ supplierId, items, ...terms })
   });
 }
 
@@ -83,9 +91,9 @@ export async function deleteCanvass(canvassId: string) {
   return result;
 }
 
-export async function updateSupplierQuotation(canvassId: string, quotationId: string, supplierId: string, items: any[]) {
+export async function updateSupplierQuotation(canvassId: string, quotationId: string, supplierId: string, items: any[], terms: QuotationTerms = {}) {
   return await fetchWithAuth(`/api/canvass/${canvassId}/quotations/${quotationId}`, {
     method: 'PUT',
-    body: JSON.stringify({ supplierId, items })
+    body: JSON.stringify({ supplierId, items, ...terms })
   });
 }

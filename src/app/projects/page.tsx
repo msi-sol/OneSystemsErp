@@ -174,11 +174,8 @@ export default async function ProjectsPage() {
                     </dl>
                     {schedule && <p className={styles.scheduleName}>{schedule.name}{schedule.baselineCode ? ` · ${schedule.baselineCode}` : schedule.revisionCode ? ` · ${schedule.revisionCode}` : ''}</p>}
                     <div className={styles.actionCardLinks}>
+                      {/* One action per project: it opens the BOQ or WPS stage the project is at. */}
                       <Link className={styles.primaryProjectAction} href={entry.nextHref}>{entry.nextLabel}</Link>
-                      <nav aria-label={`Project modules for ${project.name}`} className={styles.moduleLinks}>
-                        <Link href={`/projects/${project.id}/boq`}>BOQ module</Link>
-                        <Link href={entry.wpsHref}>WPS module</Link>
-                      </nav>
                     </div>
                   </li>;
                 })}

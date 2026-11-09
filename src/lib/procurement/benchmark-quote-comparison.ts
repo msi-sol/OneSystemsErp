@@ -7,10 +7,15 @@ export type BenchmarkMaterial = { unitCost?: number | null; revisedBenchmarkUnit
 export type ComparedCanvassItem = { id: string; quantityRequired: number; consolidatedBoqItem: BenchmarkMaterial & { description?: string; unit?: string } };
 export type ComparedQuoteItem = { canvassItemId: string; unitCost: number; quantityAvailable?: number | null };
 
-/** The rate the benchmark allows for a material: the revised rate after variations, else the approved rate. */
+/**
+ * The rate the benchmark allows for a material: the revised rate after variations, else the approved rate.
+ * The revised rate column defaults to 0 (not null) when it was never set, as with master materials generated from
+ * the Procurement Benchmark tab, so 0 means "not revised" and falls back to the approved rate.
+ */
 export function benchmarkRate(material: BenchmarkMaterial): number | null {
-  const rate = material.revisedBenchmarkUnitCost ?? material.unitCost;
-  return typeof rate === 'number' && Number.isFinite(rate) && rate > 0 ? rate : null;
+  const valid = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
+  if (valid(material.revisedBenchmarkUnitCost)) return material.revisedBenchmarkUnitCost;
+  return valid(material.unitCost) ? material.unitCost : null;
 }
 
 const cents = (value: number) => Math.round(value * 100) / 100;

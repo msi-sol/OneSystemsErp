@@ -11,6 +11,12 @@ describe('supplier quotes compared with the procurement benchmark', () => {
     expect(benchmarkRate({ unitCost: 0 })).toBeNull();
   });
 
+  it('falls back to the approved rate when the revised rate was never set (stored as 0)', () => {
+    // Master materials generated from the Procurement Benchmark tab leave revisedBenchmarkUnitCost at its default 0.
+    expect(benchmarkRate({ unitCost: 466700, revisedBenchmarkUnitCost: 0 })).toBe(466700);
+    expect(benchmarkRate({ unitCost: 0, revisedBenchmarkUnitCost: 0 })).toBeNull();
+  });
+
   it('reports under- and over-budget lines and the overall difference', () => {
     const result = compareQuoteToBenchmark(items, [
       { canvassItemId: 'accu', unitCost: 460000 },

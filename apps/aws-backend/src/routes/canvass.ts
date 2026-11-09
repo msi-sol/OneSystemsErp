@@ -36,6 +36,24 @@ async function invalidateCanvassComparison(tx: any, canvassId: string) {
   });
 }
 
+/** Optional quotation terms (delivery period, payment terms): trimmed text, or the supplier's saved terms for payment. */
+function quotationTerms(body: any, supplier: { paymentTerms?: string | null } | null) {
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, 191) : null);
+  return { deliveryPeriod: text(body.deliveryPeriod), paymentTerms: text(body.paymentTerms) ?? supplier?.paymentTerms ?? null };
+}
+
+/** Each supplier quotes once per canvass; a second quotation from the same supplier is edited instead of added. */
+async function assertSupplierCanQuote(canvassId: string, supplierId: unknown, exceptQuotationId?: string) {
+  if (typeof supplierId !== 'string' || !supplierId) return { ok: false as const, error: 'Select the supplier for this quotation.', status: 400 };
+  const supplier = await prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true, name: true, paymentTerms: true } });
+  if (!supplier) return { ok: false as const, error: 'The selected supplier no longer exists. Refresh and choose another supplier.', status: 400 };
+  const other = await prisma.supplierQuotation.findFirst({ where: { canvassFormId: canvassId, supplierId, ...(exceptQuotationId ? { id: { not: exceptQuotationId } } : {}) }, select: { id: true } });
+  if (other) return { ok: false as const, error: `${supplier.name} already has a quotation in this canvass. Edit that quotation instead of adding another one.`, status: 409 };
+  return { ok: true as const, supplier };
+}
+
+const CANVASS_APPROVAL_ADMINS = ['SUPER_ADMIN', 'ADMIN'];
+
 function rejectLockedCanvass(res: any, status: string) {
   if (!IMMUTABLE_QUOTATION_CANVASS_STATUSES.includes(status)) return false;
   res.status(409).json({ success: false, error: IMMUTABLE_QUOTATION_ERROR });
@@ -71,6 +89,10 @@ router.post('/', async (req, res) => {
 
     if (existingCanvass) {
       return res.json({ success: true, canvassId: existingCanvass.id });
+    }
+    // Suppliers are canvassed only for an approved request (minutes: material request, then canvassing).
+    if (mr.status !== 'APPROVED') {
+      return res.status(409).json({ success: false, error: `Only an approved material request can be canvassed. ${mr.mrNumber} is ${String(mr.status).replace(/_/g, ' ').toLowerCase()}.` });
     }
 
     const currentYear = new Date().getFullYear();
@@ -123,6 +145,9 @@ router.post('/:id/quotations', async (req, res) => {
     });
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
     if (rejectLockedCanvass(res, canvass.status)) return;
+    const supplierCheck = await assertSupplierCanQuote(id, supplierId);
+    if (!supplierCheck.ok) return res.status(supplierCheck.status).json({ success: false, error: supplierCheck.error });
+    const terms = quotationTerms(req.body, supplierCheck.supplier);
 
     let validatedItems;
     try {
@@ -143,6 +168,7 @@ router.post('/:id/quotations', async (req, res) => {
           supplierId: supplierId,
           status: 'RECEIVED',
           totalAmount,
+          ...terms,
           items: {
             create: validatedItems.map(item => ({
               canvassItemId: item.canvassItemId,
@@ -186,6 +212,9 @@ router.put('/:id/quotations/:quotationId', async (req, res) => {
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
     if (!existingQuotation) return res.status(404).json({ success: false, error: 'Quotation not found in this canvass' });
     if (rejectLockedCanvass(res, canvass.status)) return;
+    const supplierCheck = await assertSupplierCanQuote(id, supplierId, quotationId);
+    if (!supplierCheck.ok) return res.status(supplierCheck.status).json({ success: false, error: supplierCheck.error });
+    const terms = quotationTerms(req.body, supplierCheck.supplier);
 
     let validatedItems;
     try {
@@ -206,6 +235,7 @@ router.put('/:id/quotations/:quotationId', async (req, res) => {
         data: {
           supplierId,
           totalAmount,
+          ...terms,
           items: {
             create: validatedItems.map(item => ({
               canvassItemId: item.canvassItemId,
@@ -269,15 +299,15 @@ router.post('/:id/email', async (req, res) => {
 
     if (!canvass) return res.status(404).json({ success: false, error: 'Canvass not found' });
 
+    // Sending email from the system is not set up. This used to wait 1.5 s and report "successfully emailed"
+    // without sending anything; now it says so, and the page offers to open the user's own email app instead.
     const suppliers = await prisma.supplier.findMany({
-      where: { id: { in: supplierIds } }
+      where: { id: { in: Array.isArray(supplierIds) ? supplierIds : [] } }, select: { name: true, email: true },
     });
-
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    res.json({ 
-      success: true, 
-      message: `Canvass form successfully emailed to ${suppliers.length} supplier(s).` 
+    res.status(501).json({
+      success: false,
+      error: 'Sending email from the system is not set up yet, so nothing was sent. Use "Open in my email app" or print the canvass form and send it yourself.',
+      recipients: suppliers.filter(supplier => supplier.email).map(supplier => ({ name: supplier.name, email: supplier.email })),
     });
   } catch (error: any) {
     console.error('Error sending canvass email:', error);
@@ -300,12 +330,22 @@ router.post('/:id/approve', async (req, res) => {
     if (canvass.status !== 'ENDORSED') {
       return res.status(409).json({ success: false, error: 'Only an endorsed canvass recommendation can be approved.' });
     }
+    // Self-approval rule, as for material requests and purchase orders: whoever prepared or endorsed the
+    // recommendation does not approve it, unless they are an administrator.
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
+    if (!user) return res.status(401).json({ success: false, error: 'Unauthorized' });
+    const role = getPbacContext(req).simulatedRole || user.role;
+    const endorsement = await prisma.auditLog.findFirst({ where: { moduleName: 'CANVASSING', transactionId: id, actionType: 'CANVASS_ENDORSED' }, orderBy: { createdAt: 'desc' }, select: { userId: true } });
+    if (!CANVASS_APPROVAL_ADMINS.includes(role) && (canvass.preparedById === user.id || endorsement?.userId === user.id)) {
+      return res.status(403).json({ success: false, error: 'Self-approval is not allowed. Ask another authorized approver to approve this canvass recommendation.' });
+    }
 
     const approved = await prisma.canvassForm.updateMany({
       where: { id, status: 'ENDORSED' },
       data: { status: 'APPROVED' }
     });
     if (approved.count !== 1) return res.status(409).json({ success: false, error: 'The canvass status changed. Refresh and try again.' });
+    await prisma.auditLog.create({ data: { userId: user.id, userRole: role, moduleName: 'CANVASSING', transactionId: id, actionType: 'CANVASS_APPROVED', oldValue: 'ENDORSED', newValue: 'APPROVED', remarks: `Recommended supplier ${canvass.recommendedSupplierId}` } });
 
     res.json({ success: true, message: 'AI Recommendation Approved successfully.' });
   } catch (error: any) {
@@ -335,6 +375,9 @@ router.post('/:id/endorse', async (req, res) => {
       data: { status: 'ENDORSED' }
     });
     if (endorsed.count !== 1) return res.status(409).json({ success: false, error: 'The canvass status changed. Refresh and try again.' });
+    // Recorded so the approval step can tell who endorsed, and the history shows it.
+    const endorser = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    await prisma.auditLog.create({ data: { userId, userRole: getPbacContext(req).simulatedRole || endorser?.role || 'UNKNOWN', moduleName: 'CANVASSING', transactionId: id, actionType: 'CANVASS_ENDORSED', oldValue: canvass.status, newValue: 'ENDORSED', remarks: `Recommended supplier ${canvass.recommendedSupplierId}` } });
 
     res.json({ success: true, message: 'AI Recommendation Endorsed successfully.' });
   } catch (error: any) {
@@ -355,6 +398,10 @@ router.delete('/:id', async (req, res) => {
 
     const role = simulatedRole || user.role;
     if (role !== 'SUPER_ADMIN') return res.status(403).json({ success: false, error: 'Unauthorized: Only SUPER_ADMIN can delete canvass forms' });
+
+    // Purchase orders reference their canvass and would be deleted with it (database cascade).
+    const orders = await prisma.purchaseOrder.count({ where: { canvassFormId: id } });
+    if (orders > 0) return res.status(409).json({ success: false, error: `This canvass already has ${orders} purchase order${orders === 1 ? '' : 's'}. Deleting it would delete ${orders === 1 ? 'that order' : 'those orders'} too, so it is kept.` });
 
     await prisma.canvassForm.delete({ where: { id } });
     

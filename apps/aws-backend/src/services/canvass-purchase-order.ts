@@ -44,6 +44,9 @@ export async function generateCanvassPurchaseOrder(
 
     const quotation = await tx.supplierQuotation.findFirst({
       where: { canvassFormId: canvassId, supplierId },
+      // A supplier now quotes once per canvass, but older canvasses can hold two quotations from the same supplier.
+      // Use the one the comparison recommended, else the lower total, never whichever row comes first.
+      orderBy: [{ isRecommended: 'desc' }, { totalAmount: 'asc' }],
       include: { supplier: true, items: { include: { canvassItem: true } } },
     });
     if (!quotation) throw new CanvassPurchaseOrderError('The approved supplier quotation could not be found.', 404);

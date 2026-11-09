@@ -69,8 +69,9 @@ export default async function PurchaseOrderDetailsPage({ params }: { params: Pro
           </div>
           <div style={{ background: 'rgba(255,255,255,0.02)', padding: '15px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
             <h4 style={{ margin: '0 0 10px 0', color: 'var(--accent-color)' }}>Financial Details</h4>
-            <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}><strong>Total Amount:</strong> ₱{po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-            <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}><strong>Net Amount:</strong> ₱{po.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}><strong>Total Amount:</strong> ₱{po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}><strong>Net Amount:</strong> ₱{po.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}><strong>VAT:</strong> ₱{(po.vatAmount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
         </div>
 
@@ -89,15 +90,15 @@ export default async function PurchaseOrderDetailsPage({ params }: { params: Pro
               <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <td style={{ padding: '12px 8px', color: '#fff' }}>{item.consolidatedBoqItem.description}</td>
                 <td style={{ padding: '12px 8px', textAlign: 'center', color: 'var(--text-secondary)' }}>{item.quantity} {item.consolidatedBoqItem.unit}</td>
-                <td style={{ padding: '12px 8px', textAlign: 'right', color: 'var(--text-secondary)' }}>₱{item.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td style={{ padding: '12px 8px', textAlign: 'right', color: '#fff', fontWeight: 'bold' }}>₱{(item.quantity * item.unitCost).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td style={{ padding: '12px 8px', textAlign: 'right', color: 'var(--text-secondary)' }}>₱{item.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td style={{ padding: '12px 8px', textAlign: 'right', color: '#fff', fontWeight: 'bold' }}>₱{(item.quantity * item.unitCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={3} style={{ padding: '20px 8px', textAlign: 'right', color: 'var(--text-secondary)', fontWeight: 'bold' }}>GRAND TOTAL:</td>
-              <td style={{ padding: '20px 8px', textAlign: 'right', color: 'var(--accent-color)', fontWeight: 'bold', fontSize: '1.2rem' }}>₱{po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+              <td style={{ padding: '20px 8px', textAlign: 'right', color: 'var(--accent-color)', fontWeight: 'bold', fontSize: '1.2rem' }}>₱{po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             </tr>
           </tfoot>
         </table>

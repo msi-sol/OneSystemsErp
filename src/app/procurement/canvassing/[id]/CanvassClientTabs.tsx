@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { addSupplierQuotation, updateSupplierQuotation, autoGeneratePOFromCanvass, sendCanvassEmail, approveCanvassRecommendation, endorseCanvassRecommendation } from '@/app/actions/canvass';
+import { addSupplierQuotation, updateSupplierQuotation, autoGeneratePOFromCanvass, approveCanvassRecommendation, endorseCanvassRecommendation } from '@/app/actions/canvass';
 import { uploadAndAnalyzeQuotationsBulk } from '@/app/actions/aiQuotationActions';
 import PrintableCanvass from './PrintableCanvass';
 import { isFullQuotationCoverage } from '@/lib/procurement/quotation-validation';
@@ -50,13 +50,21 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
   const [showAddQuote, setShowAddQuote] = useState(false);
   const [editQuotationId, setEditQuotationId] = useState<string | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState('');
+  // Delivery period and payment terms are 40% of the comparison score; they were never captured before.
+  const [deliveryPeriod, setDeliveryPeriod] = useState('');
+  const [paymentTerms, setPaymentTerms] = useState('');
+  const quotedSupplierIds = new Set<string>(((canvass.quotations || []) as Array<{ id: string; supplierId: string }>).filter(q => q.id !== editQuotationId).map(q => q.supplierId));
+  const chooseSupplier = (supplierId: string) => {
+    setSelectedSupplier(supplierId);
+    const saved = suppliers.find(s => s.id === supplierId)?.paymentTerms;
+    if (!paymentTerms && saved) setPaymentTerms(saved);
+  };
   const [quoteItems, setQuoteItems] = useState<Record<string, { unitCost?: number, quantityAvailable?: number }>>({});
   
   // Print & Email states
   const [showPrint, setShowPrint] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailSelectedSuppliers, setEmailSelectedSuppliers] = useState<string[]>([]);
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Upload AI states
   const [showUploadAIModal, setShowUploadAIModal] = useState(false);
@@ -87,6 +95,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
 
   const handleSubmitQuotation = async () => {
     if (!selectedSupplier) return say('Select a supplier');
+    if (quotedSupplierIds.has(selectedSupplier)) return say('This supplier already has a quotation in this canvass. Edit that quotation instead.');
 
     let availableLineCount = 0;
     const items = [];
@@ -109,8 +118,8 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
     if (availableLineCount === 0) return say('At least one quoted item must have a positive available quantity and price.');
 
     const res = await (editQuotationId
-      ? updateSupplierQuotation(canvass.id, editQuotationId, selectedSupplier, items)
-      : addSupplierQuotation(canvass.id, selectedSupplier, items)
+      ? updateSupplierQuotation(canvass.id, editQuotationId, selectedSupplier, items, { deliveryPeriod, paymentTerms })
+      : addSupplierQuotation(canvass.id, selectedSupplier, items, { deliveryPeriod, paymentTerms })
     ).catch((error: Error) => ({ success: false, error: error.message || 'Failed to save the quotation.' }));
 
     if (res.success) {
@@ -118,6 +127,8 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
       setEditQuotationId(null);
       setQuoteItems({});
       setSelectedSupplier('');
+      setDeliveryPeriod('');
+      setPaymentTerms('');
       router.refresh();
     } else {
       say(res.error);
@@ -127,6 +138,8 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
   const handleEditQuotation = (q: any) => {
     setEditQuotationId(q.id);
     setSelectedSupplier(q.supplierId);
+    setDeliveryPeriod(q.deliveryPeriod || '');
+    setPaymentTerms(q.paymentTerms || q.supplier?.paymentTerms || '');
     
     const initialQuoteItems: Record<string, { unitCost?: number, quantityAvailable?: number }> = {};
     q.items.forEach((item: any) => {
@@ -141,19 +154,15 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleSendEmail = async () => {
-    if (emailSelectedSuppliers.length === 0) return say('Please select at least one supplier to email.');
-    setIsSendingEmail(true);
-    const res = await sendCanvassEmail(canvass.id, emailSelectedSuppliers);
-    if (res.success) {
-      say(res.message, 'success');
-      setShowEmailModal(false);
-      setEmailSelectedSuppliers([]);
-    } else {
-      say(res.error);
-    }
-    setIsSendingEmail(false);
-  };
+  // The system has no outgoing email set up (the old button waited 1.5 s and claimed the emails were sent).
+  // This opens the user's own email app with the selected suppliers' addresses, to attach the printed canvass form.
+  const emailRecipients = suppliers.filter(s => emailSelectedSuppliers.includes(s.id) && s.email).map(s => s.email as string);
+  const selectedWithoutEmail = suppliers.filter(s => emailSelectedSuppliers.includes(s.id) && !s.email).map(s => s.name?.trim() || 'a supplier with no name');
+  const emailHref = `mailto:?bcc=${encodeURIComponent(emailRecipients.join(','))}&subject=${encodeURIComponent(`Request for quotation - Canvass ${canvass.canvassNumber}`)}&body=${encodeURIComponent(`Good day,
+
+Please send your quotation for the items in the attached canvass form (${canvass.canvassNumber}), including your delivery period and payment terms.
+
+Thank you.`)}`;
 
   const handleUploadAI = async () => {
     if (uploadAIFiles.length === 0) return say('Please select quotation files to upload.');
@@ -197,8 +206,8 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
       {showEmailModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           <div style={{ background: '#1e1e2e', padding: '30px', borderRadius: '12px', width: '500px', border: '1px solid var(--glass-border)', color: '#fff' }}>
-            <h3 style={{ margin: '0 0 20px 0', color: 'var(--accent-color)' }}>📧 Send Canvass via Email</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '15px' }}>Select suppliers to send this canvass request to:</p>
+            <h3 style={{ margin: '0 0 12px 0', color: 'var(--accent-color)' }}>📧 Email Canvass to Suppliers</h3>
+            <p style={{ color: 'var(--text-secondary)', margin: '0 0 15px', lineHeight: 1.5 }}>The system does not send email itself yet. Choose the suppliers, then open your email app with their addresses filled in and attach the printed canvass form.</p>
             
             <div style={{ maxHeight: '300px', overflowY: 'auto', background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '8px', marginBottom: '20px' }}>
               <div style={{ marginBottom: '10px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '10px' }}>
@@ -223,16 +232,17 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                       else setEmailSelectedSuppliers(emailSelectedSuppliers.filter(id => id !== s.id));
                     }}
                   />
-                  {s.name} {s.email ? `(${s.email})` : '(No Email)'}
+                  {s.name?.trim() || '(No name)'} {s.email ? `(${s.email})` : '(No Email)'}
                 </label>
               ))}
             </div>
 
+            {selectedWithoutEmail.length > 0 && <p role="status" style={{ margin: '0 0 15px', color: '#fbbf24', fontSize: '0.9rem' }}>No email saved for {selectedWithoutEmail.join(', ')}. Add it in Suppliers, or send the form another way.</p>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={() => setShowEmailModal(false)} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleSendEmail} disabled={isSendingEmail} style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: '4px', cursor: isSendingEmail ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
-                {isSendingEmail ? 'Sending...' : 'Send Emails'}
-              </button>
+              <button onClick={() => setShowEmailModal(false)} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Close</button>
+              {emailRecipients.length > 0
+                ? <a href={emailHref} onClick={() => setShowEmailModal(false)} style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', borderRadius: '4px', fontWeight: 'bold', textDecoration: 'none' }}>Open in my email app ({emailRecipients.length})</a>
+                : <button type="button" disabled style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', color: '#fff', borderRadius: '4px', fontWeight: 'bold', opacity: 0.5, cursor: 'not-allowed' }}>Open in my email app</button>}
             </div>
           </div>
         </div>
@@ -439,6 +449,8 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                     if (!showAddQuote) {
                       setEditQuotationId(null);
                       setSelectedSupplier('');
+                      setDeliveryPeriod('');
+                      setPaymentTerms('');
                       setQuoteItems({});
                     }
                   }}
@@ -460,11 +472,26 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
               <select
                 aria-label="Supplier"
                 value={selectedSupplier}
-                onChange={e => setSelectedSupplier(e.target.value)}
+                onChange={e => chooseSupplier(e.target.value)}
                 style={{ width: '100%', padding: '10px', marginBottom: '15px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px' }}>
                 <option value="">Select Supplier...</option>
-                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {suppliers.map(s => <option key={s.id} value={s.id} disabled={quotedSupplierIds.has(s.id)}>{s.name}{quotedSupplierIds.has(s.id) ? ' (already quoted)' : ''}</option>)}
               </select>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
+                <label style={{ display: 'grid', gap: 6, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  Delivery period
+                  <input list="canvass-delivery-options" value={deliveryPeriod} onChange={e => setDeliveryPeriod(e.target.value)} placeholder="e.g. 7 days, On-hand"
+                    style={{ padding: '10px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px' }} />
+                </label>
+                <label style={{ display: 'grid', gap: 6, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  Payment terms
+                  <input list="canvass-payment-options" value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} placeholder="Supplier's saved terms if left blank"
+                    style={{ padding: '10px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', color: '#fff', borderRadius: '4px' }} />
+                </label>
+                <datalist id="canvass-delivery-options">{['On-hand', '3 days', '7 days', '14 days', '30 days', '45 days'].map(o => <option key={o} value={o} />)}</datalist>
+                <datalist id="canvass-payment-options">{['CASH ON DELIVERY', 'DATED CHECK ON DELIVERY', 'PDC 30', 'PDC 45', 'PDC 60', 'PDC 90', 'PDC 180', 'BANK TRANSFER', 'GCASH'].map(o => <option key={o} value={o} />)}</datalist>
+              </div>
 
               <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '15px' }}>
                 <thead>
@@ -555,7 +582,7 @@ export default function CanvassClientTabs({ canvass, suppliers }: { canvass: any
                       ))}
                     </div>
                   )}
-                  <p style={{ margin: '5px 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Delivery: {q.deliveryPeriod || 'N/A'} | Payment: {q.paymentTerms || 'N/A'}</p>
+                  <p style={{ margin: '5px 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Delivery: {q.deliveryPeriod || 'Not stated'} | Payment: {q.paymentTerms || (q.supplier?.paymentTerms ? `${q.supplier.paymentTerms} (supplier default)` : 'Not stated')}</p>
                   <p style={{ margin: '5px 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Status: {q.status}</p>
                   {q.aiRationale && <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{q.aiRationale}</p>}
                   

@@ -54,15 +54,18 @@ export async function createSupplier(formData: FormData) {
     }
   }
 
+  // Returns the error instead of throwing it: thrown server-action messages are hidden in production builds,
+  // so the form could not tell the user why saving failed (e.g. a duplicate supplier).
   try {
     await fetchWithAuth(`${API_ROUTE_PREFIX}/createSupplier`, {
       method: 'POST',
       body: JSON.stringify(data)
     });
     revalidatePath('/procurement/suppliers');
+    return { success: true as const };
   } catch (error: any) {
     console.error('Error in createSupplier proxy:', error);
-    throw new Error(error.message || 'Failed to create supplier via backend');
+    return { success: false as const, error: error.message || 'The supplier could not be saved.' };
   }
 }
 
@@ -87,8 +90,9 @@ export async function updateSupplier(id: string, formData: FormData) {
       })
     });
     revalidatePath('/procurement/suppliers');
+    return { success: true as const };
   } catch (error: any) {
     console.error('Error in updateSupplier proxy:', error);
-    throw new Error(error.message || 'Failed to update supplier via backend');
+    return { success: false as const, error: error.message || 'The supplier could not be saved.' };
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { createSupplier } from '@/app/actions/supplierActions';
 import Link from 'next/link';
@@ -8,12 +8,16 @@ import Link from 'next/link';
 export default function NewSupplierPage() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    if (!String(formData.get('name') || '').trim()) { setError('Enter the supplier name.'); return; }
+    setError('');
     startTransition(async () => {
-      await createSupplier(formData);
+      const result = await createSupplier(formData);
+      if (!result.success) { setError(result.error); return; }
       router.push('/procurement/suppliers');
     });
   };
@@ -26,6 +30,7 @@ export default function NewSupplierPage() {
       </div>
 
       <form onSubmit={handleSubmit} style={{ backgroundColor: 'var(--bg-secondary)', padding: '30px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+        {error && <p role="alert" style={{ margin: '0 0 20px', padding: '10px 12px', borderRadius: '8px', color: '#fca5a5', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>{error}</p>}
         
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
           <div>
