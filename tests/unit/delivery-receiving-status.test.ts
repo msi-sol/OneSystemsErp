@@ -82,10 +82,20 @@ describe('delivery receipt status enforcement', () => {
       delivery: { findUnique: jest.fn().mockResolvedValue(receipt), updateMany: jest.fn().mockResolvedValue({ count: 1 }), findMany: jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([receipt]) },
       consolidatedBOQItem: { update: jest.fn() }, projectCostLedger: { create: jest.fn() },
       accountsPayable: { count: jest.fn().mockResolvedValue(0), create: jest.fn() }, purchaseOrder: { update: jest.fn() },
+      commitmentLedger: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'c-other', supplierName: 'Other', remainingCommitment: 200, deliveredAmount: 0 },
+          { id: 'c-same', supplierName: 'Supplier', remainingCommitment: 40, deliveredAmount: 0 },
+        ]),
+        update: jest.fn(),
+      },
     };
     (prisma.$transaction as jest.Mock).mockImplementation(callback => callback(tx));
     const response = await post('/delivery-1/approve');
     expect(response.status).toBe(200);
+    // The ₱60 delivered becomes actual cost, so it leaves the open commitments: same supplier first, then the rest.
+    expect(tx.commitmentLedger.update).toHaveBeenCalledWith({ where: { id: 'c-same' }, data: { deliveredAmount: 40, remainingCommitment: 0, status: 'FULFILLED' } });
+    expect(tx.commitmentLedger.update).toHaveBeenCalledWith({ where: { id: 'c-other' }, data: { deliveredAmount: 20, remainingCommitment: 180, status: 'ACTIVE' } });
     expect(tx.consolidatedBOQItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { deliveredQty: 5, actualCost: 60 } }));
     expect(tx.projectCostLedger.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ grossAmount: 60, netAmount: 60 }) }));
     expect(tx.accountsPayable.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ amount: 60 }) }));

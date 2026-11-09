@@ -125,7 +125,7 @@ export default async function ProcurementPage() {
                 </td>
                 <td>
                   <span className={`${styles.badge} ${styles['status-' + po.status.toLowerCase()] || styles.badgeDefault}`}>
-                    {po.status}
+                    {po.status.replaceAll("_", " ")}
                   </span>
                 </td>
                 <td>

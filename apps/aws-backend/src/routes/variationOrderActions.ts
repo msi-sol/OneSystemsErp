@@ -37,9 +37,12 @@ async function recalculateVariationOrderTotals(voId: string) {
 
     const netAmount = totalAdditional - totalDeductive;
 
+    // "Previously approved" excludes this VO: once it is approved, its own amount was counted twice
+    // (in the previous totals and again as netAmount) in the revised contract amount.
     const approvedVosWhere: any = {
       projectId: vo.projectId,
-      currentStatus: 'APPROVED'
+      currentStatus: 'APPROVED',
+      id: { not: voId },
     };
     if (vo.variationCategory === 'SUBCONTRACTOR' && vo.subcontractPackageId) {
       approvedVosWhere.subcontractPackageId = vo.subcontractPackageId;
@@ -235,12 +238,13 @@ async function applyVariationOrderToSchedule(voId: string) {
     });
     if (!vo) return;
 
-    const schedules = await prisma.projectSchedule.findMany({
-      where: { projectId: vo.projectId },
-      take: 2,
+    // Only an editable (draft) schedule is changed here. An approved work-package baseline is locked and changes
+    // through its revision workflow; this used to throw after the VO was already approved whenever a project had
+    // more than one schedule, leaving the approval half-applied.
+    const schedule = await prisma.projectSchedule.findFirst({
+      where: { projectId: vo.projectId, workflowStatus: { notIn: ['ACTIVE_BASELINE', 'SUPERSEDED_BASELINE'] } },
+      orderBy: { createdAt: 'desc' },
     });
-    if (schedules.length > 1) throw new Error('CHOOSE_SCHEDULE: This project has multiple schedule revisions. Apply the variation through the selected schedule workflow.');
-    const schedule = schedules[0];
     if (!schedule) return;
 
     let voWbs = await prisma.scheduleWBS.findFirst({
@@ -282,8 +286,10 @@ async function applyVariationOrderToSchedule(voId: string) {
 
         const newAwardedBoqItem = await prisma.awardedBOQItem.findFirst({
           where: {
+            projectId: vo.projectId,
             itemCode: `VO-${item.voItemNumber}`,
-          }
+          },
+          orderBy: { createdAt: 'desc' },
         });
 
         if (newAwardedBoqItem) {
@@ -597,10 +603,17 @@ router.post('/recalculateVariationOrderTotals', async (req, res) => {
 router.post('/submitVariationOrder', async (req, res) => {
   try {
     const { id } = req.body;
-    const updated = await prisma.variationOrder.update({
-      where: { id },
+    // Only a draft or a VO returned for revision can be (re)submitted. Submitting an approved VO restarted the
+    // approval chain and applied its BOQ changes a second time on the next final approval.
+    const submitted = await prisma.variationOrder.updateMany({
+      where: { id, currentStatus: { in: ['DRAFT', 'FOR_REVISION', 'PENDING'] } },
       data: { currentStatus: 'SUBMITTED' }
     });
+    if (submitted.count !== 1) {
+      const current = await prisma.variationOrder.findUnique({ where: { id }, select: { currentStatus: true } });
+      return res.status(current ? 409 : 404).json({ success: false, error: current ? `This Variation Order is ${current.currentStatus.replace(/_/g, ' ').toLowerCase()} and cannot be submitted again.` : 'Variation Order not found.' });
+    }
+    const updated = await prisma.variationOrder.findUnique({ where: { id } });
     res.json({ success: true, data: updated });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

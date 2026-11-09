@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { updateAIValidationStatus, runAIDiagnostics } from '@/app/actions/equipmentActions';
+import AiThinking from '@/components/ai/AiThinking';
 
 interface AIValidation {
   id: string;
@@ -137,9 +138,10 @@ export default function AIClient({
           onMouseOver={e => { if (!isScanning) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(239, 68, 68, 0.6)'; } }}
           onMouseOut={e => { if (!isScanning) { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 15px rgba(239, 68, 68, 0.4)'; } }}
         >
-          {isScanning ? '⏳ Running AI Analysis...' : '🤖 Run AI Diagnostics Now'}
+          {isScanning ? '🤖 Analyzing…' : '🤖 Run AI Diagnostics Now'}
         </button>
       </div>
+      {isScanning && <div style={{ marginBottom: 16 }}><AiThinking messages={['Reading telemetry and engine hours', 'Reviewing maintenance logs', 'Checking utilization patterns', 'Looking for failure warning signs', 'Recording findings']} /></div>}
 
       {scanResult && (
         <div style={{ background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '8px', padding: '15px', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '10px' }}>

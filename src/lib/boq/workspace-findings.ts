@@ -63,10 +63,15 @@ export function buildWorkspaceBOQFindings(
     const printedCents = cents(input.printedTotal);
     const readCents = cents(asReadValue.toString());
     const differenceCents = printedCents.minus(readCents);
+    // Each line amount is read at the centavos Excel shows, while a printed SUM adds the unrounded values: that can
+    // drift by up to half a centavo per line. Within that range it is rounding, not a missing or wrong line.
+    const roundingOnly = differenceCents.abs().lte(Math.max(1, Math.ceil(items.length / 2)));
     if (differenceCents.abs().gt(1)) observations.push(finding({
       id: 'printed-total-differs', code: 'PRINTED_TOTAL_DIFFERS', field: 'printedTotal', itemId: null, rowNumber: null,
-      message: `The workbook prints a total of ${new Prisma.Decimal(input.printedTotal).toFixed(2)}, but the BOQ items add up to ${asReadValue.toFixed(2)}.`,
-      severity: 'BLOCKING', evidence: { printedTotal: new Prisma.Decimal(input.printedTotal).toFixed(2), asReadValue: asReadValue.toFixed(2), differenceCents: differenceCents.toString(), sheetName: input.sheetName ?? null },
+      message: roundingOnly
+        ? `The workbook prints a total of ${new Prisma.Decimal(input.printedTotal).toFixed(2)}; the BOQ items add up to ${asReadValue.toFixed(2)}. The ${new Prisma.Decimal(differenceCents.abs().toString()).div(100).toFixed(2)} difference is rounding: each line is read at the centavos shown in Excel.`
+        : `The workbook prints a total of ${new Prisma.Decimal(input.printedTotal).toFixed(2)}, but the BOQ items add up to ${asReadValue.toFixed(2)}.`,
+      severity: roundingOnly ? 'ATTENTION' : 'BLOCKING', evidence: { printedTotal: new Prisma.Decimal(input.printedTotal).toFixed(2), asReadValue: asReadValue.toFixed(2), differenceCents: differenceCents.toString(), sheetName: input.sheetName ?? null },
     }));
   }
   return observations;

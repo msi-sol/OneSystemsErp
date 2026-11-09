@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { updateMRStatus, runMRFAIValidation } from '@/app/actions/mutations';
+import AiThinking, { AI_THINKING_MESSAGES } from '@/components/ai/AiThinking';
 
 interface Props {
   mrId: string;
@@ -14,15 +15,18 @@ export default function MRWorkflowButtons({ mrId, status, currentUser, capabilit
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [aiRunning, setAiRunning] = useState(false);
 
   const role = currentUser?.role || '';
   if (role === 'GUEST_USER') return null;
 
 
   function handleAIValidation() {
+    setAiRunning(true);
     startTransition(async () => {
       setError('');
       try { await runMRFAIValidation(mrId); } catch (cause) { setError(cause instanceof Error ? cause.message : 'The request could not be checked.'); }
+      finally { setAiRunning(false); }
     });
   }
 
@@ -44,17 +48,17 @@ export default function MRWorkflowButtons({ mrId, status, currentUser, capabilit
         {/* Preparation Phase - Materials Engineer */}
         {status === 'DRAFT' && (
           <button onClick={handleAIValidation} disabled={isPending || !(capabilities.canEditDraft || capabilities.canSubmit)} className="btn-ai" title="Requires configured material-request preparation permission">
-            {isPending ? 'Running AI Check...' : '🤖 Run AI Check'}
+            {aiRunning ? 'Checking…' : '🤖 Run AI Check'}
           </button>
         )}
 
         {(status === 'AI_CHECKING' || status === 'RETURNED') && (
           <>
             <button onClick={handleAIValidation} disabled={isPending || !(capabilities.canEditDraft || capabilities.canSubmit)} className="btn-ai" title="Requires configured material-request preparation permission">
-              {isPending ? 'Running AI Check...' : '🤖 Re-run AI Check'}
+              {aiRunning ? 'Checking…' : '🤖 Re-run AI Check'}
             </button>
             <button onClick={() => handleStatusUpdate('SUBMITTED')} disabled={isPending || !capabilities.canSubmit} className="btn-primary" title="Requires configured material-request preparation permission">
-              {isPending ? 'Submitting...' : '📤 Submit for Review'}
+              {isPending && !aiRunning ? 'Submitting...' : '📤 Submit for Review'}
             </button>
           </>
         )}
@@ -88,6 +92,7 @@ export default function MRWorkflowButtons({ mrId, status, currentUser, capabilit
           {confirmCancel && <button type="button" disabled={isPending} onClick={() => setConfirmCancel(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>Keep request</button>}
         </>}
       </div>
+      {aiRunning && <AiThinking messages={AI_THINKING_MESSAGES.materialRequest} />}
 
       <style>{`
         .btn-ai {

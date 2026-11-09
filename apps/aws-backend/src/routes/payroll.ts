@@ -204,6 +204,9 @@ async function computePayrollForPeriod(payrollPeriodId: string) {
     const payrollData = {
       payrollPeriodId: period.id,
       workerId: worker.id,
+      // Charge the payroll to the period's project, else the worker's assigned project, so it appears in the
+      // project's Payroll Cost tab (it was only ever set from the period, so it stayed empty).
+      projectId: period.projectId || worker.projectId || null,
       daysWorked: data.daysWorked,
       regularHours: data.totalRegularHours,
       overtimeHours: data.totalOvertimeHours,
@@ -314,7 +317,7 @@ router.post('/period/create', async (req, res) => {
       'WEEKLY': 'Weekly Salaried', 'SEMI_MONTHLY': 'Semi-Monthly', 'MONTHLY': 'Monthly'
     };
     const workerFilter: any = {};
-    if (projectId) workerFilter.assignedProjectId = projectId;
+    if (projectId) workerFilter.projectId = projectId; // was "assignedProjectId", which is not a Worker field
     if (categoryMap[calendarRule]) workerFilter.payrollCategory = categoryMap[calendarRule];
 
     const workers = await prisma.worker.findMany({ where: workerFilter });

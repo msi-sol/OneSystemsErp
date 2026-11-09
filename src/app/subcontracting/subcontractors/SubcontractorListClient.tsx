@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { updateSubcontractor, deleteSubcontractor } from '@/app/actions/subcontractingActions';
+import { subcontractorTrade } from '@/lib/subcontracting/subcontractor-trade';
 
 export default function SubcontractorListClient({ initialData }: { initialData: any[] }) {
   const [subcontractors, setSubcontractors] = useState(initialData);
@@ -60,7 +61,7 @@ export default function SubcontractorListClient({ initialData }: { initialData: 
                   <strong>{sub.name}</strong>
                   {sub.businessName && <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{sub.businessName}</div>}
                 </td>
-                <td style={{ padding: '12px' }}>{sub.tradeCategory || 'N/A'}</td>
+                <td style={{ padding: '12px' }}>{subcontractorTrade(sub) || 'N/A'}</td>
                 <td style={{ padding: '12px' }}>
                   {sub.contactPerson} <br />
                   <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>{sub.contactNumber}</span>

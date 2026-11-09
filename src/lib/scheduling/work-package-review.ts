@@ -304,6 +304,10 @@ async function approvePlan(tx: Prisma.TransactionClient, projectId: string, acto
     },
   });
   if (update.count !== 1) conflict('SCHEDULE_VERSION_CONFLICT');
+  // Planning is done once the first baseline is approved: the project starts execution. Accomplishments,
+  // subcontracting and equipment deployment list ACTIVE projects only, so a project left in PLANNING never
+  // appeared there. Other statuses (ON_HOLD, a manual override) are left as they are.
+  await tx.project.updateMany({ where: { id: projectId, status: 'PLANNING' }, data: { status: 'ACTIVE' } });
   await audit(tx, actor, 'BOQ_WPS_BASELINE_APPROVED', schedule.id, { workflowStatus: schedule.workflowStatus, previousBaselineId: previous?.id ?? null }, { workflowStatus: ProjectScheduleWorkflowStatus.ACTIVE_BASELINE, baselineCode, revisionCode, scheduleSnapshotHash: hash });
   return { scheduleId: schedule.id, workflowStatus: ProjectScheduleWorkflowStatus.ACTIVE_BASELINE, baselineCode, revisionCode, rowVersion: body.expectedRowVersion + 1 };
 }

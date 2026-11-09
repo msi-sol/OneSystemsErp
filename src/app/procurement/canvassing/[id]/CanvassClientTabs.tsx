@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { addSupplierQuotation, updateSupplierQuotation, autoGeneratePOFromCanvass, approveCanvassRecommendation, endorseCanvassRecommendation } from '@/app/actions/canvass';
 import { uploadAndAnalyzeQuotationsBulk } from '@/app/actions/aiQuotationActions';
 import PrintableCanvass from './PrintableCanvass';
+import AiThinking, { AI_THINKING_MESSAGES } from '@/components/ai/AiThinking';
 import { isFullQuotationCoverage } from '@/lib/procurement/quotation-validation';
 import { benchmarkRate, compareQuoteToBenchmark } from '@/lib/procurement/benchmark-quote-comparison';
 
@@ -630,9 +631,10 @@ Thank you.`)}`;
                 fontSize: '0.9rem',
                 display: 'flex', alignItems: 'center', gap: '8px'
               }}>
-              {isAnalyzing ? '🤖 Re-tabulating...' : (canvass.aiSummary ? '🔄 Re-Run AI Tabulation' : '🤖 Generate AI Comparison & Summary')}
+              {isAnalyzing ? '🤖 Comparing…' : (canvass.aiSummary ? '🔄 Re-Run AI Tabulation' : '🤖 Generate AI Comparison & Summary')}
             </button>
           </div>
+          {isAnalyzing && <div style={{ marginBottom: 16 }}><AiThinking messages={AI_THINKING_MESSAGES.quotations} /></div>}
 
           {canvass.aiSummary && (
             <div style={{ 

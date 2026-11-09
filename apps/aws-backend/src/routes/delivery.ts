@@ -56,16 +56,23 @@ router.post('/encode', async (req, res) => {
     if (!po) throw new DeliveryInputError('Purchase order not found.');
     if (!canReceivePurchaseOrder(po.status)) throw new DeliveryInputError('Only an approved, issued or partially delivered purchase order can receive materials.');
     for (const item of items) {
+      // A line the DR lists but that did not arrive (actual 0) is a shortage: kept in the mismatch notes with its
+      // remark, but not posted as a received line. It used to be refused, so a short delivery could not be encoded.
+      const shortage = item && item.quantity === 0 && typeof item.remarks === 'string' && item.remarks.trim().length > 0;
       if (!item || typeof item.consolidatedBoqItemId !== 'string' ||
-          typeof item.quantity !== 'number' || !Number.isFinite(item.quantity) || item.quantity <= 0 ||
+          typeof item.quantity !== 'number' || !Number.isFinite(item.quantity) || (item.quantity <= 0 && !shortage) ||
           typeof item.drQuantity !== 'number' || !Number.isFinite(item.drQuantity) || item.drQuantity <= 0) {
-        throw new DeliveryInputError('DR and actual delivery quantities must be positive finite numbers.');
+        throw new DeliveryInputError(item?.quantity === 0
+          ? 'A line with 0 actual quantity needs a remark saying why it was not delivered.'
+          : 'DR and actual delivery quantities must be positive numbers.');
       }
       const poItem = po.items.find(line => line.consolidatedBoqItemId === item.consolidatedBoqItemId);
       if (!poItem || poItem.consolidatedBoqItem.projectId !== po.mr.projectId) {
         throw new DeliveryInputError('Every delivery item must belong to the selected purchase order and project.');
       }
     }
+    const receivedItems = items.filter((item: any) => item.quantity > 0);
+    if (receivedItems.length === 0) throw new DeliveryInputError('Enter an actual quantity above 0 for at least one item. Nothing was received, so there is no delivery to record.');
 
     let drDocumentText = noFileReason ? `No document uploaded. Reason provided by user: ${noFileReason}` : 'No document uploaded.';
     let proofFileUrl: string | undefined;
@@ -163,7 +170,7 @@ router.post('/encode', async (req, res) => {
         isMismatch,
         mismatchNotes,
         items: {
-          create: items.map((item: any) => ({
+          create: receivedItems.map((item: any) => ({
             quantity: item.quantity,
             drQuantity: item.drQuantity,
             remarks: item.remarks,
@@ -259,6 +266,29 @@ router.post('/:id/approve', async (req, res) => {
               approvalStatus: 'APPROVED'
             }
           });
+
+          // The delivered cost is now actual cost, so it is no longer an open commitment: reduce this material's
+          // open PO commitments (same supplier first, then oldest first). Otherwise actual + committed counts it twice.
+          let toRelease = new Prisma.Decimal(String(actualLineCost));
+          const open = await tx.commitmentLedger.findMany({
+            where: { projectId: delivery.po.mr.projectId, consolidatedBoqItemId: item.consolidatedBoqItemId, commitmentType: 'PURCHASE_ORDER', status: 'ACTIVE', remainingCommitment: { gt: 0 } },
+            orderBy: { createdAt: 'asc' },
+          });
+          open.sort((a, b) => Number(b.supplierName === delivery.po.supplier.name) - Number(a.supplierName === delivery.po.supplier.name));
+          for (const commitment of open) {
+            if (toRelease.lte(0)) break;
+            const release = Prisma.Decimal.min(toRelease, new Prisma.Decimal(String(commitment.remainingCommitment)));
+            const remaining = new Prisma.Decimal(String(commitment.remainingCommitment)).minus(release);
+            await tx.commitmentLedger.update({
+              where: { id: commitment.id },
+              data: {
+                deliveredAmount: new Prisma.Decimal(String(commitment.deliveredAmount)).plus(release).toNumber(),
+                remainingCommitment: remaining.toNumber(),
+                status: remaining.lte(0) ? 'FULFILLED' : 'ACTIVE',
+              },
+            });
+            toRelease = toRelease.minus(release);
+          }
         }
       }
 

@@ -54,7 +54,9 @@ export default function LogDeliveryForm({ purchaseOrders, initialPoId = '' }: { 
     const itemsToDeliver: any[] = [];
     let hasValidationError = false;
 
-    Object.entries(drQuantities).forEach(([id, drQty]) => {
+    // Every line with a DR or an actual quantity (typing only "Actual" used to skip the line).
+    [...new Set([...Object.keys(drQuantities), ...Object.keys(actualQuantities)])].forEach((id) => {
+      const drQty = drQuantities[id] || 0;
       const actualQty = actualQuantities[id] || 0;
       const remark = remarks[id] || '';
 

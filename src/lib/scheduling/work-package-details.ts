@@ -97,8 +97,16 @@ function applyBreakdown(details: PlanDetails, upload: PackageBreakdownUpload, bo
   const replaced = existing.filter(row => replacementIds.includes(row.id));
   if (replaced.length !== replacementIds.length) conflict('A selected resource no longer belongs to this draft package. Refresh before applying the DUPA.');
   const retained = details.resources.filter(row => !replacementIds.includes(row.id));
+  // Rows the user chose to leave out (e.g. after an AI Check suggestion); the original upload keeps every row.
+  const excluded = body.excludeRows ?? [];
+  if (!Array.isArray(excluded) || excluded.some(row => typeof row !== 'string' || !upload.rows.some(item => String(item.sourceRowNumber) === row))) fail('Choose valid DUPA rows to leave out.');
+  const keptRows = upload.rows.filter(row => !excluded.includes(String(row.sourceRowNumber)));
+  if (!keptRows.length) fail('Keep at least one DUPA row, or keep the generated allowances instead.');
+  const keptCategories = body.categories && typeof body.categories === 'object' && !Array.isArray(body.categories)
+    ? Object.fromEntries(Object.entries(body.categories as Record<string, unknown>).filter(([row]) => !excluded.includes(row)))
+    : body.categories;
   let rows;
-  try { rows = buildBreakdownResources(upload.rows, body.categories); }
+  try { rows = buildBreakdownResources(keptRows, keptCategories); }
   catch (error) { if (error instanceof PackageBreakdownError) fail(error.message, error.status); throw error; }
   if (retained.length + rows.length > 500) conflict('PLAN_DETAILS_LIMIT_REACHED');
   const fingerprints = new Set(retained.filter(row => row.activityId === upload.activityId).map(resourceFingerprint));
@@ -111,6 +119,7 @@ function applyBreakdown(details: PlanDetails, upload: PackageBreakdownUpload, bo
   const added = rows.map(row => ({ ...row, id: makeId(), activityId: upload.activityId, breakdownUploadId: upload.id,
     isSystemSuggested: true, reviewedAt: null, reviewedById: null }));
   upload.replacedResources = JSON.parse(JSON.stringify(replaced)) as PlanResource[];
+  if (excluded.length) upload.excludedRows = excluded as string[];
   details.resources = [...retained, ...added];
   details.resourcesReviewNeeded = { ...details.resourcesReviewNeeded, [upload.activityId]: true };
   upload.appliedAt = now; upload.appliedById = actorId; upload.reason = reason;
@@ -247,7 +256,7 @@ export async function updateWorkPackageDetails(args: { projectId: string; actor:
     'suggest-resources': ['action', 'scheduleId', 'expectedRowVersion','activityId'],
     'confirm-resources': ['action','scheduleId','expectedRowVersion','activityId','activityIds'],
     'package-assumptions': ['action','scheduleId','expectedRowVersion','activityId','plannedStartDay','procurementLeadDays','laborCrew'],
-    'apply-breakdown': ['action','scheduleId','expectedRowVersion','uploadId','categories','reason','acknowledgeExisting','replaceResourceIds'],
+    'apply-breakdown': ['action','scheduleId','expectedRowVersion','uploadId','categories','reason','acknowledgeExisting','replaceResourceIds','excludeRows'],
   };
   if (!allowed[action]) fail('UNKNOWN_ACTION');
   onlyKeys(body, allowed[action]!);

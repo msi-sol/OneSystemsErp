@@ -22,6 +22,18 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
   const [validationLogId, setValidationLogId] = useState<string | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideSuccess, setOverrideSuccess] = useState(false);
+  // Issuance by section (minutes 2026-11-09): the slip names the work package it is for, and quantities above that
+  // package's material allocation are flagged. Allocations exist where Work Packages > Materials sets them.
+  type Section = { activityId: string; code: string | null; name: string; materials: Record<string, { required: number; issued: number }> };
+  const [sections, setSections] = useState<Section[]>([]);
+  const [sectionId, setSectionId] = useState('');
+  const [overConfirmed, setOverConfirmed] = useState(false);
+  const section = sections.find(row => row.activityId === sectionId);
+  const allocationFor = (materialId: string) => section?.materials[materialId];
+  const overAllocation = items.filter(item => {
+    const allocation = item.consolidatedBoqItemId ? allocationFor(item.consolidatedBoqItemId) : undefined;
+    return allocation && item.requestedQty > Math.max(0, allocation.required - allocation.issued);
+  });
 
   // Fetch BOQ Items when project changes
   useEffect(() => {
@@ -31,7 +43,10 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
     setInventoryError('');
     setValidationLogId(null);
     setOverrideSuccess(false);
+    setSections([]); setSectionId(''); setOverConfirmed(false);
     if (projectId) {
+      fetch(`/api/projects/${encodeURIComponent(projectId)}/work-packages/issuance-sections`).then(response => response.ok ? response.json() : { sections: [] })
+        .then(body => { if (active) setSections(Array.isArray(body.sections) ? body.sections : []); }).catch(() => {});
       setInventoryLoading(true);
       getConsolidatedItemsForIssuance(projectId).then(res => {
         if (!active) return;
@@ -75,6 +90,14 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
       setError('Please fill all required fields and add at least one item.');
       return;
     }
+    if (sections.length > 0 && !sectionId) {
+      setError('Choose the work package / section these materials are for.');
+      return;
+    }
+    if (overAllocation.length > 0 && !overConfirmed) {
+      setError(`${overAllocation.length} item${overAllocation.length === 1 ? ' is' : 's are'} above this section's material allocation. Confirm below to issue anyway.`);
+      return;
+    }
 
     // Validate quantities
     for (let i = 0; i < items.length; i++) {
@@ -99,8 +122,22 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
     setError('');
 
     try {
-      const res = await createIssuanceSlip({ projectId, foremanId, activity, items });
+      const sectionLabel = section ? `${section.code ? `${section.code} · ` : ''}${section.name}` : '';
+      const res = await createIssuanceSlip({ projectId, foremanId, activity: sectionLabel && !activity.includes(sectionLabel) ? `${activity} [${sectionLabel}]` : activity, items });
       if (res.success) {
+        // Link the slip to its work package so the package's material usage and installation records include it.
+        if (sectionId && res.issuance?.id) {
+          const link = await fetch(`/api/projects/${encodeURIComponent(projectId)}/work-packages/materials`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'link-record', activityId: sectionId, recordType: 'ISSUANCE', recordId: res.issuance.id }),
+          }).catch(() => null);
+          if (!link?.ok) {
+            const body = await link?.json().catch(() => null);
+            setError(`The slip was created but could not be linked to the section (${String(body?.error || 'unknown error').replaceAll('_', ' ').toLowerCase()}). Link it from Work Packages > Materials.`);
+            router.refresh();
+            return;
+          }
+        }
         router.refresh();
         onClose();
       } else {
@@ -306,6 +343,18 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                 }}
               />
             </div>
+
+            {sections.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', gridColumn: '1 / -1' }}>
+              <label htmlFor="issuance-section" style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--accent-color)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Work package / section
+              </label>
+              <select id="issuance-section" value={sectionId} onChange={(e) => { setSectionId(e.target.value); setOverConfirmed(false); }} required
+                style={{ padding: '12px 15px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: '#fff', fontSize: '1rem', outline: 'none' }}>
+                <option value="" disabled>Select the package these materials are for...</option>
+                {sections.map(row => <option key={row.activityId} value={row.activityId}>{row.code ? `${row.code} · ` : ''}{row.name}</option>)}
+              </select>
+              {section && Object.keys(section.materials).length === 0 && <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>No material allocation is set for this package yet, so quantities are not checked against it. Set allocations in Work Packages › Materials.</span>}
+            </div>}
           </div>
 
           {/* Section 2: Items Table */}
@@ -486,6 +535,16 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
                           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                         </svg>
                       </button>
+                      {(() => {
+                        const allocation = item.consolidatedBoqItemId ? allocationFor(item.consolidatedBoqItemId) : undefined;
+                        if (!section || !item.consolidatedBoqItemId) return null;
+                        if (!allocation) return Object.keys(section.materials).length ? <span style={{ gridColumn: '1 / -1', fontSize: '0.8rem', color: '#fbbf24' }}>This material is not allocated to {section.code || section.name}.</span> : null;
+                        const left = Math.max(0, allocation.required - allocation.issued);
+                        const over = item.requestedQty > left;
+                        return <span style={{ gridColumn: '1 / -1', fontSize: '0.8rem', color: over ? '#fbbf24' : 'var(--text-secondary)' }}>
+                          {section.code || section.name}: allocated {allocation.required.toLocaleString()} · issued {allocation.issued.toLocaleString()} · left {left.toLocaleString()} {unit}{over ? ` — this request is ${(item.requestedQty - left).toLocaleString()} over the section's allocation.` : ''}
+                        </span>;
+                      })()}
                     </div>
                   );
                 })}
@@ -493,6 +552,11 @@ export default function CreateIssuanceModal({ projects, users, onClose }: { proj
               </>
             )}
           </div>
+
+          {overAllocation.length > 0 && <label style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', color: '#fbbf24', fontSize: '0.9rem' }}>
+            <input type="checkbox" checked={overConfirmed} onChange={(e) => setOverConfirmed(e.target.checked)} />
+            I confirm issuing {overAllocation.length} item{overAllocation.length === 1 ? '' : 's'} above this section's material allocation. State the reason in Activity / Purpose.
+          </label>}
 
           {/* Footer Actions */}
           <div className={styles.actions} style={{

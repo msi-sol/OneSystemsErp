@@ -1,11 +1,16 @@
 'use client';
 
-import { useState, useRef, useEffect, useTransition } from 'react';
+import { useState, useRef, useEffect, useTransition, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import styles from './materialsFlow.module.css';
 import { materialQuantity, materialTotalCost } from '@/lib/procurement/material-values';
 import LockConsolidatedBOQButton from './LockConsolidatedBOQButton';
 import GenerateMRFModal from './GenerateMRFModal';
 import AddManualMaterialModal from './AddManualMaterialModal';
 import { autoConsolidateBOQ, deleteMasterMaterialsList, downloadMasterMaterialsTemplate } from '@/app/actions/consolidation';
+import { askConfirm } from '@/lib/ui/dialogs';
+import MaterialTrackingTable, { STAGE } from './MaterialTrackingTable';
+import type { MaterialTracking, TrackingStage } from '@/lib/procurement/material-tracking';
 
 interface ConsolidatedBOQViewerProps {
   projectId: string;
@@ -17,6 +22,8 @@ interface ConsolidatedBOQViewerProps {
   canCreateMRF?: boolean;
   canLock?: boolean;
   isSuperAdmin?: boolean;
+  /** Procurement tracking per material (requested → ordered → delivered → issued → on hand, with history). */
+  tracking?: Record<string, MaterialTracking>;
 }
 
 export default function ConsolidatedBOQViewer({ 
@@ -28,7 +35,8 @@ export default function ConsolidatedBOQViewer({
   users = [],
   canCreateMRF = true,
   canLock = true,
-  isSuperAdmin = false
+  isSuperAdmin = false,
+  tracking
 }: ConsolidatedBOQViewerProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -38,6 +46,51 @@ export default function ConsolidatedBOQViewer({
   const [isDownloading, setIsDownloading] = useState(false);
   const [isRegenerating, startTransition] = useTransition();
   const containerRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  const router = useRouter();
+  const [query, setQuery] = useState('');
+  // Tracking (procurement stages, on hand, history) is the main view; the budget/VO table stays one click away.
+  const [view, setView] = useState<'tracking' | 'budget'>(tracking ? 'tracking' : 'budget');
+  const [stageFilter, setStageFilter] = useState<TrackingStage | 'ALL' | 'AWAITING'>('ALL');
+  const stageCounts = useMemo(() => {
+    const counts: Record<string, number> = { AWAITING: 0 };
+    for (const item of consolidatedItems) {
+      const track = tracking?.[item.id];
+      if (!track) continue;
+      counts[track.stage] = (counts[track.stage] || 0) + 1;
+      if (track.awaiting) counts.AWAITING += 1;
+    }
+    return counts;
+  }, [consolidatedItems, tracking]);
+  // Search and the stage filter narrow the table; selection and "select all" act on the rows shown.
+  const visibleItems = useMemo(() => {
+    const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const byStage = view !== 'tracking' || stageFilter === 'ALL' || !tracking ? consolidatedItems
+      : consolidatedItems.filter(item => stageFilter === 'AWAITING' ? !!tracking[item.id]?.awaiting : tracking[item.id]?.stage === stageFilter);
+    if (!words.length) return byStage;
+    return byStage.filter(item => {
+      const sources = (item.mappings || []).map((mapping: { procurementBenchmarkItem?: { itemCode?: string | null; description?: string } | null }) => `${mapping.procurementBenchmarkItem?.itemCode || ''} ${mapping.procurementBenchmarkItem?.description || ''}`).join(' ');
+      return words.every(word => `${item.itemCode} ${item.description} ${item.unit} ${sources}`.toLowerCase().includes(word));
+    });
+  }, [consolidatedItems, query, view, stageFilter, tracking]);
+  const closeMore = () => { if (moreRef.current) moreRef.current.open = false; };
+  /** Where a material came from: its benchmark lines, added here, or a variation order. */
+  function sourceChip(item: any) {
+    if (item.isVariationItem || item.voAdditiveQty > 0 || item.voDeductiveQty > 0) {
+      return <span style={{ backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '1px 8px', borderRadius: 12, fontWeight: 'bold', whiteSpace: 'nowrap' }}>{item.sourceVoNumber || 'VO applied'}</span>;
+    }
+    const lines = (item.mappings || []).filter((mapping: { procurementBenchmarkItem?: unknown }) => mapping.procurementBenchmarkItem).map((mapping: { procurementBenchmarkItem: { itemCode?: string | null; description: string } }) => `${mapping.procurementBenchmarkItem.itemCode ? `${mapping.procurementBenchmarkItem.itemCode} · ` : ''}${mapping.procurementBenchmarkItem.description}`);
+    const reviewed = item.mappings?.some((mapping: { mappingType: string }) => mapping.mappingType === 'BENCHMARK_REVIEW');
+    const label = reviewed ? '✓ Reviewed' : lines.length > 1 ? `Benchmark · ${lines.length} lines` : lines.length ? 'Benchmark' : item.mappings?.length ? '✓ Mapped' : 'Added here';
+    const title = lines.length ? `From the procurement benchmark:\n${lines.join('\n')}` : item.mappings?.length ? 'Mapped to its BOQ source' : 'Added in this list, not from the benchmark';
+    return <span title={title} style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '1px 8px', borderRadius: 12, fontWeight: 'bold', whiteSpace: 'nowrap' }}>{label}</span>;
+  }
+  // The "More" menu closes when you click anywhere else, like other menus.
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => { if (moreRef.current?.open && !moreRef.current.contains(event.target as Node)) moreRef.current.open = false; };
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -64,7 +117,7 @@ export default function ConsolidatedBOQViewer({
       a.click();
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.message || 'Failed to download template. It may not exist.');
+      setActionError(err.message || 'Failed to download template. It may not exist.');
     } finally {
       setIsDownloading(false);
     }
@@ -90,36 +143,38 @@ export default function ConsolidatedBOQViewer({
     setSelectedItemIds(newSet);
   }
 
+  const allVisibleSelected = visibleItems.length > 0 && visibleItems.every(item => selectedItemIds.has(item.id));
   function handleSelectAll() {
-    if (selectedItemIds.size === consolidatedItems.length) {
-      setSelectedItemIds(newSet => new Set());
-    } else {
-      setSelectedItemIds(new Set(consolidatedItems.map(i => i.id)));
-    }
+    const next = new Set(selectedItemIds);
+    for (const item of visibleItems) { if (allVisibleSelected) next.delete(item.id); else next.add(item.id); }
+    setSelectedItemIds(next);
   }
 
   const selectedItemsList = consolidatedItems.filter(item => selectedItemIds.has(item.id));
 
-  const handleRegenerate = () => {
-    if (confirm('Are you sure you want to REGENERATE the Master Materials List? This will discard the current list and re-analyze the Procurement Benchmark from scratch.')) {
+  const [actionError, setActionError] = useState('');
+  const handleRegenerate = async () => {
+    if (await askConfirm('Regenerate the Master Materials List? This discards the current list and re-analyzes the Procurement Benchmark from scratch.', { confirmLabel: 'Regenerate', danger: true })) {
       startTransition(async () => {
         try {
           await autoConsolidateBOQ(projectId, true);
           setSelectedItemIds(new Set());
+          router.refresh();
         } catch (err: any) {
-          alert(err.message || 'Error regenerating Master Materials List');
+          setActionError(err.message || 'Error regenerating Master Materials List');
         }
       });
     }
   };
 
-  const handleDelete = () => {
-    if (confirm('🚨 SUPER ADMIN ACTION: Are you sure you want to completely DELETE the Master Materials List? This action cannot be undone.')) {
+  const handleDelete = async () => {
+    if (await askConfirm('Super admin action: delete the whole Master Materials List? This cannot be undone.', { confirmLabel: 'Delete', danger: true })) {
       startTransition(async () => {
         try {
           await deleteMasterMaterialsList(projectId);
+          router.refresh();
         } catch (err: any) {
-          alert(err.message || 'Error deleting Master Materials List');
+          setActionError(err.message || 'Error deleting Master Materials List');
         }
       });
     }
@@ -138,145 +193,77 @@ export default function ConsolidatedBOQViewer({
 
   return (
     <div ref={containerRef} className={isFullscreen ? "fullscreen-wrapper" : "normal-wrapper"}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+      <div id="materials-actions" className={styles.bar}>
         <div>
-          <h2 style={{ color: isFullscreen ? '#fff' : 'var(--text-primary)', margin: 0 }}>
-            {showRevised && hasAnyVOImpact ? 'Revised Master Materials List' : 'Master Materials List Overview'}
-          </h2>
-          <p style={{ margin: '8px 0 0 0', color: isFullscreen ? '#aaa' : 'var(--text-secondary)', fontSize: '0.95rem' }}>
-            {totalItems} grouped items &bull; 
-            {showRevised && hasAnyVOImpact ? (
-              <>
-                {' '}Original: ₱ {totalOriginalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                {' '}&bull; Revised: <strong style={{ color: 'var(--accent-color)' }}>₱ {totalRevisedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-              </>
-            ) : (
-              <> Total Value: ₱ {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>
-            )}
+          <h3 className={styles.barTitle} style={{ color: isFullscreen ? '#fff' : undefined }}>
+            {showRevised && hasAnyVOImpact ? 'Revised Master Materials List' : 'Master Materials List'}{' '}
+            <span className={`${styles.status} ${isLocked ? styles.statusLocked : styles.statusDraft}`} style={{ verticalAlign: 'middle', marginLeft: 6 }}>{isLocked ? '🔒 Locked · ready for requests' : 'Draft · not locked'}</span>
+          </h3>
+          <p className={styles.barNote}>
+            {totalItems} materials · {showRevised && hasAnyVOImpact
+              ? <>original ₱ {totalOriginalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · revised <strong style={{ color: 'var(--accent-color)' }}>₱ {totalRevisedValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></>
+              : <>total ₱ {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>}
+            {isLocked && canCreateMRF ? ' · tick materials below to raise a request.' : !isLocked ? ' · check it, then lock it so requests can be raised.' : ''}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div className={styles.actions}>
           {hasAnyVOImpact && (
-            <button
-              onClick={() => setShowRevised(!showRevised)}
-              style={{
-                backgroundColor: showRevised ? 'rgba(0, 200, 83, 0.15)' : 'transparent',
-                color: showRevised ? '#00c853' : 'var(--text-secondary)',
-                border: `1px solid ${showRevised ? '#00c853' : 'var(--glass-border)'}`,
-                padding: '8px 16px',
-                borderRadius: '6px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                fontSize: '0.85rem'
-              }}
-            >
-              {showRevised ? '✓ Revised View' : '○ Original View'}
+            <button type="button" className={styles.ghost} aria-pressed={showRevised} onClick={() => setShowRevised(!showRevised)}>
+              {showRevised ? 'Showing revised (with VOs)' : 'Showing original'}
             </button>
           )}
-          {isLocked && selectedItemIds.size > 0 && canCreateMRF && (
-            <button 
+          {isLocked && canCreateMRF && (
+            <button
+              type="button"
+              className={styles.cta}
+              disabled={selectedItemIds.size === 0}
+              title={selectedItemIds.size === 0 ? 'Tick the materials to request first' : undefined}
               onClick={() => {
                 const generated = consolidatedItems.some(item => item.mappings?.some((mapping: { mappingType: string }) => mapping.mappingType === 'BENCHMARK_REVIEW'));
                 if (generated) window.location.assign(`/material-requests/create?projectId=${encodeURIComponent(projectId)}`);
                 else setIsModalOpen(true);
               }}
-              style={{
-                backgroundColor: 'var(--accent-color)',
-                color: '#000', border: 'none', padding: '8px 16px',
-                borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer',
-                boxShadow: '0 0 10px var(--accent-glow)'
-              }}
             >
-              📋 Generate MRF ({selectedItemIds.size})
+              Raise material request{selectedItemIds.size ? ` (${selectedItemIds.size})` : ''}
             </button>
           )}
-          {!isLocked && (
-            <button 
-              onClick={handleRegenerate}
-              disabled={isRegenerating}
-              className="btn-secondary"
-              style={{
-                backgroundColor: 'transparent',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--glass-border)',
-                fontWeight: 'bold',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: isRegenerating ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {isRegenerating ? 'Regenerating...' : '⚡ Regenerate List'}
-            </button>
-          )}
-          {!isLocked && (
-            <button
-              onClick={() => setIsAddManualModalOpen(true)}
-              className="btn-secondary"
-              style={{
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                color: '#10b981',
-                border: '1px solid #10b981',
-                fontWeight: 'bold',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: 'pointer'
-              }}
-            >
-              ➕ Add Material Manually
-            </button>
-          )}
-          {isSuperAdmin && !isLocked && (
-            <button
-              onClick={handleDelete}
-              disabled={isRegenerating}
-              className="btn-secondary"
-              style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                color: '#ef4444',
-                border: '1px solid #ef4444',
-                fontWeight: 'bold',
-                padding: '8px 16px',
-                borderRadius: '6px',
-                cursor: isRegenerating ? 'not-allowed' : 'pointer'
-              }}
-            >
-              🗑️ Delete Materials List
-            </button>
-          )}
-          {canLock && (
-            <LockConsolidatedBOQButton projectId={projectId} isLocked={isLocked} />
-          )}
-          <button 
-            onClick={handleDownloadTemplate}
-            disabled={isDownloading}
-            className="btn-secondary"
-            style={{ 
-              backgroundColor: 'rgba(59, 130, 246, 0.1)', 
-              color: '#3b82f6',
-              borderColor: '#3b82f6',
-              fontWeight: 'bold',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: isDownloading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {isDownloading ? 'Downloading...' : '📥 Export Excel'}
+          {canLock && <LockConsolidatedBOQButton projectId={projectId} isLocked={isLocked} onError={setActionError} />}
+          <button type="button" onClick={handleDownloadTemplate} disabled={isDownloading} className={styles.ghost}>
+            {isDownloading ? 'Exporting…' : 'Export Excel'}
           </button>
-          <button 
-            onClick={toggleFullscreen}
-            className="btn-secondary"
-            style={{ 
-              backgroundColor: isFullscreen ? 'var(--accent-color)' : 'transparent', 
-              color: isFullscreen ? '#000' : 'var(--accent-color)',
-              borderColor: 'var(--accent-color)',
-              fontWeight: 'bold',
-              // Raised only over the full-screen overlay; otherwise it floated above the app header's Sign Off when scrolling.
-              zIndex: isFullscreen ? 10000 : undefined
-            }}
-          >
-            {isFullscreen ? 'Exit Full Screen' : '⛶ Maximize'}
-          </button>
+          <details ref={moreRef} className={styles.more}>
+            <summary className={styles.ghost} aria-label="More actions">More ▾</summary>
+            <div className={styles.menu} role="menu">
+              {!isLocked && <button type="button" role="menuitem" disabled={isRegenerating} onClick={() => { closeMore(); void handleRegenerate(); }}>
+                {isRegenerating ? 'Regenerating…' : 'Regenerate from the benchmark'}<span className={styles.menuHint}>Copies the procurement benchmark again</span></button>}
+              {!isLocked && <button type="button" role="menuitem" onClick={() => { closeMore(); setIsAddManualModalOpen(true); }}>
+                Add a material<span className={styles.menuHint}>For items not in the benchmark</span></button>}
+              <button type="button" role="menuitem" onClick={() => { closeMore(); toggleFullscreen(); }}>{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
+              {isSuperAdmin && !isLocked && <button type="button" role="menuitem" className={styles.menuDanger} disabled={isRegenerating} onClick={() => { closeMore(); void handleDelete(); }}>
+                Delete the whole list<span className={styles.menuHint}>Super admin only · cannot be undone</span></button>}
+            </div>
+          </details>
         </div>
+      </div>
+
+      {tracking && <div className={styles.filters} style={{ marginBottom: 8 }}>
+        <span className={styles.segment} role="group" aria-label="Table view">
+          <button type="button" aria-pressed={view === 'tracking'} onClick={() => setView('tracking')}>Tracking</button>
+          <button type="button" aria-pressed={view === 'budget'} onClick={() => setView('budget')}>Budget &amp; VO</button>
+        </span>
+        {view === 'tracking' && <span role="group" aria-label="Filter by stage" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {(['ALL', ...Object.keys(STAGE), 'AWAITING'] as Array<TrackingStage | 'ALL' | 'AWAITING'>).filter(key => key === 'ALL' || stageCounts[key]).map(key => {
+            const active = stageFilter === key;
+            const label = key === 'ALL' ? `All ${consolidatedItems.length}` : key === 'AWAITING' ? `Awaiting action ${stageCounts.AWAITING}` : `${STAGE[key as TrackingStage].label} ${stageCounts[key]}`;
+            return <button key={key} type="button" aria-pressed={active} onClick={() => setStageFilter(key)}
+              style={{ padding: '5px 10px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', border: `1px solid ${active ? 'var(--accent-color)' : 'var(--glass-border)'}`, background: active ? 'rgba(0, 240, 255, 0.12)' : 'transparent', color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</button>;
+          })}
+        </span>}
+      </div>}
+
+      <div className={styles.filters}>
+        <input type="search" className={styles.search} placeholder="Search code, material, unit or benchmark line" aria-label="Search materials" value={query} onChange={event => setQuery(event.target.value)} />
+        <span className={styles.count} aria-live="polite">{visibleItems.length === consolidatedItems.length ? `${consolidatedItems.length} materials` : `${visibleItems.length} of ${consolidatedItems.length} materials`}{selectedItemIds.size ? ` · ${selectedItemIds.size} selected` : ''}</span>
       </div>
 
       {isModalOpen && (
@@ -328,7 +315,9 @@ export default function ConsolidatedBOQViewer({
       )}
 
       {/* No vertical padding: rows scrolled under the sticky header/footer would otherwise show through the padding strip. */}
-      <div className="table-scroll-container" style={{ backgroundColor: '#fff', padding: '0 15px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
+      {/* No padding: content scrolled sideways showed in a white strip beside the sticky item-code column. */}
+      {/* isolation keeps the sticky header's z-index inside the table, so it no longer draws over the app's top bar. */}
+      <div className="table-scroll-container" style={{ backgroundColor: '#fff', padding: 0, borderRadius: '8px 8px 0 0', border: '1px solid var(--glass-border)', borderBottom: 'none', isolation: 'isolate' }}>
         <style dangerouslySetInnerHTML={{__html: `
           .fullscreen-wrapper {
             width: 100vw;
@@ -345,7 +334,7 @@ export default function ConsolidatedBOQViewer({
           .table-scroll-container {
             overflow: auto;
             flex-grow: 1;
-            max-height: ${isFullscreen ? 'calc(100vh - 200px)' : '600px'};
+            max-height: ${isFullscreen ? 'calc(100vh - 250px)' : '600px'};
           }
           .consolidation-table { 
             width: 100%; 
@@ -402,20 +391,34 @@ export default function ConsolidatedBOQViewer({
           .vo-item-row {
             background-color: rgba(0, 200, 83, 0.06) !important;
           }
+          .consolidation-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+          .consolidation-table th.num { text-align: right; }
+          .tracking-table tr.tracking-open td { border-bottom-color: transparent; background-color: #f8fafc; }
+          .tracking-table tr.tracking-history td:first-child { position: static; }
         `}} />
-        <table className="consolidation-table">
+        {view === 'tracking' && tracking ? <MaterialTrackingTable
+          items={visibleItems}
+          tracking={tracking}
+          selectable={isLocked && canCreateMRF}
+          selected={selectedItemIds}
+          onToggle={toggleSelection}
+          allSelected={allVisibleSelected}
+          onToggleAll={handleSelectAll}
+          source={sourceChip}
+        /> : <table className="consolidation-table">
           <thead>
             <tr>
               {isLocked && (
                 <th style={{ textAlign: 'center', width: '40px' }}>
                   <input 
                     type="checkbox" 
-                    checked={selectedItemIds.size === consolidatedItems.length && consolidatedItems.length > 0}
+                    aria-label="Select all materials shown"
+                    checked={allVisibleSelected}
                     onChange={handleSelectAll}
                   />
                 </th>
               )}
-              <th>Item Code</th>
+              <th style={{ whiteSpace: 'nowrap' }}>Item Code</th>
               <th>Description</th>
               <th style={{ textAlign: 'center' }}>Source</th>
               <th style={{ textAlign: 'right' }}>Orig Qty</th>
@@ -428,14 +431,15 @@ export default function ConsolidatedBOQViewer({
               )}
               <th>Unit</th>
               <th style={{ textAlign: 'right' }}>Unit Cost</th>
-              <th style={{ textAlign: 'right', paddingRight: showRevised && hasAnyVOImpact ? undefined : 72 }}>Orig Value</th>
+              <th style={{ textAlign: 'right' }}>Orig Value</th>
               {showRevised && hasAnyVOImpact && (
-                <th style={{ textAlign: 'right', fontWeight: 'bold', paddingRight: 72 }}>Revised Value</th>
+                <th style={{ textAlign: 'right', fontWeight: 'bold' }}>Revised Value</th>
               )}
             </tr>
           </thead>
           <tbody>
-            {consolidatedItems.map((item) => {
+            {!visibleItems.length && <tr><td colSpan={12} style={{ textAlign: 'center', color: '#666', padding: 24 }}>No materials match the search.</td></tr>}
+            {visibleItems.map((item) => {
               const hasVOImpact = item.voAdditiveQty > 0 || item.voDeductiveQty > 0;
               const rowClass = item.isVariationItem ? 'vo-item-row' : (hasVOImpact ? 'vo-impact-row' : '');
 
@@ -445,6 +449,7 @@ export default function ConsolidatedBOQViewer({
                     <td style={{ textAlign: 'center' }}>
                       <input 
                         type="checkbox"
+                        aria-label={`Select ${item.itemCode}`}
                         checked={selectedItemIds.has(item.id)}
                         onChange={() => toggleSelection(item.id)}
                       />
@@ -487,7 +492,13 @@ export default function ConsolidatedBOQViewer({
                         fontSize: '0.75rem',
                         fontWeight: 'bold'
                       }}>
-                        {item.mappings?.some((mapping: { mappingType: string }) => mapping.mappingType === 'BENCHMARK_REVIEW') ? '✓ Reviewed benchmark' : item.mappings?.length ? '✓ Mapped source' : 'Saved material'}
+                        {(() => {
+                          const lines = (item.mappings || []).filter((mapping: { procurementBenchmarkItem?: unknown }) => mapping.procurementBenchmarkItem).map((mapping: { procurementBenchmarkItem: { itemCode?: string | null; description: string } }) => `${mapping.procurementBenchmarkItem.itemCode ? `${mapping.procurementBenchmarkItem.itemCode} · ` : ''}${mapping.procurementBenchmarkItem.description}`);
+                          const reviewed = item.mappings?.some((mapping: { mappingType: string }) => mapping.mappingType === 'BENCHMARK_REVIEW');
+                          const label = reviewed ? '✓ Reviewed' : lines.length > 1 ? `Benchmark · ${lines.length} lines` : lines.length ? 'Benchmark' : item.mappings?.length ? '✓ Mapped' : 'Added here';
+                          const title = lines.length ? `From the procurement benchmark:\n${lines.join('\n')}` : item.mappings?.length ? 'Mapped to its BOQ source' : 'Added in this list, not from the benchmark';
+                          return <span style={{ whiteSpace: 'nowrap' }} title={title}>{label}</span>;
+                        })()}
                       </span>
                     )}
                   </td>
@@ -511,11 +522,11 @@ export default function ConsolidatedBOQViewer({
                   <td className="nowrap" style={{ textAlign: 'right' }}>
                     ₱ {item.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="nowrap" style={{ textAlign: 'right', paddingRight: showRevised && hasAnyVOImpact ? undefined : 72 }}>
+                  <td className="nowrap" style={{ textAlign: 'right' }}>
                     ₱ {item.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   {showRevised && hasAnyVOImpact && (
-                    <td className="nowrap" style={{ textAlign: 'right', paddingRight: 72, fontWeight: 'bold', color: materialTotalCost(item) !== item.totalCost ? 'var(--accent-color)' : '#000' }}>
+                    <td className="nowrap" style={{ textAlign: 'right', fontWeight: 'bold', color: materialTotalCost(item) !== item.totalCost ? 'var(--accent-color)' : '#000' }}>
                       ₱ {materialTotalCost(item).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   )}
@@ -523,30 +534,23 @@ export default function ConsolidatedBOQViewer({
               );
             })}
           </tbody>
-          <tfoot>
-            <tr>
-              {/* Every column except the last value column: 6 base (+1 checkbox, +4 with VO columns). */}
-              <th colSpan={(showRevised && hasAnyVOImpact ? 10 : 6) + (isLocked ? 1 : 0)} style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.05rem', padding: '15px 10px', backgroundColor: '#e0e0e0', position: 'sticky', bottom: 0, zIndex: 10, borderTop: '2px solid #ccc', borderBottom: 'none' }}>
-                {showRevised && hasAnyVOImpact ? (
-                  <span>
-                    Original: ₱ {totalOriginalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    <span style={{ color: '#2e7d32', margin: '0 12px' }}>+ ₱ {totalVOAdditive.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    <span style={{ color: '#c62828' }}>- ₱ {totalVODeductive.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    <span style={{ margin: '0 12px' }}>=</span>
-                    REVISED TOTAL:
-                  </span>
-                ) : (
-                  'GRAND TOTAL:'
-                )}
-              </th>
-              {/* Dark teal stays readable on the light footer; extra right padding keeps the total clear of the floating AI button. */}
-              <th style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.05rem', padding: '15px 72px 15px 10px', color: '#0f766e', backgroundColor: '#e0e0e0', position: 'sticky', bottom: 0, zIndex: 10, borderTop: '2px solid #ccc', borderBottom: 'none', whiteSpace: 'nowrap' }}>
-                ₱ {(showRevised && hasAnyVOImpact ? totalRevisedValue : totalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </th>
-            </tr>
-          </tfoot>
-        </table>
+        </table>}
       </div>
+      {/* The total sits outside the scrolling table, so sideways scrolling and the floating AI button cannot hide it. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: '8px 16px', padding: '14px 16px', backgroundColor: '#e0e0e0', color: '#000', border: '1px solid var(--glass-border)', borderTop: '2px solid #ccc', borderRadius: '0 0 8px 8px', fontWeight: 'bold' }}>
+        {showRevised && hasAnyVOImpact ? (
+          <span style={{ fontSize: '0.9rem' }}>
+            Original: ₱ {totalOriginalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <span style={{ color: '#2e7d32', margin: '0 10px' }}>+ ₱ {totalVOAdditive.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span style={{ color: '#c62828' }}>- ₱ {totalVODeductive.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </span>
+        ) : null}
+        <span style={{ fontSize: '1.05rem', whiteSpace: 'nowrap' }}>
+          {showRevised && hasAnyVOImpact ? 'REVISED TOTAL:' : 'GRAND TOTAL:'}{' '}
+          <span style={{ color: '#0f766e' }}>₱ {(showRevised && hasAnyVOImpact ? totalRevisedValue : totalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </span>
+      </div>
+      {actionError && <p role="alert" style={{ margin: '10px 0 0', color: '#fca5a5' }}>{actionError}</p>}
     </div>
   );
 }

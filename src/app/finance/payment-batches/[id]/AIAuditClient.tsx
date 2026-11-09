@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { validatePaymentBatchWithAI } from '@/app/actions/aiPaymentValidationActions';
+import AiThinking from '@/components/ai/AiThinking';
 
 export default function AIAuditClient({ batchId, existingRiskLevel, existingNotes }: { batchId: string, existingRiskLevel?: string, existingNotes?: string }) {
   const router = useRouter();
@@ -72,9 +73,10 @@ export default function AIAuditClient({ batchId, existingRiskLevel, existingNote
           disabled={loading}
           style={{ background: '#3498db', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
         >
-          {loading ? 'Running Scan...' : 'Run AI Audit'}
+          {loading ? 'Auditing…' : 'Run AI Audit'}
         </button>
       </div>
+      {loading && <AiThinking messages={['Reading the payment batch', 'Matching payments to approved documents', 'Looking for duplicate payments', 'Checking amounts and payees', 'Rating the risk']} />}
       
       {existingRiskLevel === 'BLOCKED' && (
         <div style={{ marginTop: '15px', padding: '10px', background: 'rgba(231, 76, 60, 0.2)', borderLeft: '4px solid #e74c3c', color: '#fff' }}>

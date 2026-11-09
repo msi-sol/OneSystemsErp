@@ -4,6 +4,7 @@ import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
+import { backendErrorMessage } from '@/lib/backend-error';
 
 // Define the backend URL for the Server Action context
 
@@ -31,7 +32,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`Backend Error for ${endpoint}: ${res.status} ${errorText}`);
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    throw new Error(backendErrorMessage(res.status, errorText));
   }
   return res.json();
 }

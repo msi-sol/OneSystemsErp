@@ -150,11 +150,15 @@ export async function POST(
         });
       }
 
-      // 3. Update Project: the contract amount always changes; dates only when days were requested
-      // and there is an end date to extend (previously a null endDate also skipped the amount).
-      const projectUpdate: Record<string, unknown> = {
-        contractAmount: { increment: variationOrder.netVariationAmount },
-      };
+      // 3. Record the final stage in the approval history like the earlier stages.
+      await tx.variationOrderApproval.create({
+        data: { variationOrderId: voId, stage: 'PD_APPROVAL', action: 'APPROVED', actionById: actor.id, remarks: 'Final approval' },
+      });
+
+      // 4. Update Project dates when days were requested. The contract amount is NOT changed: project.contractAmount
+      // is the original contract everywhere (summary, executive dashboard, billing add approved VOs on top), so
+      // incrementing it here counted every approved VO twice.
+      const projectUpdate: Record<string, unknown> = {};
       if (variationOrder.additionalCalendarDaysRequested > 0) {
         const project = await tx.project.findUnique({ where: { id: projectId } });
         if (project && project.endDate) {
@@ -164,7 +168,7 @@ export async function POST(
           projectUpdate.endDate = newEndDate; // Update endDate as well for scheduling logic
         }
       }
-      await tx.project.update({ where: { id: projectId }, data: projectUpdate });
+      if (Object.keys(projectUpdate).length > 0) await tx.project.update({ where: { id: projectId }, data: projectUpdate });
     }, {
       maxWait: 5000,
       timeout: 30000

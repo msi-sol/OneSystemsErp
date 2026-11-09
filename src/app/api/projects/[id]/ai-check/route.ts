@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionActor, checkSchedulingAccess } from '@/lib/scheduling/authUtils';
-import { AiCheckError, runBenchmarkAiCheck, runBoqAiCheck, runDatesAiCheck, runWorkPackageAiCheck } from '@/lib/ai/planning-ai-check';
+import { AiCheckError, runBenchmarkAiCheck, runBoqAiCheck, runDatesAiCheck, runDupaAiCheck, runWorkPackageAiCheck } from '@/lib/ai/planning-ai-check';
 
 // Optional AI Check for the BOQ and work-package steps. Read-only: it returns insights and proposals;
 // accepting a proposal goes through the normal BOQ draft / work-package endpoints and their permissions.
@@ -19,7 +19,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (scope === 'work-packages') return NextResponse.json(await runWorkPackageAiCheck(actor, projectId));
     if (scope === 'dates') return NextResponse.json(await runDatesAiCheck(actor, projectId));
     if (scope === 'benchmark') return NextResponse.json(await runBenchmarkAiCheck(actor, projectId));
-    return NextResponse.json({ error: 'Choose what to check: boq, work-packages, dates or benchmark.' }, { status: 400 });
+    if (scope === 'dupa') { const fields = body as Record<string, unknown>; return NextResponse.json(await runDupaAiCheck(actor, projectId, { scheduleId: fields.scheduleId, uploadId: fields.uploadId })); }
+    return NextResponse.json({ error: 'Choose what to check: boq, work-packages, dates, benchmark or dupa.' }, { status: 400 });
   } catch (error) {
     if (error instanceof AiCheckError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('AI Check failed:', error instanceof Error ? error.message : 'Unknown error');

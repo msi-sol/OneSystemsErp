@@ -72,7 +72,11 @@ export default function ProjectCostLedgerTab({ projectId }: { projectId: string 
                 <td>{entry.referenceDocumentNo || entry.referenceDocumentType || 'N/A'}</td>
                 <td>{entry.supplierName || entry.subcontractorName || entry.workerName || 'N/A'}</td>
                 <td>{entry.costCategory || 'UNCODED'}</td>
-                <td style={{ maxWidth: '300px', whiteSpace: 'normal' }}>{entry.costType}</td>
+                <td style={{ maxWidth: '300px', whiteSpace: 'normal' }}>
+                  {/* What the cost is for: the linked BOQ material, else the cost type (DIRECT/INDIRECT). */}
+                  {(entry.consolidatedBoqItem || entry.awardedBoqItem)?.description?.replace(/\s+/g, ' ') || entry.costType}
+                  {entry.quantity > 0 && (entry.consolidatedBoqItem || entry.awardedBoqItem) ? <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{entry.quantity.toLocaleString()} × ₱{Number(entry.unitCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · {entry.costType}</span> : null}
+                </td>
                 <td style={{ textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>
                   ₱ {entry.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>

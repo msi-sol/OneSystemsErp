@@ -20,11 +20,14 @@ export default async function ViewSubcontractPackagePage({ params }: { params: P
   const __session = await verifySession();
   const sessionId = __session?.id || '';
   let canDelete = false;
+  // The workflow controls enable each approval step by role; without it every step button was disabled.
+  let currentRole = '';
   if (sessionId) {
     const user = await prisma.user.findUnique({
       where: { id: sessionId },
       include: { userRoles: { include: { role: true } } }
     });
+    currentRole = cookieStore.get('simulatedRole')?.value || user?.role || '';
     const hasCompletedPayments = pkg.billings?.some((b: any) => ['APPROVED_FOR_PAYMENT', 'PAID'].includes(b.status)) || false;
     
     if (hasCompletedPayments) {
@@ -94,7 +97,7 @@ export default async function ViewSubcontractPackagePage({ params }: { params: P
         </div>
       </div>
 
-      <PackageWorkflowControls packageId={id} currentStatus={pkg.status} isLocked={(pkg as any).isLocked} canDelete={canDelete} />
+      <PackageWorkflowControls packageId={id} currentStatus={pkg.status} isLocked={(pkg as any).isLocked} canDelete={canDelete} currentUser={{ role: currentRole }} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
         <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>

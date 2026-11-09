@@ -5,6 +5,16 @@ import Link from 'next/link';
 import { CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { BOQReviewDocument } from '@/lib/boq/review-state';
 import styles from './BOQFindingsReview.module.css';
+import ReasonSelect from '@/components/ui/ReasonSelect';
+
+const FINDING_REASONS = [
+  'Checked against the signed BOQ: the file is right as read',
+  'Not part of the contract scope',
+  'Header, subtotal or note row, not a BOQ item',
+  'Duplicate of another BOQ line',
+  'Will be corrected in a BOQ revision',
+  'Waiting for the client or designer to confirm',
+];
 
 type Finding = BOQReviewDocument['findings'][number];
 type Decision = 'CONFIRMED' | 'SET_ASIDE' | 'DEFERRED';
@@ -56,8 +66,8 @@ export default function BOQFindingsReview({ projectId, findings, canReview, pend
         {' '}<Link href={`/projects/${projectId}/boq?view=compare`}>Check it against the file</Link> · <Link href={`/projects/${projectId}/boq?view=items`}>Correct BOQ items</Link></p>
       {canReview ? <>
         <label htmlFor={`finding-reason-${finding.id}`}>Reason {blocking ? '(needed to set aside)' : '(needed to set aside or defer)'}</label>
-        <input id={`finding-reason-${finding.id}`} value={reasons[finding.id] || ''} maxLength={300} disabled={pending} placeholder="Why this decision is right"
-          onChange={event => setReasons({ ...reasons, [finding.id]: event.target.value })} />
+        <ReasonSelect id={`finding-reason-${finding.id}`} options={FINDING_REASONS} value={reasons[finding.id] || ''} maxLength={300} disabled={pending} placeholder="Why this decision is right"
+          onChange={value => setReasons({ ...reasons, [finding.id]: value })} />
         <div className={styles.decisions}>
           <button type="button" className={styles.confirm} disabled={pending} onClick={() => void decide('CONFIRMED')}><CheckCircle2 size={16} aria-hidden="true" /> Confirm as read</button>
           <button type="button" className={styles.other} disabled={pending || reason.length < 5} onClick={() => void decide('SET_ASIDE')}>Set aside</button>

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './AiCheckPanel.module.css';
+import AiThinking, { AI_THINKING_MESSAGES } from '@/components/ai/AiThinking';
 
 /**
  * Optional AI Check for the BOQ → BOQ baseline → sections → work packages flow.
@@ -62,6 +63,7 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
   const [done, setDone] = useState<Record<string, 'accepted' | 'dismissed'>>({});
   const [checksum, setChecksum] = useState<string | null>(null);
   const [items, setItems] = useState<Record<string, BoqItem>>({});
+  const [selectedFix, setSelectedFix] = useState<Record<string, boolean>>({});
   // Work-package proposal editing state
   const [groups, setGroups] = useState<Group[]>([]);
   const [confirmApply, setConfirmApply] = useState(false);
@@ -69,16 +71,9 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
   const [rowVersion, setRowVersion] = useState<number | null>(null);
   // Elapsed seconds while a check runs, so a 30–60 s model call visibly progresses instead of looking frozen.
   const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!running) return;
-    const started = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
 
   async function run() {
-    setBusy(true); setRunning(true); setElapsed(0); setError(''); setMessage(''); setConfirmApply(false);
+    setBusy(true); setRunning(true); setError(''); setMessage(''); setConfirmApply(false);
     try {
       const data = await call(`/api/projects/${projectId}/ai-check`, 'POST', { scope });
       if (scope === 'boq') {
@@ -93,26 +88,42 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
   }
 
   // ---- BOQ: accept (optionally edited) correction through the normal draft-edit endpoint.
-  async function acceptCorrection(correction: Correction) {
-    if (!boq) return;
-    const value = (edits[correction.id] ?? correction.proposed).trim();
-    if (!value) { setError('Enter a value before accepting.'); return; }
-    const item = items[correction.item.id] || correction.item;
+  /**
+   * Saves one or more suggestions (as edited) to the draft BOQ, one after another so each uses the checksum the
+   * previous save returned. Stops at the first failure and says how many were saved.
+   */
+  async function saveCorrections(list: Correction[]) {
+    if (!boq || !list.length) return;
     setBusy(true); setError(''); setMessage('');
+    let currentChecksum = checksum;
+    let currentItems = { ...items };
+    let saved = 0;
     try {
-      const reason = `AI Check suggestion ${edits[correction.id] !== undefined && edits[correction.id].trim() !== correction.proposed ? 'edited and accepted' : 'accepted'}: ${correction.reason}`.slice(0, 300);
-      const next = { ...item, [correction.field]: value };
-      const result = await call(`/api/projects/${projectId}/boq-draft`, 'PATCH', {
-        versionId: boq.versionId, itemId: item.id, expectedChecksum: checksum, editReason: reason.length >= 5 ? reason : 'AI Check suggestion accepted.',
-        itemCode: next.itemCode, description: next.description, unit: next.unit, quantity: next.quantity, unitCost: next.unitCost, amount: next.amount,
-        ...(correction.field === 'section' ? { section: value } : {}),
-      });
-      setChecksum(result.checksum); setItems((current) => ({ ...current, [item.id]: next })); setDone((current) => ({ ...current, [correction.id]: 'accepted' }));
-      setMessage(`${FIELD_LABEL[correction.field]} updated for ${item.itemCode}. The engineering review must be recorded again.`);
-      router.refresh();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'The correction could not be saved.'); }
-    finally { setBusy(false); }
+      for (const correction of list) {
+        const value = (edits[correction.id] ?? correction.proposed).trim();
+        if (!value) throw new Error(`Enter a value for ${correction.item.itemCode} before saving.`);
+        const item = currentItems[correction.item.id] || correction.item;
+        const reason = `AI Check suggestion ${edits[correction.id] !== undefined && edits[correction.id].trim() !== correction.proposed ? 'edited and saved' : 'saved'}: ${correction.reason}`.slice(0, 300);
+        const next = { ...item, [correction.field]: value };
+        const result = await call(`/api/projects/${projectId}/boq-draft`, 'PATCH', {
+          versionId: boq.versionId, itemId: item.id, expectedChecksum: currentChecksum, editReason: reason.length >= 5 ? reason : 'AI Check suggestion saved.',
+          itemCode: next.itemCode, description: next.description, unit: next.unit, quantity: next.quantity, unitCost: next.unitCost, amount: next.amount,
+          ...(correction.field === 'section' ? { section: value } : {}),
+        });
+        currentChecksum = result.checksum;
+        currentItems = { ...currentItems, [item.id]: next };
+        saved += 1;
+        setDone((current) => ({ ...current, [correction.id]: 'accepted' }));
+      }
+      setMessage(saved === 1 ? `${FIELD_LABEL[list[0].field]} updated for ${list[0].item.itemCode}. The engineering review must be recorded again.` : `Saved ${saved} corrections to the draft BOQ. The engineering review must be recorded again.`);
+    } catch (caught) {
+      setError(`${saved ? `Saved ${saved}, then stopped: ` : ''}${caught instanceof Error ? caught.message : 'The correction could not be saved.'}`);
+    } finally {
+      setChecksum(currentChecksum); setItems(currentItems); setSelectedFix({}); setBusy(false);
+      if (saved) router.refresh();
+    }
   }
+  const removeCorrections = (list: Correction[]) => { setDone((current) => ({ ...current, ...Object.fromEntries(list.map((correction) => [correction.id, 'dismissed' as const])) })); setSelectedFix({}); };
 
   // ---- Work packages: grouping editor helpers.
   const sectionGroup = useMemo(() => { const map = new Map<number, number>(); groups.forEach((group, index) => group.sections.forEach((ref) => map.set(ref, index))); return map; }, [groups]);
@@ -135,9 +146,10 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The grouping could not be applied.'); }
     finally { setBusy(false); }
   }
-  async function addLinks() {
+  const removeLinks = (indexes: number[]) => { if (!wp) return; const drop = new Set(indexes); setWp({ ...wp, sequence: wp.sequence.filter((_, index) => !drop.has(index)) }); setLinks({}); };
+  async function addLinks(all = false) {
     if (!wp?.schedule) return;
-    const chosen = wp.sequence.map((link, index) => ({ link, index })).filter(({ index }) => links[index]);
+    const chosen = wp.sequence.map((link, index) => ({ link, index })).filter(({ index }) => all || links[index]);
     if (!chosen.length) return;
     setBusy(true); setError(''); setMessage('');
     let version = rowVersion, added = 0;
@@ -147,7 +159,7 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
         version = result.rowVersion; added++;
       }
       setMessage(`Added ${added} sequence ${added === 1 ? 'link' : 'links'}. Check that planned dates still respect them.`);
-      setWp({ ...wp, sequence: wp.sequence.filter((_, index) => !links[index]) }); setLinks({});
+      setWp({ ...wp, sequence: wp.sequence.filter((_, index) => !chosen.some((item) => item.index === index)) }); setLinks({});
       router.refresh();
     } catch (caught) { setError(`${added ? `Added ${added}, then stopped: ` : ''}${caught instanceof Error ? caught.message : 'The link could not be added.'}`); }
     finally { setRowVersion(version); setBusy(false); }
@@ -162,13 +174,10 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
           ? 'Have AI look over this BOQ for misplaced items, inconsistent units, duplicates and unclear descriptions before the baseline is locked. Nothing changes unless you accept a suggestion.'
           : 'Have AI suggest how BOQ sections should be grouped into work packages and which packages must finish before others start. Edit any suggestion before accepting it; nothing changes otherwise.'}</p>
       </div>
-      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? `Checking… ${elapsed}s` : result ? 'Run again' : 'Run AI Check'}</button>
+      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Run AI Check'}</button>
     </div>
-    {running && <p className={styles.muted} role="status" style={{ marginTop: 10 }}>
-      {elapsed < 90
-        ? `The AI is reading the BOQ${scope === 'work-packages' ? ' sections and current packages' : ''}. This usually takes 30–60 seconds.${scope === 'work-packages' ? ' You can keep working on other steps; the result will be here when you come back.' : ''}`
-        : 'Still working: the AI service is slower than usual. It stops by itself after about 4 minutes, and nothing is changed either way.'}
-    </p>}
+    {running && <AiThinking messages={scope === 'boq' ? AI_THINKING_MESSAGES.boq : AI_THINKING_MESSAGES.workPackages}
+      note={`This usually takes 30–60 seconds.${scope === 'work-packages' ? ' You can keep working on other steps; the result will be here when you come back.' : ''}`} />}
     {error && <div className={styles.error} role="alert">{error}</div>}
     {message && <div className={styles.success} role="status">{message}</div>}
 
@@ -179,10 +188,11 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
       <h4 className={styles.sectionTitle}>Suggested corrections ({boq.corrections.length})</h4>
       {!boq.corrections.length && <p className={styles.muted}>No item corrections suggested.</p>}
       {!!boq.corrections.length && !boq.editable && <p className={styles.muted}>This BOQ is {boq.versionStatus.toLowerCase()}; the baseline is locked, so these suggestions are for information. Correct them through a BOQ revision if needed.</p>}
-      {!!boq.corrections.length && <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>Item</th><th>Field</th><th>Current → suggested (editable)</th><th>Why</th>{boq.editable && <th>Decision</th>}</tr></thead><tbody>
+      {!!boq.corrections.length && <div className={styles.tableWrap}><table className={styles.table}><thead><tr>{boq.editable && <th><input type="checkbox" aria-label="Select all open suggestions" checked={boq.corrections.some((correction) => !done[correction.id]) && boq.corrections.filter((correction) => !done[correction.id]).every((correction) => selectedFix[correction.id])} onChange={(event) => setSelectedFix(event.target.checked ? Object.fromEntries(boq.corrections.filter((correction) => !done[correction.id]).map((correction) => [correction.id, true])) : {})} /></th>}<th>Item</th><th>Field</th><th>Current → suggested (editable)</th><th>Why</th>{boq.editable && <th>Decision</th>}</tr></thead><tbody>
         {boq.corrections.map((correction) => {
           const state = done[correction.id];
-          return <tr key={correction.id}>
+          return <tr key={correction.id} style={state ? { opacity: 0.6 } : undefined}>
+            {boq.editable && <td><input type="checkbox" aria-label={`Select suggestion for ${correction.item.itemCode}`} disabled={!!state || busy} checked={!!selectedFix[correction.id]} onChange={(event) => setSelectedFix((current) => ({ ...current, [correction.id]: event.target.checked }))} /></td>}
             <td><strong>{correction.item.itemCode}</strong><div className={styles.groupMeta}>{correction.item.description.slice(0, 80)}</div></td>
             <td>{FIELD_LABEL[correction.field]}</td>
             <td><div className={styles.strike}>{correction.current || '—'}</div>
@@ -191,13 +201,23 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
                 : <input className={styles.input} disabled={!boq.editable || !!state} value={edits[correction.id] ?? correction.proposed} onChange={(event) => setEdits((current) => ({ ...current, [correction.id]: event.target.value }))} aria-label={`Suggested ${FIELD_LABEL[correction.field]} for ${correction.item.itemCode}`} />}
             </td>
             <td className={styles.groupMeta}>{correction.reason}</td>
-            {boq.editable && <td>{state ? <span className={styles.groupMeta}>{state === 'accepted' ? 'Accepted' : 'Dismissed'}</span> : <div className={styles.actions} style={{ marginTop: 0 }}>
-              <button type="button" className={styles.primary} disabled={busy} onClick={() => void acceptCorrection(correction)}>Accept</button>
-              <button type="button" className={styles.ghost} disabled={busy} onClick={() => setDone((current) => ({ ...current, [correction.id]: 'dismissed' }))}>Dismiss</button>
+            {boq.editable && <td>{state ? <span className={styles.groupMeta}>{state === 'accepted' ? 'Saved' : 'Removed'}</span> : <div className={styles.actions} style={{ marginTop: 0 }}>
+              <button type="button" className={styles.primary} disabled={busy} onClick={() => void saveCorrections([correction])}>Save</button>
+              <button type="button" className={styles.ghost} disabled={busy} onClick={() => removeCorrections([correction])}>Remove</button>
             </div>}</td>}
           </tr>;
         })}
       </tbody></table></div>}
+      {boq.editable && boq.corrections.some((correction) => !done[correction.id]) && (() => {
+        const open = boq.corrections.filter((correction) => !done[correction.id]);
+        const chosen = open.filter((correction) => selectedFix[correction.id]);
+        return <div className={styles.actions}>
+          <button type="button" className={styles.primary} disabled={busy || !chosen.length} onClick={() => void saveCorrections(chosen)}>Save selected ({chosen.length})</button>
+          <button type="button" className={styles.secondary} disabled={busy} onClick={() => void saveCorrections(open)}>Save all ({open.length})</button>
+          <button type="button" className={styles.ghost} disabled={busy || !chosen.length} onClick={() => removeCorrections(chosen)}>Remove selected</button>
+          <button type="button" className={styles.ghost} disabled={busy} onClick={() => removeCorrections(open)}>Remove all</button>
+        </div>;
+      })()}
     </div>}
 
     {wp && <>
@@ -235,8 +255,17 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
         {!wp.sequence.length && <p className={styles.muted}>No new links suggested for the current packages.</p>}
         {!!wp.sequence.length && <><ul className={styles.list}>{wp.sequence.map((link, index) => <li key={index} className={styles.insight}><label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <input type="checkbox" checked={!!links[index]} disabled={!wp.sequenceEditable} onChange={(event) => setLinks((current) => ({ ...current, [index]: event.target.checked }))} />
-          <span><span className={styles.insightTitle}>{link.before.label} → {link.after.label}</span><span className={styles.muted} style={{ display: 'block' }}>Finish before start · {link.reason}</span></span></label></li>)}</ul>
-          {wp.sequenceEditable && <div className={styles.actions}><button type="button" className={styles.primary} disabled={busy || !Object.values(links).some(Boolean)} onClick={() => void addLinks()}>Add selected links</button></div>}</>}
+          <span style={{ flex: 1 }}><span className={styles.insightTitle}>{link.before.label} → {link.after.label}</span><span className={styles.muted} style={{ display: 'block' }}>Finish before start · {link.reason}</span></span>
+          {wp.sequenceEditable && <button type="button" className={styles.ghost} disabled={busy} onClick={(event) => { event.preventDefault(); removeLinks([index]); }}>Remove</button>}</label></li>)}</ul>
+          {wp.sequenceEditable && (() => {
+            const chosen = wp.sequence.map((_, index) => index).filter((index) => links[index]);
+            return <div className={styles.actions}>
+              <button type="button" className={styles.primary} disabled={busy || !chosen.length} onClick={() => void addLinks()}>Save selected ({chosen.length})</button>
+              <button type="button" className={styles.secondary} disabled={busy} onClick={() => void addLinks(true)}>Save all ({wp.sequence.length})</button>
+              <button type="button" className={styles.ghost} disabled={busy || !chosen.length} onClick={() => removeLinks(chosen)}>Remove selected</button>
+              <button type="button" className={styles.ghost} disabled={busy} onClick={() => removeLinks(wp.sequence.map((_, index) => index))}>Remove all</button>
+            </div>;
+          })()}</>}
       </div>
     </>}
     {result && <p className={styles.muted} style={{ marginTop: 14 }}>Suggestions by {result.model}. AI can be wrong: review before accepting. Accepted changes are recorded in the history like any other edit.</p>}

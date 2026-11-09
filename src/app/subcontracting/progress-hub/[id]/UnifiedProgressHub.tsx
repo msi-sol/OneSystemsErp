@@ -3,8 +3,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { createAccomplishment, createBilling, approveAccomplishment, submitBillingToPM, endorseBillingToPD, approvePaymentRequest } from '@/app/actions/progressActions';
+import { useRouter } from 'next/navigation';
+import { readItemPercentages } from '@/lib/subcontracting/progress-report-percent';
 
 export default function UnifiedProgressHub({ packageData }: { packageData: any }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'accomplishments' | 'billings' | 'payments'>('accomplishments');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -40,41 +43,42 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
     }
   }, [maxBilleable]);
 
-  const handleSimulateAI = () => {
+  // Weighted overall % of the package from each item's percentage for this period.
+  const overallFrom = (breakdown: any[]) => {
+    const total = breakdown.reduce((sum: number, item: any) => sum + (item.totalCost || 0) * ((Number(item.thisPeriodPercent) || 0) / 100), 0);
+    return packageData.contractAmount > 0 ? (total / packageData.contractAmount) * 100 : 0;
+  };
+
+  // Reads each item's percentage from a text report. This used to be a fake "AI evaluation": it never read the
+  // file and assigned hardcoded percentages by keyword (e.g. any "Mobilization" item = 100%), others 0%.
+  const handleSimulateAI = async () => {
     if (!simulatedFile) {
       setError("Please upload a file first.");
       return;
     }
-    
     setIsSimulatingAI(true);
     setError('');
-    
-    // Simulate AI processing delay
-    setTimeout(() => {
-      // Hardcoded simulation based on mock_report.txt
-      const mockBreakdown = assignedBoqItems.map((item: any) => {
-        let percent = 0;
-        if (item.awardedBoqItem.description.includes('Mobilization')) percent = 100;
-        else if (item.awardedBoqItem.description.includes('Project Management')) percent = 25;
-        else if (item.awardedBoqItem.description.includes('Admin Support')) percent = 40;
-        return { ...item, thisPeriodPercent: percent };
-      });
-      
-      setBoqBreakdown(mockBreakdown);
-      
-      // Calculate mathematically weighted overall percentage
-      let totalFinancialAccomplishment = 0;
-      mockBreakdown.forEach((item: any) => {
-        totalFinancialAccomplishment += (item.totalCost || 0) * (item.thisPeriodPercent / 100);
-      });
-      
-      const overallPercent = (totalFinancialAccomplishment / packageData.contractAmount) * 100;
-      setCalculatedOverallPercent(overallPercent);
-      
-      setIsSimulatingAI(false);
-      setAiAnalysisDone(true);
-      setSuccessMsg("AI evaluation complete! Item percentages have been extracted from the report.");
-    }, 2000);
+    const isText = simulatedFile.type.startsWith('text/') || /\.txt$/i.test(simulatedFile.name);
+    const text = isText ? await simulatedFile.text().catch(() => '') : '';
+    const found = readItemPercentages(text, assignedBoqItems.map((item: any) => ({ id: item.id, description: item.awardedBoqItem.description })));
+    const breakdown = assignedBoqItems.map((item: any) => ({ ...item, thisPeriodPercent: found[item.id] ?? 0 }));
+    const foundCount = Object.values(found).filter(value => value !== null).length;
+    setBoqBreakdown(breakdown);
+    setCalculatedOverallPercent(overallFrom(breakdown));
+    setIsSimulatingAI(false);
+    setAiAnalysisDone(true);
+    setSuccessMsg(!isText
+      ? "PDF reports are not read automatically yet. Enter each item's percentage for this period below."
+      : foundCount > 0
+        ? `Read ${foundCount} of ${breakdown.length} item percentage${breakdown.length === 1 ? '' : 's'} from the report. Check each one before submitting.`
+        : "No item percentages were found in the report. Enter each item's percentage for this period below.");
+  };
+
+  const setItemPercent = (id: string, value: string) => {
+    const percent = Math.min(100, Math.max(0, Number(value) || 0));
+    const breakdown = boqBreakdown.map((item: any) => item.id === id ? { ...item, thisPeriodPercent: percent } : item);
+    setBoqBreakdown(breakdown);
+    setCalculatedOverallPercent(overallFrom(breakdown));
   };
 
   const handleCreateAccomplishment = async () => {
@@ -87,7 +91,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
     }
     const formData = new FormData();
     formData.append('packageId', packageData.id);
-    formData.append('workDescription', accDesc || `AI Evaluated Report: ${simulatedFile?.name || 'Uploaded File'}`);
+    formData.append('workDescription', accDesc || `Progress report: ${simulatedFile?.name || 'Uploaded File'}`);
     formData.append('prevPercent', latestCumulative.toString());
     formData.append('currentPercent', calculatedOverallPercent.toString());
     formData.append('cumulativePercent', newCumulative.toString());
@@ -103,6 +107,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
 
     const res = await createAccomplishment(formData);
     if (res.success) {
+      router.refresh();
       setSuccessMsg('Accomplishment report submitted successfully.');
       setCalculatedOverallPercent(0);
       setAccDesc('');
@@ -143,6 +148,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
     });
 
     if (res.success) {
+      router.refresh();
       setSuccessMsg('Billing created successfully.');
       setBillingGross(0);
     } else {
@@ -155,6 +161,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
     setLoading(true); setError(''); setSuccessMsg('');
     const res = await approvePaymentRequest(billingId, packageData.id);
     if (res.success) {
+      router.refresh();
       setSuccessMsg('Payment request approved successfully.');
     } else {
       setError(res.error || 'Failed to approve payment request');
@@ -166,6 +173,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
     setLoading(true); setError(''); setSuccessMsg('');
     const res = await approveAccomplishment(id, packageData.id);
     if (res.success) {
+      router.refresh();
       setSuccessMsg('Accomplishment approved successfully. It is now eligible for billing.');
     } else {
       setError(res.error || 'Failed to approve accomplishment');
@@ -177,6 +185,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
     setLoading(true); setError(''); setSuccessMsg('');
     const res = await submitBillingToPM(id, packageData.id);
     if (res.success) {
+      router.refresh();
       setSuccessMsg('Billing successfully submitted to Project Manager.');
     } else {
       setError(res.error || 'Failed to submit billing');
@@ -188,6 +197,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
     setLoading(true); setError(''); setSuccessMsg('');
     const res = await endorseBillingToPD(id, packageData.id);
     if (res.success) {
+      router.refresh();
       setSuccessMsg('Billing successfully endorsed to Project Director.');
     } else {
       setError(res.error || 'Failed to endorse billing');
@@ -264,7 +274,7 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
                       disabled={isSimulatingAI || !simulatedFile || aiAnalysisDone}
                       style={{ padding: '8px 24px', backgroundColor: '#8b5cf6', color: '#fff', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: isSimulatingAI || !simulatedFile || aiAnalysisDone ? 'not-allowed' : 'pointer', opacity: isSimulatingAI || !simulatedFile || aiAnalysisDone ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
                     >
-                      {isSimulatingAI ? '🤖 Analyzing Document...' : '🤖 Evaluate with AI'}
+                      {isSimulatingAI ? 'Reading report…' : '📄 Read report'}
                     </button>
                   </div>
                 </div>
@@ -272,14 +282,14 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
                 {aiAnalysisDone && (
                   <div style={{ backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', overflow: 'hidden', marginBottom: '20px' }}>
                     <div style={{ padding: '12px 16px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#111827' }}>
-                      AI Itemized Breakdown
+                      Itemized Breakdown (this period)
                     </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
                       <thead>
                         <tr style={{ color: '#6b7280', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
                           <th style={{ padding: '12px 16px' }}>BOQ Item</th>
                           <th style={{ padding: '12px 16px' }}>Total Cost</th>
-                          <th style={{ padding: '12px 16px' }}>AI Extracted %</th>
+                          <th style={{ padding: '12px 16px' }}>This Period %</th>
                           <th style={{ padding: '12px 16px' }}>Accomplished Value</th>
                         </tr>
                       </thead>
@@ -288,7 +298,11 @@ export default function UnifiedProgressHub({ packageData }: { packageData: any }
                           <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '12px 16px', color: '#111827' }}>{item.awardedBoqItem.description}</td>
                             <td style={{ padding: '12px 16px', color: '#111827' }}>₱{(item.totalCost || 0).toLocaleString()}</td>
-                            <td style={{ padding: '12px 16px', color: '#8b5cf6', fontWeight: 'bold' }}>{item.thisPeriodPercent}%</td>
+                            <td style={{ padding: '12px 16px' }}>
+                              <input type="number" min={0} max={100} step="0.01" aria-label={`This period percent for ${item.awardedBoqItem.description}`} value={item.thisPeriodPercent}
+                                onChange={(e) => setItemPercent(item.id, e.target.value)}
+                                style={{ width: '90px', padding: '6px', borderRadius: '6px', border: '1px solid #d1d5db', color: '#111827', fontWeight: 'bold' }} /> %
+                            </td>
                             <td style={{ padding: '12px 16px', color: '#059669', fontWeight: 'bold' }}>₱{((item.totalCost || 0) * (item.thisPeriodPercent / 100)).toLocaleString()}</td>
                           </tr>
                         ))}

@@ -44,6 +44,10 @@ export default async function SubcontractingDashboard() {
   let packages = await getSubcontractPackages(activeProjectId);
   let jobOrders = await getJobOrders(activeProjectId);
   let variationOrders = await getAllSubcontractorVariationOrders(activeProjectId);
+  // Drafts and closed packages are not active (same statuses as the project's Subcontracting tab).
+  const ACTIVE_PACKAGE_STATUSES = ['APPROVED', 'AGREEMENT_ISSUED', 'JOB_ORDER_ISSUED', 'ONGOING', 'FOR_INSPECTION', 'PARTIALLY_ACCOMPLISHED'];
+  const activePackages = (packages ?? []).filter((p: any) => ACTIVE_PACKAGE_STATUSES.includes(p.status));
+  const draftPackages = (packages ?? []).filter((p: any) => p.status === 'DRAFT').length;
 
   return (
     <div className={styles.dashboardContainer} style={{ maxWidth: '1400px' }}>
@@ -58,7 +62,8 @@ export default async function SubcontractingDashboard() {
       <div className={styles.statsGrid} style={{ marginBottom: '40px' }}>
         <div className={styles.statCard}>
           <h3>Active Subcontracts</h3>
-          <div className={styles.statValue}>{packages?.length ?? 0}</div>
+          <div className={styles.statValue}>{activePackages.length}</div>
+          {draftPackages > 0 && <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{draftPackages} draft{draftPackages === 1 ? '' : 's'} not yet approved</p>}
         </div>
         <div className={styles.statCard}>
           <h3>Active Job Orders</h3>
@@ -70,7 +75,7 @@ export default async function SubcontractingDashboard() {
         </div>
         <div className={styles.statCard}>
           <h3>Total Payable</h3>
-          <div className={styles.statValue}>₱{(packages?.reduce((sum: number, p: any) => sum + (p.totalPayable || p.contractAmount || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div className={styles.statValue}>₱{(packages?.reduce((sum: number, p: any) => sum + (Number(p.totalPayable) || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
         </div>
         <div className={styles.statCard}>
           <h3>AI Flags</h3>

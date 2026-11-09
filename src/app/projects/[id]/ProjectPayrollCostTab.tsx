@@ -258,11 +258,12 @@ export default async function ProjectPayrollCostTab({ projectId }: { projectId: 
                   {p.worker?.firstName} {p.worker?.lastName}
                 </td>
                 <td style={{ padding: '16px', color: 'rgba(255,255,255,0.8)' }}>
-                  <div style={{ fontSize: '0.9rem' }}>{p.worker?.designation || 'Worker'}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>{p.worker?.workerCategory}</div>
+                  <div style={{ fontSize: '0.9rem' }}>{p.worker?.designation || p.worker?.workerCategory || 'Worker'}</div>
+                  {p.worker?.designation && p.worker?.workerCategory && p.worker.workerCategory !== p.worker.designation && <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>{p.worker.workerCategory}</div>}
                 </td>
                 <td style={{ padding: '16px', color: 'rgba(255,255,255,0.7)' }}>
-                  {p.payrollPeriod?.periodName || 'Custom Period'}
+                  {/* PayrollPeriod has no name field; describe it from its month, half and dates. */}
+                  {p.payrollPeriod ? `${p.payrollPeriod.month}/${p.payrollPeriod.year} · ${String(p.payrollPeriod.periodType || '').replace(/_/g, ' ').toLowerCase()} (${new Date(p.payrollPeriod.startDate).toLocaleDateString()} – ${new Date(p.payrollPeriod.endDate).toLocaleDateString()})` : '—'}
                 </td>
                 <td style={{ padding: '16px', textAlign: 'center', color: 'rgba(255,255,255,0.9)' }}>
                   {((p.regularHours || 0) + (p.overtimeHours || 0)).toFixed(1)}

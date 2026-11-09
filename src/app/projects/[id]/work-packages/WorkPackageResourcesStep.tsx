@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import SideDrawer from '@/components/ui/SideDrawer';
 import WorkPackageDetailsPanel from './WorkPackageDetailsPanel';
+import BulkDupaUpload from './BulkDupaUpload';
 import { packageAllowanceStatus } from '@/lib/scheduling/wps-overview';
 import type { ModuleSchedule } from './module-types';
 import styles from '../planning/planning.module.css';
@@ -60,6 +61,14 @@ export default function WorkPackageResourcesStep({ projectId, schedule, members,
   const boqValue = rows.reduce((sum, row) => sum + row.value, 0);
   const allowance = rows.reduce((sum, row) => sum + row.allowance, 0);
   const dupaCount = rows.filter((row) => row.dupa !== 'none').length;
+  // DUPA vs BOQ (minutes 2026-11-09: the DUPAs should add up to the BOQ amount). Uses each package's latest upload.
+  const uploads = schedule.details.breakdownUploads ?? [];
+  const latestDupa = rows.flatMap((row) => {
+    const own = uploads.filter((upload) => upload.activityId === row.id).sort((a, b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)))[0];
+    return own ? [{ value: row.value, total: own.rows.reduce((sum, line) => sum + Number(line.amount || 0), 0) }] : [];
+  });
+  const dupaTotal = latestDupa.reduce((sum, item) => sum + item.total, 0);
+  const dupaBoqValue = latestDupa.reduce((sum, item) => sum + item.value, 0);
   const open = rows.find((row) => row.id === openId);
   const openActivity = schedule.activities.find((activity) => activity.id === openId);
 
@@ -94,7 +103,8 @@ export default function WorkPackageResourcesStep({ projectId, schedule, members,
     ? <span className={own.done}>{row.dupa === 'applied' ? '✓ DUPA applied' : '✓ Confirmed'}</span>
     : row.standing === 'review' ? <span className={own.todo}>Suggested · check and confirm</span>
     : row.standing === 'over' ? <span className={own.bad}>Above BOQ value</span>
-    : <span className={own.todo}>No allowances yet</span>;
+    // A package with some lines (e.g. a DUPA without equipment) is told what is missing, not "No allowances yet".
+    : <span className={own.todo}>{row.lines ? `No ${row.split.filter((item) => !item.present).map((item) => KIND_LABEL[item.kind].toLowerCase()).join(' or ')} lines` : 'No allowances yet'}</span>;
 
   return <>
     <p className={own.statusLine} role="status">
@@ -121,6 +131,12 @@ export default function WorkPackageResourcesStep({ projectId, schedule, members,
       <p className={styles.muted}>Each amount below is a suggested split of the package’s BOQ value. If they look right, confirm them. You can change any package’s lines, or upload its DUPA, at any time.</p>
       <div className={styles.actions} style={{ marginTop: 14 }}><button className={styles.button} type="button" disabled={busy} onClick={() => void post('confirm-resources', { activityIds: toConfirm.map((row) => row.id) }, `Allowances confirmed for ${toConfirm.length} ${toConfirm.length === 1 ? 'package' : 'packages'}.`)}>{busy ? 'Working…' : `Confirm all ${toConfirm.length} ${toConfirm.length === 1 ? 'package' : 'packages'}`}</button></div>
     </section>}
+
+    {dupaCount > 0 && <p className={styles.muted} role="note" style={{ marginBottom: 16, color: Math.abs(dupaTotal - dupaBoqValue) > dupaBoqValue * 0.05 ? '#fcd34d' : undefined }}>
+      DUPA total {money(dupaTotal)} vs the BOQ value of those {dupaCount} {dupaCount === 1 ? 'package' : 'packages'} {money(dupaBoqValue)}{dupaBoqValue > 0 ? ` (${(dupaTotal / dupaBoqValue * 100).toFixed(1)}%)` : ''}.{dupaCount < rows.length ? ` ${rows.length - dupaCount} ${rows.length - dupaCount === 1 ? 'package has' : 'packages have'} no DUPA; the whole BOQ is ${money(boqValue)}.` : ''}
+    </p>}
+
+    {canEdit && rows.length > 0 && <BulkDupaUpload projectId={projectId} scheduleId={schedule.id} rowVersion={schedule.rowVersion} packages={rows.map((row) => ({ id: row.id, code: row.code, name: row.name, value: row.value }))} onSaved={onSaved} onOpenDupa={onOpenDupa} />}
 
     {over.length > 0 && <p className={styles.error} role="note" style={{ marginBottom: 16 }}>{over.length} {over.length === 1 ? 'package has' : 'packages have'} allowances above the BOQ value ({over.map((row) => row.code || row.name).join(', ')}). Open its lines and lower them before the plan can be approved.</p>}
 

@@ -476,4 +476,22 @@ describe('BOQ workspace workbook parser', () => {
     });
     expect(analysis.errors).toContainEqual(expect.objectContaining({ field: 'laborUnitCost', message: expect.stringContaining('different columns') }));
   });
+
+  it('treats hyphenated "Sub-total <section>" rows as totals and flags a stated rate that disagrees with the amount', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('BOQ');
+    addHeader(sheet);
+    sheet.addRow([null, 'A. CONCRETE WORKS']);
+    sheet.addRow(['A.1', 'Concrete footing', 'cu.m', 10, 100, 1000]);
+    sheet.addRow(['A.2', 'Painting', 'sq.m', 250, 185, 47000]);
+    sheet.addRow(['A.3', 'Signage', null, 1, 500, 500]);
+    sheet.addRow([null, 'Sub-total A. CONCRETE WORKS', null, null, null, { formula: 'SUM(F3:F5)', result: 48500 }]);
+    sheet.addRow([null, 'GRAND TOTAL', null, null, null, 48500]);
+    const result = await analyzeBOQWorkbook({ buffer: await workbookBuffer(workbook), fileName: 'hyphenated-subtotal.xlsx' });
+    expect(result.itemCount).toBe(3);
+    expect(result.total).toBe('48500.00');
+    expect(result.preview.map(item => item.description)).not.toContain('Sub-total A. CONCRETE WORKS');
+    expect(result.warnings).toContainEqual(expect.objectContaining({ row: 4, field: 'unitCost', message: expect.stringContaining('does not equal the stated amount 47000') }));
+    expect(result.warnings).toContainEqual(expect.objectContaining({ row: 5, field: 'unit', message: expect.stringContaining('assumed to be "lot"') }));
+  });
 });

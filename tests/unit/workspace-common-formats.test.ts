@@ -15,6 +15,10 @@ jest.mock('xlsx', () => {
 });
 jest.mock('@/lib/boq/workspace-upload-ai', () => ({ askUploadHelper: jest.fn() }));
 
+// The project name / contract value check (operation 'upload_project_metadata') may also call the helper when
+// the file does not state them; these tests are about column mapping and values, so they count only those calls.
+const readingCalls = () => (askUploadHelper as jest.Mock).mock.calls.filter(call => call[0]?.name !== 'upload_project_metadata');
+
 const context = 'boq:format-review:new';
 const reading = documentReadingSchema.parse({
   projectName: 'Format Review Project', contractAmount: 48,
@@ -43,7 +47,7 @@ describe('common BOQ source formats', () => {
     expect(parsed.analysis.total).toBe('49.00');
     expect(parsed.items[0]).toMatchObject({ itemCode: 'A1', description: 'Concrete, 25 MPa', unit: 'm3', amount: 49 });
     expect(parsed.analysis.readingMethod).toBe('builtin');
-    expect(askUploadHelper).not.toHaveBeenCalled();
+    expect(readingCalls()).toHaveLength(0);
   });
 
   it('converts an actual legacy XLS workbook without evaluating formulas', async () => {
@@ -149,19 +153,19 @@ describe('common BOQ source formats', () => {
     expect(parsed.analysis.fileName).toBe('actual.tsv');
     expect(parsed.analysis.fileHash).toBe(createHash('sha256').update(source).digest('hex'));
     expect(parsed.analysis.total).toBe('48.00');
-    expect(askUploadHelper).not.toHaveBeenCalled();
+    expect(readingCalls()).toHaveLength(0);
   });
 
   it('rejects a corrupt legacy workbook instead of handing it to AI', async () => {
     await expect(parseWorkspaceWorkbook({ buffer: Buffer.from('not a workbook'), fileName: 'broken.xls', documentContext: context }))
       .rejects.toBeInstanceOf(WorkspaceError);
-    expect(askUploadHelper).not.toHaveBeenCalled();
+    expect(readingCalls()).toHaveLength(0);
   });
 
   it('extracts plain UTF-8 text with the helper and verifies the signed reading on confirm reread', async () => {
     const source = Buffer.from('Project: Format Review Project\nA1 Test concrete bag quantity 2 amount 48');
     const analyzed = await parseWorkspaceWorkbook({ buffer: source, fileName: 'schedule.txt', documentContext: context });
-    expect(askUploadHelper).toHaveBeenCalledTimes(1);
+    expect(readingCalls()).toHaveLength(1);
     expect(analyzed.analysis.fileHash).toBe(createHash('sha256').update(source).digest('hex'));
     expect(analyzed.analysis.documentToken).toBeTruthy();
     expect(analyzed.analysis.documentKind).toBe('txt');
@@ -171,14 +175,14 @@ describe('common BOQ source formats', () => {
       mapping: analyzed.analysis.mapping, selectedSheet: analyzed.analysis.selectedSheet,
     });
     expect(confirmed.analysis.total).toBe('48.00');
-    expect(askUploadHelper).toHaveBeenCalledTimes(1);
+    expect(readingCalls()).toHaveLength(1);
   });
 
   it('sends a validated actual PNG to Responses vision and reuses its signed reading', async () => {
     const source = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#ffffff' } }).png().toBuffer();
     const analyzed = await parseWorkspaceWorkbook({ buffer: source, fileName: 'scan.png', documentContext: context });
-    expect(askUploadHelper).toHaveBeenCalledTimes(1);
-    const call = (askUploadHelper as jest.Mock).mock.calls[0][0];
+    expect(readingCalls()).toHaveLength(1);
+    const call = readingCalls()[0][0];
     expect(call.content).toContainEqual(expect.objectContaining({
       type: 'input_image', image_url: expect.stringMatching(/^data:image\/png;base64,/), detail: 'high',
     }));
@@ -189,12 +193,12 @@ describe('common BOQ source formats', () => {
       buffer: source, fileName: 'scan.png', documentContext: context, documentToken: analyzed.analysis.documentToken,
     });
     expect(confirmed.analysis.total).toBe('48.00');
-    expect(askUploadHelper).toHaveBeenCalledTimes(1);
+    expect(readingCalls()).toHaveLength(1);
   });
 
   it('rejects an invalid image before invoking the helper', async () => {
     await expect(parseWorkspaceWorkbook({ buffer: Buffer.from('not png'), fileName: 'scan.png', documentContext: context }))
       .rejects.toThrow(/damaged or cannot be decoded/i);
-    expect(askUploadHelper).not.toHaveBeenCalled();
+    expect(readingCalls()).toHaveLength(0);
   });
 });

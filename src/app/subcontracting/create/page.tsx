@@ -10,7 +10,7 @@ export default async function CreateSubcontractPage() {
       select: { id: true, name: true, contractNumber: true }
     }),
     prisma.subcontractor.findMany({
-      select: { id: true, name: true, /* tradeCategory removed */ }
+      select: { id: true, name: true, specialization: true }
     })
   ]);
 

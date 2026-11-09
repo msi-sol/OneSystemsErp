@@ -268,19 +268,25 @@ export async function generateProjectProgressBilling(
       const totalPreviousBilling = pastBillings.reduce((sum, b) => sum + (b.currentBillingAmount || 0), 0);
 
       // Use the project's configured rates as-is: a deliberate 0% must stay 0% (previously `|| 10` / `|| 2`).
+      // Every amount is rounded to centavos; unrounded values showed as e.g. ₱22,765.681 in Collections and
+      // pre-filled a payment that could never clear the balance exactly.
+      const cents = (value: number) => Math.round(value * 100) / 100;
       const vatRate = (project.vatRate ?? 12) / 100;
       const vatExclusiveBase = project.contractAmountVATInclusive ? gross / (1 + vatRate) : gross;
-      const vat = project.contractAmountVATInclusive ? gross - vatExclusiveBase : gross * vatRate;
-      const retention = gross * ((project.retentionPercentage ?? 0) / 100);
+      const vat = cents(project.contractAmountVATInclusive ? gross - vatExclusiveBase : gross * vatRate);
+      const retention = cents(gross * ((project.retentionPercentage ?? 0) / 100));
       // EWT is withheld on the VAT-exclusive amount.
-      const withholdingTax = vatExclusiveBase * ((project.withholdingTaxPercentage ?? 0) / 100);
+      const withholdingTax = cents(vatExclusiveBase * ((project.withholdingTaxPercentage ?? 0) / 100));
       const mobilizationAdvanceAmount = project.mobilizationAdvanceAmount || 0;
-      const mobilizationAdvanceRecoupment = project.contractAmount > 0
+      const mobilizationAdvanceRecoupment = cents(project.contractAmount > 0
         ? Math.min((gross / project.contractAmount) * mobilizationAdvanceAmount, mobilizationAdvanceAmount)
-        : 0;
+        : 0);
       // A VAT-exclusive contract bills VAT on top of the gross.
       const billedAmount = project.contractAmountVATInclusive ? gross : gross + vat;
-      const netAmountDue = billedAmount - retention - withholdingTax - mobilizationAdvanceRecoupment;
+      const netAmountDue = cents(billedAmount - retention - withholdingTax - mobilizationAdvanceRecoupment);
+      // The revised contract includes approved variation orders (as on the project summary).
+      const approvedVOs = await tx.variationOrder.findMany({ where: { projectId, currentStatus: 'APPROVED' }, select: { additionalAmount: true, deductiveAmount: true } });
+      const revisedContractAmount = project.contractAmount + approvedVOs.reduce((sum, vo) => sum + (vo.additionalAmount || 0) - (vo.deductiveAmount || 0), 0);
 
       const dates = accomplishments.map((a) => a.accomplishmentDate.getTime());
       const sequence = pastBillings.length + 1;
@@ -294,11 +300,11 @@ export async function generateProjectProgressBilling(
           billingDate: new Date(),
           billingType: 'PROGRESS',
           contractAmount: project.contractAmount,
-          revisedContractAmount: project.contractAmount,
+          revisedContractAmount,
           totalPreviousBilling,
           currentBillingAmount: gross,
           totalBillingToDate: totalPreviousBilling + gross,
-          balanceContractAmount: project.contractAmount - (totalPreviousBilling + gross),
+          balanceContractAmount: revisedContractAmount - (totalPreviousBilling + gross),
           status: 'SUBMITTED',
           preparedById: actor.id,
           projectId,

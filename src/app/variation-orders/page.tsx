@@ -30,7 +30,8 @@ export default function VariationOrderDashboard() {
   };
 
   const totalVOs = vos.length;
-  const pendingVOs = vos.filter(v => v.currentStatus !== 'APPROVED' && v.currentStatus !== 'REJECTED').length;
+  // Drafts and VOs returned for revision are not awaiting approval.
+  const pendingVOs = vos.filter(v => !['APPROVED', 'REJECTED', 'DRAFT', 'FOR_REVISION'].includes(v.currentStatus)).length;
   const highRiskVOs = vos.filter(v => v.aiRiskRating === 'HIGH' || v.aiRiskRating === 'CRITICAL').length;
   const approvedVOs = vos.filter(v => v.currentStatus === 'APPROVED').length;
 

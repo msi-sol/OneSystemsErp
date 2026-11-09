@@ -5,6 +5,7 @@ import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
+import { backendErrorMessage } from '@/lib/backend-error';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies();
@@ -32,7 +33,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
       const body = JSON.parse(errorText);
       if (body && typeof body === 'object' && typeof body.error === 'string') return { ...body, success: false };
     } catch {}
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    throw new Error(backendErrorMessage(res.status, errorText));
   }
   return res.json();
 }

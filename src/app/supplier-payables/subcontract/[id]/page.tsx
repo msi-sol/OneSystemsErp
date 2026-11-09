@@ -6,6 +6,7 @@ import Link from 'next/link';
 import SubcontractPaymentForm from './SubcontractPaymentForm';
 import styles from '../../../projects/page.module.css';
 import { getUserPermissions } from '@/lib/permissions';
+import { subcontractorTrade } from '@/lib/subcontracting/subcontractor-trade';
 
 export default async function SubcontractPayableDetailsPage({
   params,
@@ -41,6 +42,10 @@ export default async function SubcontractPayableDetailsPage({
   });
 
   if (!billing) return notFound();
+  // Endorsed / released payment details are kept in supportingDocs (pendingPayment / payment).
+  const docs = (billing.supportingDocs && typeof billing.supportingDocs === 'object' && !Array.isArray(billing.supportingDocs) ? billing.supportingDocs : {}) as Record<string, any>;
+  const paymentInfo = docs.pendingPayment || docs.payment || null;
+  const paymentView = { ...billing, endorsedForPayment: !!docs.pendingPayment, paymentMethod: paymentInfo?.method ?? null, paymentRef: paymentInfo?.reference ?? null, paidAt: paymentInfo?.date ?? null };
 
   const isJobOrder = !!billing.jobOrderId;
   const refNo = isJobOrder
@@ -72,7 +77,7 @@ export default async function SubcontractPayableDetailsPage({
             <p style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '10px 0', color: 'var(--text-primary)' }}>
               {billing.subcontractor?.name || 'Unknown Subcontractor'}
             </p>
-            {(billing.subcontractor as any)?.tradeCategory && <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}>Category: {(billing.subcontractor as any).tradeCategory}</p>}
+            {subcontractorTrade(billing.subcontractor as any) && <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}>Category: {subcontractorTrade(billing.subcontractor as any)}</p>}
             {(billing.subcontractor as any)?.vatStatus && <p style={{ margin: '5px 0', color: 'var(--text-secondary)' }}>VAT Status: {(billing.subcontractor as any).vatStatus}</p>}
           </div>
 
@@ -125,7 +130,7 @@ export default async function SubcontractPayableDetailsPage({
 
         {/* Right Side: Form */}
         <div>
-          <SubcontractPaymentForm billing={billing} userRole={userRole} canIssue={canIssue} />
+          <SubcontractPaymentForm billing={paymentView} userRole={userRole} canIssue={canIssue} />
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { uploadToS3 as put } from '@/lib/s3';
 import { prisma } from '@/lib/prisma';
+import { backendErrorMessage } from '@/lib/backend-error';
 
 const PDFParse = require('pdf-parse');
 const API_ROUTE_PREFIX = '/api/progressActions'; // The agreed-upon route name for the API
@@ -34,7 +35,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    throw new Error(backendErrorMessage(res.status, errorText));
   }
   return res.json();
 }

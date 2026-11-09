@@ -4,6 +4,7 @@ import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
+import { backendErrorMessage } from '@/lib/backend-error';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies();
@@ -28,7 +29,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     if (res.status === 400 && errorText.includes('AI Blocked')) {
       return JSON.parse(errorText); // Pass the validation block to frontend (body already read above)
     }
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    throw new Error(backendErrorMessage(res.status, errorText));
   }
   return res.json();
 }
@@ -97,4 +98,19 @@ export async function logDirectExpense(data: {
 
   revalidatePath('/expenses');
   return result.id;
+}
+
+/** Approve or reject a logged direct expense; approval posts it to the project's actual cost. */
+export async function reviewDirectExpense(expenseId: string, decision: 'APPROVE' | 'REJECT', remarks?: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await fetchWithAuth(`/api/finance/expense/${encodeURIComponent(expenseId)}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, remarks }),
+    });
+    revalidatePath('/expenses');
+    revalidatePath(`/expenses/${expenseId}`);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'The expense could not be reviewed.' };
+  }
 }

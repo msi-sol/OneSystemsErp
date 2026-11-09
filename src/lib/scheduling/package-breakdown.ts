@@ -11,6 +11,8 @@ export type PackageBreakdownUpload = {
   appliedAt: string | null; appliedById: string | null; resourceIds: string[];
   categories: Record<string, BreakdownKind>; reason: string | null;
   replacedResources?: PlanResource[];
+  /** Source rows left out when the DUPA was applied (e.g. removed after an AI Check suggestion). */
+  excludedRows?: string[];
 };
 
 export class PackageBreakdownError extends Error {

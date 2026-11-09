@@ -21,7 +21,8 @@ export default async function ReceivePaymentPage({ params }: { params: Promise<{
 
   const netAmountDue = billing.deductions[0]?.netAmountDue || billing.currentBillingAmount;
   const currentTotalPaid = billing.payments.reduce((sum, p) => sum + p.amountPaid, 0);
-  const balance = netAmountDue - currentTotalPaid;
+  // Rounded to centavos so the pre-filled payment clears the balance exactly (older billings stored e.g. 22,765.681).
+  const balance = Math.round((netAmountDue - currentTotalPaid) * 100) / 100;
 
   if (balance <= 0) {
     return (

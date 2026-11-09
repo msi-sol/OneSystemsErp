@@ -95,7 +95,7 @@ export default function AccomplishmentForm({ projectId, boqItems }: { projectId:
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Code</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Section / Item</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Qty</th>
@@ -108,12 +108,16 @@ export default function AccomplishmentForm({ projectId, boqItems }: { projectId:
             {boqItems.map((item) => {
               const claim = claims[item.id] || 0;
               const newTotal = item.previousQuantity + claim;
-              const newPercentage = ((newTotal / item.contractQuantity) * 100).toFixed(2);
+              // A zero-quantity reference line has no percentage (it showed Infinity% / NaN%).
+              const newPercentage = item.contractQuantity > 0 ? ((newTotal / item.contractQuantity) * 100).toFixed(2) : '0.00';
               const isOver = newTotal > item.contractQuantity;
 
               return (
                 <tr key={item.id} className={isOver ? "bg-red-50" : ""}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.itemCode}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900 max-w-[14rem]">
+                    <span className="block text-xs text-gray-500">{item.section}</span>
+                    {item.itemCode && <span className="font-medium">{item.itemCode}</span>}
+                  </td>
                   <td className="px-6 py-4 text-sm text-gray-500 truncate max-w-xs" title={item.description}>{item.description}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
                     {new Intl.NumberFormat("en-PH", { style: "decimal" }).format(item.unitCost)}

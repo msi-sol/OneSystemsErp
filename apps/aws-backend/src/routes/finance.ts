@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { requirePermission } from '../lib/permissions';
 import { validateTransactionWithAI } from '../lib/aiValidation';
 import { logAudit } from '../lib/workflow';
+import { postExpenseToCostLedger } from '../services/expense-cost-ledger';
 
 const router = Router();
 function getPbacContext(req: any) {
@@ -205,6 +206,33 @@ router.post('/expense/log', async (req, res) => {
     }
 
     res.json({ id: expense.id });
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
+// Approve or reject a logged direct expense. There was no approval step, so direct expenses stayed LOGGED and
+// never counted as project cost. Approval posts the expense to the project's actual-cost ledger.
+router.post('/expense/:id/review', async (req, res) => {
+  try {
+    const { userId, simulatedRole } = getPbacContext(req);
+    const decision = req.body?.decision;
+    if (decision !== 'APPROVE' && decision !== 'REJECT') return res.status(400).json({ error: 'Choose approve or reject.' });
+    await requirePermission(userId!, 'FINANCE', 'canApprove', simulatedRole);
+    const user = await prisma.user.findUnique({ where: { id: userId! }, select: { role: true } });
+    const role = simulatedRole || user?.role || '';
+    const result = await prisma.$transaction(async (tx) => {
+      const expense = await tx.expense.findUnique({ where: { id: req.params.id } });
+      if (!expense) return { status: 404, error: 'Expense not found.' };
+      if (!['LOGGED', 'DRAFT', 'SUBMITTED'].includes(expense.status)) return { status: 409, error: `This expense is already ${expense.status.toLowerCase()}.` };
+      if (expense.loggedById === userId && !['SUPER_ADMIN', 'ADMIN'].includes(role)) return { status: 403, error: 'Self-approval is not allowed. Another approver must review the expense you logged.' };
+      const status = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+      const moved = await tx.expense.updateMany({ where: { id: expense.id, status: expense.status }, data: { status, approvalStatus: status, approverId: userId! } });
+      if (moved.count !== 1) return { status: 409, error: 'The expense changed meanwhile. Refresh and try again.' };
+      if (status === 'APPROVED') await postExpenseToCostLedger(tx, expense, userId!, 'DIRECT_EXPENSE');
+      return { status: 200 };
+    });
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
+    await logAudit(userId!, role || 'FINANCE_OFFICER', 'FINANCE', req.params.id, decision === 'APPROVE' ? 'APPROVE_EXPENSE' : 'REJECT_EXPENSE', 'LOGGED', decision === 'APPROVE' ? 'APPROVED' : 'REJECTED', req.body?.remarks || '');
+    res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 

@@ -87,7 +87,7 @@ export default async function WorkersDirectoryPage() {
                     {worker.employmentType.replace(/_/g, ' ')}
                   </span>
                 </td>
-                <td style={{ padding: '15px' }}>{worker.designation || 'N/A'}</td>
+                <td style={{ padding: '15px' }}>{worker.designation || worker.workerCategory || 'N/A'}</td>
                 <td style={{ padding: '15px' }}>
                   <span style={{ 
                     background: worker.employmentStatus === 'ACTIVE' ? 'rgba(46, 204, 113, 0.2)' : 'rgba(231, 76, 60, 0.2)', 

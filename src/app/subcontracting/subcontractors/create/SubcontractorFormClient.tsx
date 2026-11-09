@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { createSubcontractor, updateSubcontractor } from '@/app/actions/subcontractingActions';
 import { useRouter } from 'next/navigation';
+import { subcontractorTrade } from '@/lib/subcontracting/subcontractor-trade';
 
 export default function SubcontractorFormClient({ initialData, id }: { initialData?: any, id?: string }) {
   const router = useRouter();
@@ -13,7 +14,7 @@ export default function SubcontractorFormClient({ initialData, id }: { initialDa
     name: initialData?.name || '',
     businessName: initialData?.businessName || '',
     businessType: initialData?.businessType || 'CORPORATION',
-    tradeCategory: initialData?.tradeCategory || 'General Works',
+    tradeCategory: subcontractorTrade(initialData) || initialData?.tradeCategory || 'General Works',
     address: initialData?.address || '',
     contactPerson: initialData?.contactPerson || '',
     contactNumber: initialData?.contactNumber || '',

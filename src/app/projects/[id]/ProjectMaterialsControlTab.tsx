@@ -11,11 +11,19 @@ export default async function ProjectMaterialsControlTab({ projectId }: { projec
     },
     orderBy: { createdAt: 'desc' }
   });
+  // Returned (restocked or damaged) materials; listed below the issuances.
+  const returns = await prisma.materialReturn.findMany({
+    where: { projectId },
+    include: { issuance: { select: { misNumber: true } }, items: true },
+    orderBy: { createdAt: 'desc' },
+  });
 
   const totalIssuances = issuances.length;
   const pendingIssuances = issuances.filter(i => i.status === 'PENDING').length;
-  const releasedIssuances = issuances.filter(i => i.status === 'RELEASED').length;
-  const totalItemsIssued = issuances.reduce((sum, i) => sum + (i.status === 'RELEASED' ? i.items.length : 0), 0);
+  // A released slip becomes COMPLETED once materials are returned against it; it was still released to site.
+  const wasReleased = (status: string) => status === 'RELEASED' || status === 'COMPLETED';
+  const releasedIssuances = issuances.filter(i => wasReleased(i.status)).length;
+  const totalItemsIssued = issuances.reduce((sum, i) => sum + (wasReleased(i.status) ? i.items.length : 0), 0);
 
   if (issuances.length === 0) {
     return (
@@ -126,6 +134,7 @@ export default async function ProjectMaterialsControlTab({ projectId }: { projec
       case 'DRAFT': return '#9e9e9e';
       case 'PENDING': return '#2196f3';
       case 'RELEASED': return '#4caf50';
+      case 'COMPLETED': return '#26a69a';
       case 'PARTIAL': return '#ff9800';
       case 'REJECTED': return '#f44336';
       default: return '#9e9e9e';
@@ -315,6 +324,22 @@ export default async function ProjectMaterialsControlTab({ projectId }: { projec
           </tbody>
         </table>
       </div>
+
+      {returns.length > 0 && <div style={{ marginTop: 24, background: 'rgba(10, 15, 30, 0.8)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', padding: '16px' }}>
+        <h3 style={{ margin: '0 0 12px', color: '#fff', fontSize: '1rem' }}>Material Returns (MRS) · {returns.length}</h3>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+          <thead><tr style={{ color: 'rgba(255,255,255,0.5)', textAlign: 'left', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+            <th style={{ padding: '8px' }}>MRS Number</th><th style={{ padding: '8px' }}>From issuance</th><th style={{ padding: '8px', textAlign: 'center' }}>Line items</th><th style={{ padding: '8px', textAlign: 'center' }}>Date</th><th style={{ padding: '8px', textAlign: 'center' }}>Status</th>
+          </tr></thead>
+          <tbody>{returns.map(r => <tr key={r.id} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <td style={{ padding: '8px' }}><Link href="/material-issuance" style={{ color: '#ff9800', fontWeight: 'bold', textDecoration: 'none' }}>{r.mrsNumber}</Link></td>
+            <td style={{ padding: '8px', color: 'rgba(255,255,255,0.8)' }}>{r.issuance?.misNumber}</td>
+            <td style={{ padding: '8px', textAlign: 'center', color: 'rgba(255,255,255,0.9)' }}>{r.items.length}</td>
+            <td style={{ padding: '8px', textAlign: 'center', color: 'rgba(255,255,255,0.6)' }}>{new Date(r.createdAt).toLocaleDateString()}</td>
+            <td style={{ padding: '8px', textAlign: 'center', color: getStatusColor(r.status), fontWeight: 700 }}>{r.status}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
     </div>
   );
 }

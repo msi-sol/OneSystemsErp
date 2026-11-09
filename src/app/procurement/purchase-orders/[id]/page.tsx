@@ -48,7 +48,7 @@ export default async function PurchaseOrderDetailsPage({ params }: { params: Pro
                 backgroundColor: po.status === 'APPROVED' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)',
                 color: po.status === 'APPROVED' ? '#4ade80' : '#facc15'
               }}>
-                {po.status}
+                {po.status.replaceAll("_", " ")}
               </span>
             </p>
           </div>

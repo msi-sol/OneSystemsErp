@@ -81,7 +81,7 @@ router.post('/getCompanyOverview', async (req, res) => {
           select: { netVariationAmount: true }
         },
         billings: {
-          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } },
+          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PARTIALLY_PAID', 'PAID'] } },
           select: { currentBillingAmount: true, payments: { select: { amountPaid: true } } }
         },
         expenses: {
@@ -235,7 +235,7 @@ router.post('/getProjectPortfolio', async (req, res) => {
           select: { netVariationAmount: true }
         },
         billings: {
-          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } },
+          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PARTIALLY_PAID', 'PAID'] } },
           select: { currentBillingAmount: true, payments: { select: { amountPaid: true } } }
         },
         consolidatedBoqItems: {

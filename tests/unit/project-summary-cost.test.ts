@@ -16,7 +16,7 @@ it('includes approved delivery costs in the summary without counting source expe
   (prisma.project.findUnique as jest.Mock).mockResolvedValue({
     contractAmount: 1000, variationOrders: [], billings: [],
     expenses: [{ netAmount: 10 }], subcontractBillings: [{ currentGross: 20 }],
-    projectCostLedgers: [{ netAmount: 88 }, { netAmount: 132 }],
+    projectCostLedgers: [{ netAmount: 88, costCategory: 'MATERIALS' }, { netAmount: 132, costCategory: 'MATERIALS' }], accomplishments: [],
     materialRequests: [], workers: [], awardedBoqItems: [], startDate: null, originalCompletionDate: null, revisedCompletionDate: null,
   });
   (prisma.projectBOQVersion.findFirst as jest.Mock).mockResolvedValue(null);
@@ -30,14 +30,14 @@ it('includes approved delivery costs in the summary without counting source expe
   expect(html).toContain('Balance before future costs');
   expect(html).not.toContain('Projected Profit');
   expect(prisma.project.findUnique).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({
-    projectCostLedgers: { where: { approvalStatus: 'APPROVED' }, select: { netAmount: true } },
+    projectCostLedgers: { where: { approvalStatus: 'APPROVED' }, select: { netAmount: true, costCategory: true, referenceDocumentType: true } },
   }) }));
 });
 
 it('shows the project BOQ version and latest schedule with scoped summary links', async () => {
   (prisma.project.findUnique as jest.Mock).mockResolvedValue({
     contractAmount: 1000, variationOrders: [], billings: [], expenses: [], subcontractBillings: [],
-    projectCostLedgers: [], materialRequests: [], workers: [], awardedBoqItems: [{ id: 'item-1' }, { id: 'item-2' }],
+    projectCostLedgers: [], accomplishments: [], materialRequests: [], workers: [], awardedBoqItems: [{ id: 'item-1' }, { id: 'item-2' }],
     startDate: null, originalCompletionDate: null, revisedCompletionDate: null,
   });
   (prisma.projectBOQVersion.findFirst as jest.Mock).mockResolvedValue({
@@ -66,7 +66,7 @@ it('shows the project BOQ version and latest schedule with scoped summary links'
 it('marks missing BOQ and schedule data unavailable rather than inventing zero totals or packages', async () => {
   (prisma.project.findUnique as jest.Mock).mockResolvedValue({
     contractAmount: 0, variationOrders: [], billings: [], expenses: [], subcontractBillings: [],
-    projectCostLedgers: [], materialRequests: [], workers: [], awardedBoqItems: [],
+    projectCostLedgers: [], accomplishments: [], materialRequests: [], workers: [], awardedBoqItems: [],
     startDate: null, originalCompletionDate: null, revisedCompletionDate: null,
   });
   (prisma.projectBOQVersion.findFirst as jest.Mock).mockResolvedValue(null);
@@ -85,7 +85,7 @@ it('marks missing BOQ and schedule data unavailable rather than inventing zero t
 it('shows the approved work-package plan span when no contract dates are recorded', async () => {
   (prisma.project.findUnique as jest.Mock).mockResolvedValue({
     contractAmount: 1000, variationOrders: [], billings: [], expenses: [], subcontractBillings: [],
-    projectCostLedgers: [], materialRequests: [], workers: [], awardedBoqItems: [],
+    projectCostLedgers: [], accomplishments: [], materialRequests: [], workers: [], awardedBoqItems: [],
     startDate: null, originalCompletionDate: null, revisedCompletionDate: null,
   });
   (prisma.projectBOQVersion.findFirst as jest.Mock).mockResolvedValue(null);
@@ -104,7 +104,7 @@ it('shows the approved work-package plan span when no contract dates are recorde
 it('shows a recorded zero actual cost when an approved zero-value ledger entry exists', async () => {
   (prisma.project.findUnique as jest.Mock).mockResolvedValue({
     contractAmount: 1000, variationOrders: [], billings: [], expenses: [], subcontractBillings: [],
-    projectCostLedgers: [{ netAmount: 0 }], materialRequests: [], workers: [], awardedBoqItems: [],
+    projectCostLedgers: [{ netAmount: 0, costCategory: 'MATERIALS' }], accomplishments: [], materialRequests: [], workers: [], awardedBoqItems: [],
     startDate: null, originalCompletionDate: null, revisedCompletionDate: null,
   });
   (prisma.projectBOQVersion.findFirst as jest.Mock).mockResolvedValue(null);

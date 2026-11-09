@@ -1,89 +1,49 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { uploadMasterMaterialsList } from '@/app/actions/consolidation';
+import styles from './materialsFlow.module.css';
 
+/** Secondary path: upload a ready-made materials list. It is not linked line by line to the benchmark. */
 export default function UploadMasterMaterialsButton({ projectId }: { projectId: string }) {
+  const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState('');
   const [file, setFile] = useState<File | null>(null);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
-    }
-  };
 
   const handleUpload = async () => {
     if (!file) return;
     setIsPending(true);
     setError('');
-    
     const formData = new FormData();
     formData.append('projectId', projectId);
     formData.append('materialsFile', file);
-
     try {
       await uploadMasterMaterialsList(formData);
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during upload.');
+      router.refresh();
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'The file could not be uploaded.');
     } finally {
       setIsPending(false);
     }
   };
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '20px', padding: '40px', border: '1px solid var(--glass-border)', borderRadius: '12px', background: 'rgba(0, 0, 0, 0.2)' }}>
-      <h3 style={{ marginBottom: '15px' }}>Option A: Direct Excel Upload</h3>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', maxWidth: '600px', margin: '0 auto 20px auto' }}>
-        Upload an Excel (.xlsx) file containing your materials list. Ensure it has columns like Item No, Description, Quantity, Unit, and Unit Cost.
+    <div style={{ marginTop: 12 }}>
+      <p style={{ marginBottom: 12 }}>
+        The Excel file needs columns for item no., description, quantity, unit and unit cost. An uploaded list is not linked
+        line by line to the procurement benchmark.
       </p>
-      
-      {error && <p style={{ color: '#ef4444', marginBottom: '15px' }}>{error}</p>}
-      
-      <div style={{ marginBottom: '20px' }}>
-        <input 
-          type="file" 
-          accept=".xlsx,.xls" 
-          onChange={handleFileChange}
-          style={{ display: 'none' }}
-          id="master-materials-upload"
-        />
-        <label 
-          htmlFor="master-materials-upload"
-          className="btn-secondary"
-          style={{
-            cursor: 'pointer',
-            padding: '10px 20px',
-            border: '1px solid var(--glass-border)',
-            borderRadius: '6px',
-            display: 'inline-block',
-            marginRight: '10px'
-          }}
-        >
-          {file ? `📁 ${file.name}` : '📄 Select Excel File'}
+      {error && <p role="alert" className={styles.error}>{error}</p>}
+      <div className={styles.fileRow}>
+        <label className={styles.ghost} style={{ cursor: 'pointer' }}>
+          {file ? `📄 ${file.name}` : 'Choose Excel file (.xlsx)'}
+          <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={event => setFile(event.target.files?.[0] ?? null)} />
         </label>
-
-        {file && (
-          <button 
-            onClick={handleUpload} 
-            disabled={isPending}
-            style={{
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              color: '#fff',
-              border: 'none',
-              padding: '10px 24px',
-              borderRadius: '8px',
-              fontWeight: 'bold',
-              cursor: isPending ? 'not-allowed' : 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            {isPending ? 'Uploading...' : 'Upload List'}
-          </button>
-        )}
+        <button type="button" className={styles.secondary} onClick={() => void handleUpload()} disabled={!file || isPending}>
+          {isPending ? 'Uploading…' : 'Upload list'}
+        </button>
       </div>
     </div>
   );

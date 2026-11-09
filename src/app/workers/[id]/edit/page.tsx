@@ -15,6 +15,7 @@ export default async function EditWorkerPage({ params }: { params: Promise<{ id:
 
   // Sanitize the object so it passes down well to client
   const serializedWorker = JSON.parse(JSON.stringify(worker));
+  const projects = await prisma.project.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } });
 
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto', color: '#fff' }}>
@@ -22,7 +23,7 @@ export default async function EditWorkerPage({ params }: { params: Promise<{ id:
         <h1 style={{ margin: 0, fontSize: '2rem' }}>Edit Worker / Consultant</h1>
         <p style={{ margin: '5px 0 0 0', color: 'var(--text-secondary)' }}>Update profile information and configuration.</p>
       </header>
-      <NewWorkerForm initialData={serializedWorker} />
+      <NewWorkerForm initialData={serializedWorker} projects={projects} />
     </div>
   );
 }

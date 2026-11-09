@@ -76,7 +76,7 @@ export async function getCompanyOverview(projectId?: string) {
           select: { netVariationAmount: true }
         },
         billings: {
-          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } },
+          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PARTIALLY_PAID', 'PAID'] } },
           select: { currentBillingAmount: true, payments: { select: { amountPaid: true } } }
         },
         expenses: {
@@ -228,7 +228,7 @@ export async function getProjectPortfolio() {
           select: { netVariationAmount: true }
         },
         billings: {
-          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } },
+          where: { status: { in: ['APPROVED', 'SUBMITTED', 'PARTIALLY_PAID', 'PAID'] } },
           select: { currentBillingAmount: true, payments: { select: { amountPaid: true } } }
         },
         consolidatedBoqItems: {

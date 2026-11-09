@@ -59,7 +59,7 @@ function setup(plan = makePlan()) {
     scheduleBOQAllocation: { create: jest.fn().mockResolvedValue({ id: 'allocation-copy' }) },
     scheduleDependency: { create: jest.fn() },
     baselineActivation: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
-    project: { findUnique: jest.fn().mockResolvedValue({ id: 'project-1', boqLocked: true, contractAmount: 100 }) },
+    project: { findUnique: jest.fn().mockResolvedValue({ id: 'project-1', boqLocked: true, contractAmount: 100 }), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     projectBOQVersion: { findFirst: jest.fn().mockResolvedValue({ status: 'APPROVED', checksum: testBoqChecksum }) },
     awardedBOQItem: { findMany: jest.fn().mockResolvedValue([testBoqItem]) },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
@@ -144,7 +144,8 @@ describe('work-package review and activation', () => {
       action: 'approve', reason:'Reviewed scope and budget complete.', scheduleId: 'schedule-1', expectedRowVersion: 4,
     } });
     expect(result).toMatchObject({ workflowStatus: 'ACTIVE_BASELINE', baselineCode: 'BL-001' });
-    expect(tx.baselineActivation.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ isAuthoritative: true }) }));
+    expect(tx.baselineActivation.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ isAuthoritative: true }) }));    // Approving the first baseline starts the project (PLANNING -> ACTIVE) so execution modules list it.
+    expect(tx.project.updateMany).toHaveBeenCalledWith({ where: { id: 'project-1', status: 'PLANNING' }, data: { status: 'ACTIVE' } });
   });
 
   test('PM activation refuses an open constraint without accountable owner and date', async () => {

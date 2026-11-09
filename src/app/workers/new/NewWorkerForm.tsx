@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { validateWorkerProfileWithAI, saveWorkerProfile } from '@/app/actions/workerActions';
 
-export default function NewWorkerForm({ initialData }: { initialData?: any }) {
+export default function NewWorkerForm({ initialData, projects = [] }: { initialData?: any; projects?: Array<{ id: string; name: string }> }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('BASIC_INFO');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+  // Shown on the page; alert() pop-ups are suppressed in embedded browsers, so saves looked silent.
+  const [notice, setNotice] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
   
   const [formData, setFormData] = useState({
     id: undefined as string | undefined,
@@ -20,6 +22,8 @@ export default function NewWorkerForm({ initialData }: { initialData?: any }) {
     workerCategory: 'SKILLED',
     employmentType: 'PROJECT_BASED',
     employmentStatus: 'ACTIVE',
+    // Site assignment: counted in the project's "Active Site Workers" and charged with the worker's payroll.
+    projectId: '',
     rateType: 'DAILY_RATE',
     dailyRate: 0,
     basicMonthlySalary: 0,
@@ -88,7 +92,7 @@ export default function NewWorkerForm({ initialData }: { initialData?: any }) {
       setAiValidationLogs(res.results);
       setActiveTab('AI_VALIDATION');
     } else {
-      alert("Validation failed or could not be completed.");
+      setNotice({ kind: 'error', text: 'Validation failed or could not be completed.' });
     }
   };
 
@@ -98,7 +102,7 @@ export default function NewWorkerForm({ initialData }: { initialData?: any }) {
     // Check for critical errors before saving
     const criticalLogs = aiValidationLogs.filter(log => log.severity === 'CRITICAL');
     if (criticalLogs.length > 0) {
-      alert('Cannot save: Critical errors exist. Please resolve them first.');
+      setNotice({ kind: 'error', text: 'Cannot save: critical errors exist. Resolve them first.' });
       setIsSubmitting(false);
       return;
     }
@@ -107,10 +111,10 @@ export default function NewWorkerForm({ initialData }: { initialData?: any }) {
     setIsSubmitting(false);
     
     if (res.success) {
-      alert('Worker Saved Successfully!');
-      router.push(`/workers/${res.workerId}`);
+      setNotice({ kind: 'success', text: 'Worker saved.' });
+      router.push(`/workers/${res.workerId || formData.id}`);
     } else {
-      alert('Failed to save worker: ' + res.error);
+      setNotice({ kind: 'error', text: `Failed to save worker: ${res.error || 'unknown error'}` });
     }
   };
 
@@ -251,6 +255,13 @@ export default function NewWorkerForm({ initialData }: { initialData?: any }) {
                   <option value="ACTIVE">Active</option>
                   <option value="INACTIVE">Inactive</option>
                   <option value="SUSPENDED">Suspended</option>
+                </select>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', marginBottom: '5px' }}>Assigned Project / Site</label>
+                <select name="projectId" value={formData.projectId || ''} onChange={handleInputChange} style={{ width: '100%', padding: '10px', borderRadius: '6px', background: '#333', border: '1px solid var(--glass-border)', color: '#fff' }}>
+                  <option value="">Not assigned (office / pool)</option>
+                  {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
                 </select>
               </div>
             </div>
@@ -471,6 +482,7 @@ export default function NewWorkerForm({ initialData }: { initialData?: any }) {
         >
           {isSubmitting ? 'Saving...' : 'Save Worker Profile'}
         </button>
+        {notice && <p role={notice.kind === 'error' ? 'alert' : 'status'} style={{ margin: 0, fontSize: '0.9rem', color: notice.kind === 'error' ? '#fca5a5' : '#6ee7b7' }}>{notice.text}</p>}
         <button 
           onClick={() => router.push('/workers')} 
           style={{ 

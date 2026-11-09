@@ -16,7 +16,7 @@ export default async function EditSubcontractPackagePage({ params }: { params: P
       select: { id: true, name: true, contractNumber: true }
     }),
     prisma.subcontractor.findMany({
-      select: { id: true, name: true, /* tradeCategory removed */ }
+      select: { id: true, name: true, specialization: true }
     }),
     getSubcontractPackageById(id)
   ]);

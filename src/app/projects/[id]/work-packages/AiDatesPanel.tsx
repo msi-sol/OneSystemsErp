@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import styles from '@/components/ai/AiCheckPanel.module.css';
+import AiThinking, { AI_THINKING_MESSAGES } from '@/components/ai/AiThinking';
 
 /**
- * Optional AI Check for the Dates & sequence step. It suggests a start and finish for every package and
+ * Optional AI Check for the Dates & schedule step. It suggests a start and finish for every package and
  * finish-to-start links; the planner edits any date, lag or choice, then saves the ticked ones in one change
  * (planning command "apply-plan-dates"). Nothing changes until Save.
  */
@@ -42,15 +43,8 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   const [links, setLinks] = useState<{ on: boolean; lag: string; saved: boolean }[]>([]);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  useEffect(() => {
-    if (!running) return;
-    const started = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
 
   const datesFrom = (start: string, data: Result, keep?: Record<string, Row>) => Object.fromEntries(data.packages.map((row) => {
     const first = addDays(start, row.startDay - 1);
@@ -58,7 +52,7 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   }));
 
   async function run() {
-    setBusy(true); setRunning(true); setElapsed(0); setError(''); setMessage('');
+    setBusy(true); setRunning(true); setError(''); setMessage('');
     try {
       const data = await call(`/api/projects/${projectId}/ai-check`, { scope: 'dates' }) as Result;
       const start = data.projectStart || today();
@@ -72,19 +66,33 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   // A package's dates as they would be after saving: the suggestion when ticked, otherwise its current dates.
   const effective = (id: string) => {
     const row = rows[id], current = result?.packages.find((item) => item.id === id);
-    return row?.on && !row.saved ? { start: row.start, finish: row.finish } : { start: current?.currentStart ?? (row?.saved ? row.start : null), finish: current?.currentFinish ?? (row?.saved ? row.finish : null) };
+    // Ticked or just saved: the panel's dates. Otherwise the package's dates as they were when the check ran.
+    return row && (row.saved || row.on) ? { start: row.start, finish: row.finish } : { start: current?.currentStart ?? null, finish: current?.currentFinish ?? null };
   };
   const chosenRows = result ? result.packages.filter((row) => rows[row.id]?.on && !rows[row.id]?.saved) : [];
   const chosenLinks = result ? result.sequence.map((link, index) => ({ link, index })).filter(({ index }) => links[index]?.on && !links[index]?.saved) : [];
   const invalidRow = chosenRows.find((row) => !rows[row.id].start || !rows[row.id].finish || rows[row.id].finish < rows[row.id].start);
   const invalidLag = chosenLinks.find(({ index }) => !/^\d+$/.test(links[index].lag.trim()) || Number(links[index].lag) > 36500);
+  // Same rule as the plan's readiness check: a finish-to-start link needs the successor to start on or after the
+  // predecessor's finish + lag. Checked for every link that is (or will be) recorded: ticked ones and saved ones.
+  const lagOf = (index: number) => { const value = Number(links[index]?.lag || 0); return Number.isFinite(value) ? value : 0; };
+  const clashes = (index: number) => {
+    const link = result?.sequence[index], state = links[index];
+    if (!link || !state || (!state.on && !state.saved)) return false;
+    const before = effective(link.before.id), after = effective(link.after.id);
+    return !!(before.finish && after.start && after.start < addDays(before.finish, lagOf(index)));
+  };
+  // Only clashes that this save would create (a ticked link, or ticked dates on either end) block saving; a clash
+  // between dates and links that are already saved is shown but must be fixed from the package.
+  const pending = (id: string) => !!rows[id]?.on && !rows[id]?.saved;
+  const clashingLinks = result ? result.sequence.map((link, index) => ({ link, index })).filter(({ link, index }) => clashes(index) && ((links[index]?.on && !links[index]?.saved) || pending(link.before.id) || pending(link.after.id))) : [];
   const planDates = result ? result.packages.map((row) => effective(row.id)).filter((row) => row.start && row.finish) as { start: string; finish: string }[] : [];
   const planStart = planDates.length ? planDates.map((row) => row.start).sort()[0] : null;
   const finishes = planDates.map((row) => row.finish).sort();
   const planFinish = finishes.length ? finishes[finishes.length - 1] : null;
 
   async function save() {
-    if (!result || (!chosenRows.length && !chosenLinks.length) || invalidRow || invalidLag) return;
+    if (!result || (!chosenRows.length && !chosenLinks.length) || invalidRow || invalidLag || clashingLinks.length) return;
     setBusy(true); setError(''); setMessage('');
     try {
       const data = await call(`/api/projects/${projectId}/work-packages`, {
@@ -101,6 +109,40 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   }
 
   const setRow = (id: string, patch: Partial<Row>) => setRows((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
+  /** Moves each clashing successor's start (keeping its length) to its predecessor's finish + lag, then repeats so
+   *  chains settle. A successor whose dates were already saved is left alone: change it from its package. */
+  function shiftToFollowLinks() {
+    if (!result) return;
+    const next = { ...rows };
+    const current = (id: string) => {
+      const row = next[id], saved = result.packages.find((item) => item.id === id);
+      return row && (row.saved || row.on) ? { start: row.start, finish: row.finish } : { start: saved?.currentStart ?? null, finish: saved?.currentFinish ?? null };
+    };
+    let moved = 0, blocked = 0;
+    for (let pass = 0; pass < result.packages.length + 1; pass++) {
+      let changed = false;
+      result.sequence.forEach((link, index) => {
+        const state = links[index];
+        if (!state || (!state.on && !state.saved)) return;
+        const before = current(link.before.id), after = current(link.after.id), row = next[link.after.id];
+        if (!before.finish || !after.start) return;
+        const earliest = addDays(before.finish, lagOf(index));
+        if (after.start >= earliest) return;
+        if (!row) { if (pass === 0) blocked++; return; }
+        const length = after.finish ? daysBetween(after.start, after.finish) : 1;
+        // A package saved earlier from this panel becomes ticked again, so the moved dates are saved next.
+        next[link.after.id] = { ...row, start: earliest, finish: addDays(earliest, Math.max(1, length) - 1), on: true, saved: false };
+        moved++; changed = true;
+      });
+      if (!changed) break;
+    }
+    setRows(next);
+    setMessage(moved ? `Moved ${moved} start ${moved === 1 ? 'date' : 'dates'} so every ticked link is respected. Package lengths are unchanged. Save to record the moved dates.` : blocked ? 'A clashing package is not in this check; open it to change its dates, or untick the link.' : 'All ticked links are already respected.');
+  }
+  const tickAll = (on: boolean) => {
+    setRows((current) => Object.fromEntries(Object.entries(current).map(([id, row]) => [id, row.saved ? row : { ...row, on }])));
+    setLinks((current) => current.map((row) => row.saved ? row : { ...row, on }));
+  };
   const setStart = (id: string, start: string) => {
     // Moving the start keeps the package's length, so editing a date never silently shortens the work.
     const row = rows[id];
@@ -111,12 +153,12 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   return <section className={styles.panel} aria-labelledby="ai-check-dates">
     <div className={styles.header}>
       <div>
-        <h3 id="ai-check-dates" className={styles.title}>AI Check · dates &amp; sequence <span className={styles.badge}>Optional</span></h3>
+        <h3 id="ai-check-dates" className={styles.title}>AI Check · dates &amp; schedule <span className={styles.badge}>Optional</span></h3>
         <p className={styles.muted}>Have AI propose a start and finish for every package and which packages must finish before others start. Change any date or link, tick what you want, then save. Nothing changes until you save.</p>
       </div>
-      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? `Checking… ${elapsed}s` : result ? 'Run again' : 'Suggest dates'}</button>
+      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Suggest dates'}</button>
     </div>
-    {running && <p className={styles.muted} role="status" style={{ marginTop: 10 }}>{elapsed < 90 ? 'The AI is reading your packages, values and assumptions. This usually takes 30–60 seconds. You can keep working on other steps.' : 'Still working: the AI service is slower than usual. It stops by itself after about 4 minutes, and nothing is changed either way.'}</p>}
+    {running && <AiThinking messages={AI_THINKING_MESSAGES.dates} note="This usually takes 30–60 seconds. You can keep working on other steps." />}
     {error && <div className={styles.error} role="alert">{error}</div>}
     {message && <div className={styles.success} role="status">{message}</div>}
 
@@ -162,15 +204,14 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
         {!result.sequence.length && <p className={styles.muted}>No new links suggested.</p>}
         {result.sequence.length > 0 && <ul className={styles.list}>{result.sequence.map((link, index) => {
           const state = links[index];
-          const before = effective(link.before.id), after = effective(link.after.id);
-          const lag = Number(state?.lag || 0);
-          const clash = state?.on && before.finish && after.start && after.start <= addDays(before.finish, Number.isFinite(lag) ? lag : 0);
+          const lag = lagOf(index);
+          const clash = clashes(index);
           return <li key={index} className={styles.insight}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
               {state?.saved ? <span className={styles.groupMeta}>Saved</span> : <input type="checkbox" aria-label={`Add link ${link.before.label} before ${link.after.label}`} checked={!!state?.on} disabled={!editable} onChange={(event) => setLinks((current) => current.map((row, i) => i === index ? { ...row, on: event.target.checked } : row))} />}
               <span style={{ flex: '1 1 260px' }}><span className={styles.insightTitle}>{link.before.label} → {link.after.label}</span>
                 <span className={styles.muted} style={{ display: 'block' }}>Finish before start · {link.reason}</span>
-                {clash && <span style={{ display: 'block', color: '#f1c782', fontSize: '.8rem' }}>With these dates, {link.after.label} starts before {link.before.label} finishes{lag ? ` + ${lag} days` : ''}. Adjust a date or untick the link.</span>}</span>
+                {clash && <span style={{ display: 'block', color: '#f1c782', fontSize: '.8rem' }}>With these dates, {link.after.label} starts before {link.before.label} finishes{lag ? ` + ${lag} days` : ''}. Use “Shift starts to follow links”, adjust a date, or untick the link.</span>}</span>
               <label className={styles.groupMeta} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Lag (days)
                 <input type="number" min={0} className={styles.input} style={{ width: 80 }} value={state?.lag ?? '0'} disabled={!editable || state?.saved} onChange={(event) => setLinks((current) => current.map((row, i) => i === index ? { ...row, lag: event.target.value } : row))} />
               </label>
@@ -180,11 +221,15 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
       </div>
 
       {editable ? <div className={styles.actions}>
-        <button type="button" className={styles.primary} disabled={busy || (!chosenRows.length && !chosenLinks.length) || !!invalidRow || !!invalidLag} onClick={() => void save()}>
+        <button type="button" className={styles.primary} disabled={busy || (!chosenRows.length && !chosenLinks.length) || !!invalidRow || !!invalidLag || clashingLinks.length > 0} onClick={() => void save()}>
           {busy && !running ? 'Saving…' : `Save ${chosenRows.length} ${chosenRows.length === 1 ? 'date' : 'dates'}${chosenLinks.length ? ` and ${chosenLinks.length} ${chosenLinks.length === 1 ? 'link' : 'links'}` : ''}`}
         </button>
+        <button type="button" className={styles.secondary} disabled={busy} onClick={() => tickAll(true)}>Tick all</button>
+        <button type="button" className={styles.ghost} disabled={busy} onClick={() => tickAll(false)}>Untick all</button>
+        {result.sequence.some((_, index) => clashes(index)) && <button type="button" className={styles.secondary} disabled={busy} onClick={shiftToFollowLinks}>Shift starts to follow links</button>}
         {invalidRow && <span className={styles.muted}>Fix the dates of {invalidRow.label} first.</span>}
         {invalidLag && <span className={styles.muted}>Lag must be a whole number of days.</span>}
+        {!invalidRow && !invalidLag && clashingLinks.length > 0 && <span className={styles.muted}>{clashingLinks.length} ticked {clashingLinks.length === 1 ? 'link clashes' : 'links clash'} with the dates. Shift the starts, change a date, or untick the link before saving.</span>}
       </div> : <p className={styles.muted}>{canEdit ? 'This plan is locked in its current status, so the suggestions are for information only.' : 'You can view these suggestions; saving needs permission to edit the plan.'}</p>}
       <p className={styles.muted} style={{ marginTop: 14 }}>Suggestions by {result.model}. AI can be wrong: review before saving. Saved dates and links are recorded in the history like any other edit.</p>
     </>}

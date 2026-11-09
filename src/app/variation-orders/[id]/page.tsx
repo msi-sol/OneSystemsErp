@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import AiThinking from '@/components/ai/AiThinking';
 import { 
   ArrowLeft, CheckSquare, Edit, DollarSign, UploadCloud, 
   Send, Bot, Settings, Briefcase, Plus, Search, Trash2, AlertOctagon,
@@ -33,6 +34,7 @@ export default function VariationOrderDetailPage() {
   const [vo, setVo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [aiChecking, setAiChecking] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [showApprovalHistory, setShowApprovalHistory] = useState(false);
 
@@ -52,7 +54,7 @@ export default function VariationOrderDetailPage() {
   };
 
   const handleRunAIPreCheck = async () => {
-    setActionLoading(true);
+    setActionLoading(true); setAiChecking(true);
     try {
       const res = await preCheckVariationOrder(voId, 'SYSTEM');
       toast.success('AI Pre-check complete!');
@@ -60,7 +62,7 @@ export default function VariationOrderDetailPage() {
     } catch (e: any) {
       toast.error(e.message);
     } finally {
-      setActionLoading(false);
+      setActionLoading(false); setAiChecking(false);
     }
   };
 
@@ -285,7 +287,7 @@ export default function VariationOrderDetailPage() {
             background: 'rgba(25,118,210,0.1)', color: '#1976D2', border: '1px solid rgba(25,118,210,0.3)'
           }}
         >
-          <Bot size={15} /> AI Pre-Check
+          <Bot size={15} /> {aiChecking ? 'Checking…' : 'AI Pre-Check'}
         </button>
 
         {vo.approvals && vo.approvals.length > 0 && (
@@ -310,7 +312,7 @@ export default function VariationOrderDetailPage() {
               <Edit size={15} /> Edit
             </button>
             <button 
-              onClick={async () => { await submitVariationOrder(voId); fetchVO(); }}
+              onClick={async () => { try { await submitVariationOrder(voId); toast.success('Variation Order submitted for review.'); } catch (e: any) { toast.error(e?.message || 'The Variation Order could not be submitted.'); } fetchVO(); }}
               disabled={actionLoading}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: '600', cursor: 'pointer', background: 'linear-gradient(135deg, #00ffa3, #00cc82)', color: '#000', border: 'none' }}
             >
@@ -344,6 +346,7 @@ export default function VariationOrderDetailPage() {
           <Trash2 size={15} /> {vo.currentStatus === 'APPROVED' ? 'Force Delete' : 'Delete'}
         </button>
       </div>
+      {aiChecking && <div style={{ margin: '-12px 0 24px' }}><AiThinking messages={['Reading the variation order', 'Checking the scope against the contract BOQ', 'Checking quantities and rates', 'Assessing cost and schedule impact', 'Preparing the pre-check result']} /></div>}
 
       {/* COLLAPSIBLE APPROVAL HISTORY */}
       {showApprovalHistory && vo.approvals && vo.approvals.length > 0 && (

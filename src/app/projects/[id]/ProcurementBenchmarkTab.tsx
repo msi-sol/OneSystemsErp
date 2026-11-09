@@ -1,23 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { uploadProcurementBenchmark, lockProcurementBenchmark, deleteProcurementBenchmark } from '@/app/actions/mutations';
 import BenchmarkAiCheck from './BenchmarkAiCheck';
+import styles from './materialsFlow.module.css';
 
+type BenchmarkItem = { id?: string; itemCode?: string | null; description: string; quantity?: number | null; unit?: string | null; unitCost?: number | null; totalCost?: number | null };
+const peso = (value: number) => `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (value: number | null | undefined) => (value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Procurement Benchmark: the internal spending limit, and the source the Master Materials List is generated from.
+ * Corrections are made here (the materials list copies these lines), so the page leads with its figures, the
+ * AI Check and one clear lock action; delete stays available but secondary.
+ */
 export default function ProcurementBenchmarkTab({
   projectId,
   isLocked,
   items,
   totalItems,
   totalAmount,
+  contractAmount = 0,
+  materialsGenerated = false,
   boqLinks = {}
 }: {
   projectId: string;
   isLocked: boolean;
-  items: Array<{ id?: string; itemCode?: string | null; description: string; quantity?: number | null; unit?: string | null; unitCost?: number | null; totalCost?: number | null }>;
+  items: BenchmarkItem[];
   totalItems: number;
   totalAmount: number;
+  /** Signed contract value, to show the benchmark as a share of it (it may be lower: it is an internal limit). */
+  contractAmount?: number;
+  /** The Master Materials List already exists (it was copied from this benchmark). */
+  materialsGenerated?: boolean;
   /** Saved benchmark-line → BOQ-item links (line id → "code · description"). */
   boqLinks?: Record<string, string>;
 }) {
@@ -27,9 +44,12 @@ export default function ProcurementBenchmarkTab({
   const [isLocking, setIsLocking] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
+  const [fileName, setFileName] = useState('');
   // Confirmation is asked on the page itself. The browser's confirm() popup is not shown in every browser (in the app's
   // built-in browser it returns "Cancel" instantly), which made Delete and Lock silently do nothing.
   const [confirming, setConfirming] = useState<'delete' | 'lock' | null>(null);
+  const [query, setQuery] = useState('');
+  const [show, setShow] = useState<'all' | 'unlinked'>('all');
 
   const handleUpload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -40,10 +60,10 @@ export default function ProcurementBenchmarkTab({
       const formData = new FormData(form);
       formData.append('projectId', projectId);
       await uploadProcurementBenchmark(formData);
-      form.reset();
+      form.reset(); setFileName('');
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : 'Failed to upload file');
+      setError(err instanceof Error && err.message ? err.message : 'The file could not be uploaded. Check that it is an Excel file and try again.');
     } finally {
       setIsUploading(false);
     }
@@ -55,13 +75,12 @@ export default function ProcurementBenchmarkTab({
       await lockProcurementBenchmark(projectId);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : 'Failed to lock benchmark');
+      setError(err instanceof Error && err.message ? err.message : 'The benchmark could not be locked.');
     } finally {
       setIsLocking(false);
     }
   };
 
-  // Shows progress and errors on the page (it used to give no feedback, and errors came as a browser alert).
   const handleDelete = async () => {
     if (isDeleting) return;
     setConfirming(null); setIsDeleting(true); setError('');
@@ -75,167 +94,142 @@ export default function ProcurementBenchmarkTab({
     }
   };
 
-  const errorBox = error && <div role="alert" style={{ color: '#fca5a5', marginBottom: '16px', padding: '10px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px' }}>{error}</div>;
+  const visible = useMemo(() => {
+    const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return items.filter(item => (show === 'all' || !(item.id && boqLinks[item.id]))
+      && words.every(word => `${item.itemCode || ''} ${item.description} ${item.unit || ''}`.toLowerCase().includes(word)));
+  }, [items, query, show, boqLinks]);
+  const visibleTotal = visible.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+
+  const errorBox = error && <div role="alert" className={styles.error}>{error}</div>;
 
   if (items.length === 0) {
     return (
-      <div style={{ padding: '40px', border: '1px solid var(--glass-border)', borderRadius: '12px', background: 'rgba(0, 0, 0, 0.2)', maxWidth: '600px', margin: '0 auto' }}>
-        <h3 style={{ marginBottom: '15px' }}>Upload Procurement Benchmark (Forecast BOQ)</h3>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '30px' }}>
-          Please upload the Excel file (.xlsx) containing the Procurement Benchmark. This file will be parsed and stored. Once locked, it can be used to generate the Master Materials List.
+      <div className={styles.empty}>
+        <h3>Upload the procurement benchmark</h3>
+        <p>
+          The benchmark is the internal spending limit for this project. It can be lower than the BOQ and contract value.
+          After you check and lock it, the Master Materials List is generated from it.
         </p>
-
         {errorBox}
-
-        <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>Benchmark Excel File</label>
-            <input
-              type="file"
-              name="benchmarkFile"
-              accept=".xlsx,.xls"
-              required
-              className="input-field"
-              style={{ padding: '10px' }}
-            />
-          </div>
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={isUploading}
-            style={{ padding: '12px', fontSize: '1rem' }}
-          >
-            {isUploading ? 'Uploading & Parsing...' : 'Upload Benchmark File'}
+        <form onSubmit={handleUpload} className={styles.fileRow}>
+          <label className={styles.ghost} style={{ cursor: 'pointer' }}>
+            {fileName ? `📄 ${fileName}` : 'Choose Excel file (.xlsx)'}
+            <input type="file" name="benchmarkFile" accept=".xlsx,.xls" required className="sr-only" onChange={event => setFileName(event.target.files?.[0]?.name || '')} />
+          </label>
+          <button type="submit" className={styles.cta} disabled={isUploading || !fileName}>
+            {isUploading ? 'Reading the file…' : 'Upload benchmark'}
           </button>
         </form>
       </div>
     );
   }
 
+  const share = contractAmount > 0 ? totalAmount / contractAmount * 100 : null;
+  const aboveContract = share !== null && totalAmount > contractAmount + 0.005;
+
   return (
     <div>
       {errorBox}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' }}>
-        <div>
-          <h3>Procurement Benchmark (Forecast BOQ)</h3>
-          <p style={{ color: 'var(--text-secondary)' }}>
-            Total Items: {totalItems} | Total Amount: ₱{totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Linked to BOQ: {linkedCount} of {totalItems}
-          </p>
+      <div className={styles.figures}>
+        <div className={styles.figure}><span className={styles.figureLabel}>Benchmark lines</span><span className={styles.figureValue}>{totalItems.toLocaleString()}</span></div>
+        <div className={styles.figure}><span className={styles.figureLabel}>Benchmark total</span><span className={styles.figureValue} title={peso(totalAmount)}>{peso(totalAmount)}</span>
+          {share !== null && <span className={`${styles.figureNote} ${aboveContract ? styles.warn : ''}`}>{aboveContract ? `Above the contract value (${share.toFixed(1)}%). Check the budget.` : `${share.toFixed(1)}% of the contract value. Lower is expected: this is an internal limit.`}</span>}
         </div>
+        <div className={styles.figure}><span className={styles.figureLabel}>Linked to a BOQ item</span><span className={styles.figureValue}>{linkedCount} of {totalItems}</span>
+          <span className={styles.figureNote}>{linkedCount === totalItems ? 'Every line is linked.' : <a href="#ai-check-benchmark" style={{ color: 'var(--accent-color)' }}>Link them with the AI Check ↓</a>}</span></div>
+        <div className={styles.figure}><span className={styles.figureLabel}>Status</span>
+          <span className={styles.figureValue}><span className={`${styles.status} ${isLocked ? styles.statusLocked : styles.statusDraft}`}>{isLocked ? '🔒 Locked' : 'Draft · not locked'}</span></span>
+          <span className={styles.figureNote}>{isLocked ? (materialsGenerated ? 'The materials list was generated from it.' : 'Ready to generate the materials list.') : 'Check the lines, then lock.'}</span></div>
+      </div>
 
-        {!isLocked && (
-          <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Please review the uploaded items below.</span>
-            <button
-              onClick={() => { setConfirming('delete'); setError(''); }}
-              disabled={isDeleting || isLocking}
-              className="btn-primary"
-              style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#fff', opacity: isDeleting ? 0.7 : 1 }}
-            >
-              {isDeleting ? 'Deleting…' : 'Delete Benchmark'}
-            </button>
-            <button
-              onClick={() => { setConfirming('lock'); setError(''); }}
-              disabled={isLocking || isDeleting}
-              className="btn-primary"
-              style={{ backgroundColor: '#00cc66', borderColor: '#00cc66' }}
-            >
-              {isLocking ? 'Locking...' : 'Lock Procurement Benchmark'}
-            </button>
-          </div>
-        )}
-
-        {isLocked && (
-          <span style={{
-            backgroundColor: 'rgba(0, 255, 128, 0.1)',
-            color: '#00ff80',
-            padding: '6px 12px',
-            borderRadius: '4px',
-            fontWeight: 'bold',
-            border: '1px solid rgba(0, 255, 128, 0.3)'
-          }}>
-            🔒 Benchmark Locked
-          </span>
-        )}
+      <div id="benchmark-actions" className={styles.bar}>
+        <div>
+          <h3 className={styles.barTitle}>Procurement Benchmark</h3>
+          <p className={styles.barNote}>{isLocked
+            ? 'Locked. The Master Materials List copies these lines and keeps them in step with this benchmark.'
+            : 'Correct lines here, not in the materials list: the list is copied from this benchmark.'}</p>
+        </div>
+        <div className={styles.actions}>
+          {!isLocked && <>
+            <button type="button" className={styles.danger} onClick={() => { setConfirming('delete'); setError(''); }} disabled={isDeleting || isLocking}>{isDeleting ? 'Deleting…' : 'Delete and re-upload'}</button>
+            <button type="button" className={styles.cta} onClick={() => { setConfirming('lock'); setError(''); }} disabled={isLocking || isDeleting}>{isLocking ? 'Locking…' : 'Lock benchmark'}</button>
+          </>}
+          {/* When locked, the progress card above already links to the next step. */}
+          {isLocked && <Link className={styles.ghost} href={`/projects/${projectId}?tab=consolidation`}>Master Materials List</Link>}
+        </div>
       </div>
 
       {confirming && !isLocked && (
-        <div role="alertdialog" aria-labelledby="benchmark-confirm-text" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', justifyContent: 'space-between', marginBottom: '20px', padding: '14px 16px', borderRadius: '10px', border: `1px solid ${confirming === 'delete' ? 'rgba(239, 68, 68, 0.5)' : 'rgba(0, 204, 102, 0.5)'}`, background: confirming === 'delete' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(0, 204, 102, 0.08)' }}>
+        <div role="alertdialog" aria-labelledby="benchmark-confirm-text" className={`${styles.confirm} ${confirming === 'delete' ? styles.confirmDanger : styles.confirmGo}`}>
           <span id="benchmark-confirm-text" style={{ flex: '1 1 320px' }}>
             {confirming === 'delete'
-              ? <><strong>Delete all {totalItems} benchmark rows?</strong> This cannot be undone. You can upload the file again afterwards.</>
-              : <><strong>Lock the Procurement Benchmark?</strong> This will allow you to generate the Master Materials List via AI auto-consolidation.</>}
+              ? <><strong>Delete all {totalItems} benchmark lines?</strong> This cannot be undone. You can upload the file again afterwards.</>
+              : <><strong>Lock the procurement benchmark?</strong> Lines can no longer be changed here. The Master Materials List can then be generated from it.</>}
           </span>
-          <span style={{ display: 'flex', gap: '10px' }}>
-            <button type="button" className="btn-secondary" onClick={() => setConfirming(null)} autoFocus>Cancel</button>
+          <span className={styles.actions}>
+            <button type="button" className={styles.ghost} onClick={() => setConfirming(null)} autoFocus>Cancel</button>
             {confirming === 'delete'
-              ? <button type="button" className="btn-primary" onClick={() => void handleDelete()} style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#fff' }}>Yes, delete {totalItems} rows</button>
-              : <button type="button" className="btn-primary" onClick={() => void handleLock()} style={{ backgroundColor: '#00cc66', borderColor: '#00cc66' }}>Yes, lock benchmark</button>}
+              ? <button type="button" className={styles.danger} onClick={() => void handleDelete()}>Yes, delete {totalItems} lines</button>
+              : <button type="button" className={styles.cta} onClick={() => void handleLock()}>Yes, lock benchmark</button>}
           </span>
         </div>
       )}
 
       <BenchmarkAiCheck projectId={projectId} editable={!isLocked} />
 
-      <div className="table-scroll-container" style={{ overflow: 'auto', maxHeight: '600px', border: '1px solid #ccc', borderRadius: '8px' }}>
+      <div className={styles.filters}>
+        <input type="search" className={styles.search} placeholder="Search code, description or unit" aria-label="Search benchmark lines" value={query} onChange={event => setQuery(event.target.value)} />
+        <span className={styles.segment} role="group" aria-label="Which lines to show">
+          <button type="button" aria-pressed={show === 'all'} onClick={() => setShow('all')}>All lines</button>
+          <button type="button" aria-pressed={show === 'unlinked'} onClick={() => setShow('unlinked')}>Not linked to BOQ ({totalItems - linkedCount})</button>
+        </span>
+        <span className={styles.count} aria-live="polite">{visible.length === items.length ? `${items.length} lines` : `${visible.length} of ${items.length} lines · ${peso(visibleTotal)}`}</span>
+      </div>
+
+      <div className="table-scroll-container" style={{ overflow: 'auto', maxHeight: '600px', border: '1px solid #ccc', borderRadius: '8px 8px 0 0', isolation: 'isolate' }}>
         <style dangerouslySetInnerHTML={{__html: `
-          .excel-table-wrapper table {
-            border-collapse: separate;
-            border-spacing: 0;
-            width: 100%;
-            color: #000;
-            font-size: 0.85rem;
-            background: #fff;
-            table-layout: auto;
-          }
-          .excel-table-wrapper td, .excel-table-wrapper th {
-            border: 1px solid #ccc;
-            padding: 8px 10px;
-            white-space: normal;
-            word-wrap: break-word;
-            vertical-align: top;
-          }
-          .excel-table-wrapper th {
-            position: sticky;
-            top: 0;
-            background: #e0e0e0;
-            font-weight: bold;
-            z-index: 2;
-            color: #000;
-            text-align: left;
-            box-shadow: 0 2px 2px rgba(0,0,0,0.1);
-          }
+          .excel-table-wrapper table { border-collapse: separate; border-spacing: 0; width: 100%; color: #000; font-size: 0.85rem; background: #fff; table-layout: auto; }
+          .excel-table-wrapper td, .excel-table-wrapper th { border-bottom: 1px solid #e5e5e5; padding: 8px 10px; white-space: normal; word-wrap: break-word; vertical-align: top; }
+          .excel-table-wrapper th { position: sticky; top: 0; background: #eef0f2; font-weight: bold; z-index: 2; color: #000; text-align: left; border-bottom: 2px solid #ccc; }
+          .excel-table-wrapper .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+          .excel-table-wrapper tr:hover td { background: #f7fbfc; }
         `}} />
         <div className="excel-table-wrapper">
           <table>
             <thead>
               <tr>
-                <th style={{ width: '120px' }}>Item Code</th>
-                <th>Description</th>
-                <th style={{ textAlign: 'center', width: '80px' }}>Qty</th>
-                <th style={{ textAlign: 'center', width: '80px' }}>Unit</th>
-                <th style={{ textAlign: 'right', width: '150px' }}>Unit Cost</th>
-                <th style={{ textAlign: 'right', width: '150px' }}>Total Cost</th>
-                <th style={{ width: '220px' }}>BOQ Item</th>
+                <th style={{ width: '1%', whiteSpace: 'nowrap', maxWidth: 140 }}>Code</th>
+                <th style={{ minWidth: 280 }}>Description</th>
+                <th className="num" style={{ width: '1%' }}>Qty</th>
+                <th style={{ width: '1%' }}>Unit</th>
+                <th className="num" style={{ width: '1%' }}>Unit cost</th>
+                <th className="num" style={{ width: '1%' }}>Total</th>
+                <th style={{ width: '22%', minWidth: 180 }}>BOQ item</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item, index) => (
+              {visible.map((item, index) => (
                 <tr key={item.id || index}>
-                  <td>{item.itemCode || '-'}</td>
-                  <td>
-                    <div style={{ fontWeight: '500' }}>{item.description}</div>
-                  </td>
-                  <td style={{ textAlign: 'center' }}>{item.quantity?.toLocaleString()}</td>
-                  <td style={{ textAlign: 'center' }}>{item.unit}</td>
-                  <td style={{ textAlign: 'right' }}>{(item.unitCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{(item.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  {/* Short codes stay on one line; some files put text in the code column, so long values wrap. */}
+                  <td style={{ whiteSpace: (item.itemCode || '').length > 14 ? 'normal' : 'nowrap', maxWidth: 140, overflowWrap: 'anywhere' }}>{item.itemCode || '—'}</td>
+                  <td style={{ fontWeight: 500 }}>{item.description}</td>
+                  <td className="num">{item.quantity?.toLocaleString()}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{item.unit}</td>
+                  <td className="num">{money(item.unitCost)}</td>
+                  <td className="num" style={{ fontWeight: 'bold' }}>{money(item.totalCost)}</td>
                   <td style={{ color: item.id && boqLinks[item.id] ? '#000' : '#888' }}>{(item.id && boqLinks[item.id]) || 'Not linked'}</td>
                 </tr>
               ))}
+              {!visible.length && <tr><td colSpan={7} style={{ textAlign: 'center', color: '#666', padding: 24 }}>No lines match. Clear the search or show all lines.</td></tr>}
             </tbody>
           </table>
         </div>
+      </div>
+      {/* Total kept outside the scroll area so it is always visible. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, padding: '12px 16px', background: '#e0e0e0', color: '#000', border: '1px solid #ccc', borderTop: 0, borderRadius: '0 0 8px 8px', fontWeight: 'bold' }}>
+        {visible.length !== items.length && <span style={{ fontWeight: 500 }}>Shown: {peso(visibleTotal)}</span>}
+        <span>Benchmark total: <span style={{ color: '#0f766e' }}>{peso(totalAmount)}</span></span>
       </div>
     </div>
   );

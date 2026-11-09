@@ -8,7 +8,7 @@ export type WpsStepKey = 'packages' | 'scope' | 'sequence' | 'locations' | 'reso
 export const WPS_STEPS: { key: WpsStepKey; view: string; label: string; checks: string[] }[] = [
   { key: 'packages', view: 'schedule', label: 'Packages', checks: [] },
   { key: 'scope', view: 'scope', label: 'Scope', checks: ['scope_checks', 'scope_present'] },
-  { key: 'sequence', view: 'sequence', label: 'Dates & sequence', checks: ['dates', 'windows', 'weights', 'acyclic', 'sequence'] },
+  { key: 'sequence', view: 'sequence', label: 'Dates & schedule', checks: ['dates', 'windows', 'weights', 'acyclic', 'sequence'] },
   { key: 'locations', view: 'locations', label: 'Locations & constraints', checks: ['locations', 'constraints'] },
   { key: 'resources', view: 'resources', label: 'Resources & DUPA', checks: ['resources', 'resource_review', 'direct_cost'] },
   { key: 'review', view: 'review', label: 'Review & approve', checks: [] },

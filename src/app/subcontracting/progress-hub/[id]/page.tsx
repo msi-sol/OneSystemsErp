@@ -13,6 +13,10 @@ export default async function ProgressHubPage({ params }: { params: Promise<{ id
   }
 
   const pkg = result.data;
+  // Only approved (or already billed) progress counts; reports awaiting review are shown separately.
+  const approvedPercent = pkg.accomplishments.filter((a: any) => ['APPROVED', 'BILLED'].includes(a.status)).reduce((sum: number, a: any) => sum + (a.currentPercent || 0), 0);
+  const pendingPercent = pkg.accomplishments.filter((a: any) => ['FOR_REVIEW', 'SUBMITTED', 'PENDING'].includes(a.status)).reduce((sum: number, a: any) => sum + (a.currentPercent || 0), 0);
+  const totalBilledGross = pkg.billings.reduce((sum: number, b: any) => sum + (b.currentGross || 0), 0);
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px', color: '#111827' }}>
@@ -48,19 +52,21 @@ export default async function ProgressHubPage({ params }: { params: Promise<{ id
         <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', borderLeft: '4px solid #10b981' }}>
           <div style={{ fontSize: '0.85rem', color: '#6b7280', fontWeight: 'bold' }}>TOTAL ACCOMPLISHED</div>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#059669', marginTop: '4px' }}>
-            {pkg.accomplishments.length > 0 ? `${(pkg.accomplishments[0].cumulativePercent || 0).toFixed(2)}%` : '0.00%'}
+            {approvedPercent.toFixed(2)}%
           </div>
+          {pendingPercent > 0 && <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '4px' }}>+{pendingPercent.toFixed(2)}% awaiting approval</div>}
         </div>
         <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', borderLeft: '4px solid #f59e0b' }}>
           <div style={{ fontSize: '0.85rem', color: '#6b7280', fontWeight: 'bold' }}>TOTAL BILLED</div>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#d97706', marginTop: '4px' }}>
-            ₱{pkg.billings.reduce((sum: number, b: any) => sum + (b.currentGross || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₱{totalBilledGross.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
         <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', borderLeft: '4px solid #ef4444' }}>
-          <div style={{ fontSize: '0.85rem', color: '#6b7280', fontWeight: 'bold' }}>BALANCE DUE</div>
+          <div style={{ fontSize: '0.85rem', color: '#6b7280', fontWeight: 'bold' }}>REMAINING TO BILL</div>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#b91c1c', marginTop: '4px' }}>
-            ₱{(pkg.contractAmount - pkg.billings.reduce((sum: number, b: any) => sum + (b.netPayable || 0), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {/* Contract less gross billed (it subtracted net payable, mixing gross and net amounts). */}
+            ₱{(pkg.contractAmount - totalBilledGross).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
       </div>

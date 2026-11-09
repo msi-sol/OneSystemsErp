@@ -25,7 +25,10 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    // Show the backend's own message ("DR and actual quantities…") instead of "Backend Error: 400 {json}".
+    let message = '';
+    try { const body = JSON.parse(errorText); if (typeof body?.error === 'string') message = body.error; } catch {}
+    throw new Error(message || `The request failed (${res.status}). Try again.`);
   }
   return res.json();
 }
@@ -73,9 +76,7 @@ export async function rejectDelivery(deliveryId: string, reason: string): Promis
     revalidatePath('/deliveries');
     return { success: true };
   } catch (cause) {
-    const text = cause instanceof Error ? cause.message : '';
-    const match = /"error":"([^"]+)"/.exec(text);
-    return { success: false, error: match?.[1] || 'The delivery could not be rejected.' };
+    return { success: false, error: cause instanceof Error && cause.message ? cause.message : 'The delivery could not be rejected.' };
   }
 }
 

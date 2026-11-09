@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { reviewProjectAccomplishment } from '@/app/actions/projectAccomplishmentActions';
+import { askConfirm, askText } from '@/lib/ui/dialogs';
 
 export default function AccomplishmentReviewButtons({ accomplishmentId }: { accomplishmentId: string }) {
   const router = useRouter();
@@ -12,14 +13,10 @@ export default function AccomplishmentReviewButtons({ accomplishmentId }: { acco
   const review = async (decision: 'APPROVE' | 'REJECT') => {
     let remarks: string | undefined;
     if (decision === 'REJECT') {
-      const reason = window.prompt('Reason for rejecting this accomplishment:');
+      const reason = await askText('Reason for rejecting this accomplishment:', { required: true, confirmLabel: 'Reject', danger: true });
       if (reason === null) return;
-      if (!reason.trim()) {
-        toast.error('A rejection reason is required.');
-        return;
-      }
       remarks = reason;
-    } else if (!window.confirm('Approve this accomplishment? Approved accomplishments become available for progress billing.')) {
+    } else if (!(await askConfirm('Approve this accomplishment? Approved accomplishments become available for progress billing.', { confirmLabel: 'Approve' }))) {
       return;
     }
 

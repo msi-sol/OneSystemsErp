@@ -25,13 +25,17 @@ export default async function NewAccomplishmentPage({ params }: { params: Promis
   // Fetch the Awarded BOQ for this project
   const awardedBoq = await prisma.awardedBOQItem.findMany({
     where: { projectId: projectId },
-    orderBy: { itemCode: "asc" },
+    // BOQ order (rows are created in source order). Sorting by item code scattered the BOQ, and for BOQs
+    // without item codes the stored code is the section name.
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 
   // Map to the format needed by the form
   const formattedBoqItems = awardedBoq.map((item) => ({
     id: item.id,
-    itemCode: item.itemCode,
+    // Show a code only when the BOQ had one; otherwise the stored code repeats the section or description.
+    itemCode: item.itemCode && item.itemCode !== item.category && item.itemCode !== item.description ? item.itemCode : "",
+    section: item.category || "",
     description: item.description,
     unit: item.unit,
     // Same basis the server uses when saving (revised values after approved variation orders).

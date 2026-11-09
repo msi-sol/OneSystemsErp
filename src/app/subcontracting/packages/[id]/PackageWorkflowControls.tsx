@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateSubcontractPackageStatus, deleteSubcontractPackage } from '@/app/actions/subcontractingActions';
+import { askConfirm } from '@/lib/ui/dialogs';
 
 interface PackageWorkflowControlsProps {
   packageId: string;
@@ -38,7 +39,7 @@ export default function PackageWorkflowControls({ packageId, currentStatus, isLo
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this locked package? This cannot be undone.')) return;
+    if (!(await askConfirm('Delete this locked package? This cannot be undone.', { confirmLabel: 'Delete', danger: true }))) return;
     setLoading(true);
     setError('');
     const res = await deleteSubcontractPackage(packageId);
@@ -210,7 +211,8 @@ export default function PackageWorkflowControls({ packageId, currentStatus, isLo
             )
           ) : (
             <>
-              {currentStepIndex < 3 && (
+              {/* Shortcut for directors/admins only (the backend enforces the same rule). */}
+              {currentStepIndex < 3 && isSimAdmin && (
                 <button
                   onClick={() => handleUpdateStatus('APPROVED')}
                   disabled={loading}

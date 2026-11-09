@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from '@/components/ai/AiCheckPanel.module.css';
 import { applyProcurementBenchmarkSuggestions, saveProcurementBenchmarkBoqLinks } from '@/app/actions/mutations';
+import AiThinking, { AI_THINKING_MESSAGES } from '@/components/ai/AiThinking';
 
 /**
  * Optional AI Check for the uploaded procurement benchmark: exact amount and duplicate checks, the benchmark total
@@ -39,17 +40,10 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
   const [linkPage, setLinkPage] = useState(0);
   const [savingLinks, setSavingLinks] = useState(false);
   const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState('');
-  useEffect(() => {
-    if (!running) return;
-    const started = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
 
   async function run() {
-    setRunning(true); setElapsed(0); setError('');
+    setRunning(true); setError('');
     try {
       const response = await fetch(`/api/projects/${projectId}/ai-check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'benchmark' }) });
       const data = await response.json().catch(() => ({}));
@@ -73,13 +67,13 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
   const sameAsSaved = (result?.links ?? []).filter((link) => link.boqId && link.boqId === link.savedBoqId).length;
   const notInBoq = (result?.links ?? []).filter((link) => !link.boqId);
   const setLinkDraft = (id: string, patch: Partial<LinkDraft>) => setLinkDrafts((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
-  async function saveLinks() {
-    if (!chosenLinks.length) return;
+  async function saveLinks(list = chosenLinks) {
+    if (!list.length) return;
     setSavingLinks(true); setError(''); setSaveMessage('');
     try {
-      const outcome = await saveProcurementBenchmarkBoqLinks(projectId, chosenLinks.map((link) => ({ rowId: link.rowId, boqItemId: linkDrafts[link.rowId].boqId || null })));
-      setLinkDrafts((current) => ({ ...current, ...Object.fromEntries(chosenLinks.map((link) => [link.rowId, { ...current[link.rowId], state: 'saved' as const }])) }));
-      setSaveMessage(`Saved ${outcome.saved} BOQ link${outcome.saved === 1 ? '' : 's'}. ${outcome.linked} benchmark line${outcome.linked === 1 ? ' is' : 's are'} now linked to the BOQ.`);
+      const outcome = await saveProcurementBenchmarkBoqLinks(projectId, list.map((link) => ({ rowId: link.rowId, boqItemId: linkDrafts[link.rowId].boqId || null })));
+      setLinkDrafts((current) => ({ ...current, ...Object.fromEntries(list.map((link) => [link.rowId, { ...current[link.rowId], state: 'saved' as const }])) }));
+      setSaveMessage(`Saved ${outcome.saved} BOQ link${outcome.saved === 1 ? '' : 's'}. ${outcome.linked} benchmark line${outcome.linked === 1 ? ' is' : 's are'} now linked to the BOQ${outcome.materialsUpdated ? `; the master materials list was updated too` : ''}.`);
       router.refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The links could not be saved.'); }
     finally { setSavingLinks(false); }
@@ -87,12 +81,18 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
   const openSuggestions = (result?.suggestions ?? []).filter((item) => drafts[item.id]?.state === 'open');
   const chosen = openSuggestions.filter((item) => drafts[item.id]?.selected);
   const setDraft = (id: string, patch: Partial<Draft>) => setDrafts((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
-  async function saveSelected() {
-    if (!chosen.length) return;
+  async function saveSelected(list: Suggestion[] = chosen) {
+    if (!list.length) return;
     setSaving(true); setError(''); setSaveMessage('');
     try {
-      const outcome = await applyProcurementBenchmarkSuggestions(projectId, chosen.map((item) => ({ rowId: item.rowId, field: item.field, value: drafts[item.id].value })));
-      setDrafts((current) => ({ ...current, ...Object.fromEntries(chosen.map((item) => [item.id, { ...current[item.id], state: 'saved' as const }])) }));
+      const outcome = await applyProcurementBenchmarkSuggestions(projectId, list.map((item) => ({ rowId: item.rowId, field: item.field, value: drafts[item.id].value })));
+      const removedRows = new Set(list.filter((item) => item.field === 'remove').map((item) => item.rowId));
+      setDrafts((current) => ({ ...current, ...Object.fromEntries((result?.suggestions ?? []).flatMap((item): [string, Draft][] =>
+        list.some((saved) => saved.id === item.id) ? [[item.id, { ...current[item.id], state: 'saved' as const }]]
+          // Other suggestions for a line that was just removed no longer apply.
+          : removedRows.has(item.rowId) && current[item.id]?.state === 'open' ? [[item.id, { ...current[item.id], state: 'dismissed' as const }]] : [])) }));
+      // A removed line no longer exists, so its BOQ link suggestion must not be saved (it would fail the whole save).
+      if (removedRows.size) setLinkDrafts((current) => ({ ...current, ...Object.fromEntries([...removedRows].filter((rowId) => current[rowId]).map((rowId) => [rowId, { ...current[rowId], selected: false, state: 'dismissed' as const }])) }));
       setSaveMessage(`Saved: ${outcome.updated} line${outcome.updated === 1 ? '' : 's'} changed${outcome.removed ? `, ${outcome.removed} removed` : ''}. Run the AI Check again to re-check the updated benchmark.`);
       router.refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The changes could not be saved.'); }
@@ -112,11 +112,11 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
     <div className={styles.header}>
       <div>
         <h3 id="ai-check-benchmark" className={styles.title}>AI Check <span className={styles.badge}>Optional</span></h3>
-        <p className={styles.muted}>Check this benchmark against the approved BOQ: lines where quantity × unit cost does not equal the total (including small rounding differences), duplicate lines, and budget lines with no matching BOQ item. Nothing changes.</p>
+        <p className={styles.muted}>Links every benchmark line to its BOQ item (the BOQ is the basis), and checks quantity × unit cost, duplicate lines and lines with no BOQ item. Nothing changes until you save.</p>
       </div>
-      <button type="button" className={result ? styles.secondary : styles.primary} disabled={running} onClick={() => void run()}>{running ? `Checking… ${elapsed}s` : result ? 'Run again' : 'Run AI Check'}</button>
+      <button type="button" className={result ? styles.secondary : styles.primary} disabled={running} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Run AI Check'}</button>
     </div>
-    {running && <p className={styles.muted} role="status" style={{ marginTop: 10 }}>{elapsed < 90 ? 'The AI is comparing every budget line with the BOQ. This usually takes 30–60 seconds.' : 'Still working: the AI service is slower than usual. It stops by itself after about 4 minutes.'}</p>}
+    {running && <AiThinking messages={AI_THINKING_MESSAGES.benchmark} note="This usually takes 30–60 seconds." />}
     {error && <div className={styles.error} role="alert">{error}</div>}
 
     {saveMessage && <div className={styles.success} role="status">{saveMessage}</div>}
@@ -124,12 +124,50 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
     {result && checks && <>
       <div className={styles.summary}><strong>Summary.</strong> {result.summary}</div>
 
+      <div className={styles.section}>
+        <h4 className={styles.sectionTitle}>Link to the BOQ ({openLinks.length} to review)</h4>
+        <p className={styles.muted}>The BOQ is the basis: each budget line is linked to the BOQ item it is for. Change the BOQ item if the AI picked the wrong one, untick what you do not want, or remove a suggestion with ✕. Low-confidence and “not in the BOQ” lines start unticked. Saved links also update the master materials list.{sameAsSaved ? ` ${sameAsSaved} line(s) already have the suggested link.` : ''}</p>
+        {notInBoq.length > 0 && <p className={styles.muted}><strong>Not in the BOQ ({notInBoq.length}):</strong> {notInBoq.slice(0, 8).map((link) => link.label).join('; ')}{notInBoq.length > 8 ? '; …' : ''}. These are additional budget items; link them in the list below if the AI is wrong.</p>}
+        {!openLinks.length ? <p className={styles.muted}>No link changes left to review.</p> : <>
+          <div className={styles.tableWrap}><table className={styles.table}>
+            <thead><tr><th><span className="sr-only">Use</span></th><th>Budget line</th><th>BOQ item</th><th>Confidence</th><th><span className="sr-only">Remove suggestion</span></th></tr></thead>
+            <tbody>{openLinks.slice(linkPage * 25, (linkPage + 1) * 25).map((link) => {
+              const draft = linkDrafts[link.rowId];
+              return <tr key={link.rowId}>
+                <td><input type="checkbox" aria-label={`Use BOQ link for ${link.label}`} checked={draft.selected} disabled={savingLinks} onChange={(event) => setLinkDraft(link.rowId, { selected: event.target.checked })} /></td>
+                <td>{link.label}<div className={styles.groupMeta}>{peso(link.amount)}{link.savedBoqLabel ? ` · now linked to ${link.savedBoqLabel}` : ''}</div></td>
+                <td style={{ minWidth: 260 }}>
+                  <select className={styles.input} aria-label={`BOQ item for ${link.label}`} value={draft.boqId} disabled={savingLinks} onChange={(event) => setLinkDraft(link.rowId, { boqId: event.target.value, selected: true })}>
+                    <option value="">Not in the BOQ (additional budget item)</option>
+                    {result.boqOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                  </select>
+                  {link.reason && <div className={styles.groupMeta}>{link.reason}</div>}
+                </td>
+                <td><span className={styles.ref} style={{ color: link.confidence === 'high' ? '#86efac' : link.confidence === 'medium' ? '#fde68a' : '#fca5a5' }}>{link.boqId ? link.confidence : 'not in BOQ'}</span></td>
+                <td><button type="button" className={styles.ghost} aria-label={`Remove the BOQ link suggestion for ${link.label}`} title="Remove this suggestion" disabled={savingLinks} onClick={() => setLinkDraft(link.rowId, { state: 'dismissed' })}>✕</button></td>
+              </tr>;
+            })}</tbody>
+          </table></div>
+          {openLinks.length > 25 && <div className={styles.actions}>
+            <button type="button" className={styles.ghost} disabled={linkPage === 0} onClick={() => setLinkPage((page) => page - 1)}>← Previous</button>
+            <span className={styles.muted}>{linkPage * 25 + 1}–{Math.min((linkPage + 1) * 25, openLinks.length)} of {openLinks.length}</span>
+            <button type="button" className={styles.ghost} disabled={(linkPage + 1) * 25 >= openLinks.length} onClick={() => setLinkPage((page) => page + 1)}>Next →</button>
+          </div>}
+          <div className={styles.actions}>
+            <button type="button" className={styles.primary} disabled={savingLinks || !chosenLinks.length} onClick={() => void saveLinks()}>{savingLinks ? 'Saving…' : `Save ${chosenLinks.length} BOQ ${chosenLinks.length === 1 ? 'link' : 'links'}`}</button>
+            <button type="button" className={styles.secondary} disabled={savingLinks} onClick={() => void saveLinks(openLinks)}>Save all ({openLinks.length})</button>
+            <button type="button" className={styles.ghost} disabled={savingLinks} onClick={() => setLinkDrafts((current) => Object.fromEntries(Object.entries(current).map(([id, draft]) => [id, draft.state === 'open' ? { ...draft, state: 'dismissed' as const } : draft])))}>Discard all link suggestions</button>
+          </div>
+        </>}
+      </div>
+
+
       {(result.suggestions ?? []).length > 0 && <div className={styles.section}>
         <h4 className={styles.sectionTitle}>Suggested fixes ({openSuggestions.length})</h4>
         {!openSuggestions.length ? <p className={styles.muted}>No suggestions left to review.</p> : <>
           <p className={styles.muted}>Change any suggested value, untick what you do not want, or remove a suggestion with ✕. Nothing changes until you save. Total changes start unticked because they change the budget.</p>
           <div className={styles.tableWrap}><table className={styles.table}>
-            <thead><tr><th><span className="sr-only">Use</span></th><th>Line</th><th>Change</th><th>Why</th><th><span className="sr-only">Remove suggestion</span></th></tr></thead>
+            <thead><tr><th><input type="checkbox" aria-label="Select all open suggestions" disabled={!editable || saving} checked={openSuggestions.length > 0 && openSuggestions.every((item) => drafts[item.id]?.selected)} onChange={(event) => setDrafts((current) => ({ ...current, ...Object.fromEntries(openSuggestions.map((item) => [item.id, { ...current[item.id], selected: event.target.checked }])) }))} /></th><th>Line</th><th>Change</th><th>Why</th><th><span className="sr-only">Remove suggestion</span></th></tr></thead>
             <tbody>{openSuggestions.map((item) => {
               const draft = drafts[item.id];
               return <tr key={item.id}>
@@ -152,6 +190,7 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
           {editable
             ? <div className={styles.actions}>
               <button type="button" className={styles.primary} disabled={saving || !chosen.length} onClick={() => void saveSelected()}>{saving ? 'Saving…' : `Save ${chosen.length} selected ${chosen.length === 1 ? 'change' : 'changes'}`}</button>
+              <button type="button" className={styles.secondary} disabled={saving} onClick={() => void saveSelected(openSuggestions)}>Save all ({openSuggestions.length})</button>
               <button type="button" className={styles.ghost} disabled={saving} onClick={discardAll}>Discard all suggestions</button>
             </div>
             : <p className={styles.muted}>This benchmark is locked, so the suggestions are for information only.</p>}
@@ -184,42 +223,6 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
         <p className={styles.muted}>The same item appears more than once. That is normal when it is budgeted in several sections; the master material list adds them together.</p>
         <ul className={styles.list}>{checks.duplicates.slice(0, 20).map((row) => <li key={row.label} className={styles.insight}><span className={styles.insightTitle}>{row.label}</span> <span className={styles.muted}>· {row.count} times · {row.totalQuantity.toLocaleString('en-PH')} {row.unit} in total</span></li>)}</ul>
       </div>}
-
-      <div className={styles.section}>
-        <h4 className={styles.sectionTitle}>BOQ links ({openLinks.length} to review)</h4>
-        <p className={styles.muted}>Which BOQ item each budget line is for. Change the BOQ item if the AI picked the wrong one, untick what you do not want, or remove a suggestion with ✕. Low-confidence and “not in the BOQ” lines start unticked. Saved links are used when the master materials list is generated.{sameAsSaved ? ` ${sameAsSaved} line(s) already have the suggested link.` : ''}</p>
-        {notInBoq.length > 0 && <p className={styles.muted}><strong>Not in the BOQ ({notInBoq.length}):</strong> {notInBoq.slice(0, 8).map((link) => link.label).join('; ')}{notInBoq.length > 8 ? '; …' : ''}. These are additional budget items; link them in the list below if the AI is wrong.</p>}
-        {!openLinks.length ? <p className={styles.muted}>No link changes left to review.</p> : <>
-          <div className={styles.tableWrap}><table className={styles.table}>
-            <thead><tr><th><span className="sr-only">Use</span></th><th>Budget line</th><th>BOQ item</th><th>Confidence</th><th><span className="sr-only">Remove suggestion</span></th></tr></thead>
-            <tbody>{openLinks.slice(linkPage * 25, (linkPage + 1) * 25).map((link) => {
-              const draft = linkDrafts[link.rowId];
-              return <tr key={link.rowId}>
-                <td><input type="checkbox" aria-label={`Use BOQ link for ${link.label}`} checked={draft.selected} disabled={savingLinks} onChange={(event) => setLinkDraft(link.rowId, { selected: event.target.checked })} /></td>
-                <td>{link.label}<div className={styles.groupMeta}>{peso(link.amount)}{link.savedBoqLabel ? ` · now linked to ${link.savedBoqLabel}` : ''}</div></td>
-                <td style={{ minWidth: 260 }}>
-                  <select className={styles.input} aria-label={`BOQ item for ${link.label}`} value={draft.boqId} disabled={savingLinks} onChange={(event) => setLinkDraft(link.rowId, { boqId: event.target.value, selected: true })}>
-                    <option value="">Not in the BOQ (additional budget item)</option>
-                    {result.boqOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                  </select>
-                  {link.reason && <div className={styles.groupMeta}>{link.reason}</div>}
-                </td>
-                <td><span className={styles.ref} style={{ color: link.confidence === 'high' ? '#86efac' : link.confidence === 'medium' ? '#fde68a' : '#fca5a5' }}>{link.boqId ? link.confidence : 'not in BOQ'}</span></td>
-                <td><button type="button" className={styles.ghost} aria-label={`Remove the BOQ link suggestion for ${link.label}`} title="Remove this suggestion" disabled={savingLinks} onClick={() => setLinkDraft(link.rowId, { state: 'dismissed' })}>✕</button></td>
-              </tr>;
-            })}</tbody>
-          </table></div>
-          {openLinks.length > 25 && <div className={styles.actions}>
-            <button type="button" className={styles.ghost} disabled={linkPage === 0} onClick={() => setLinkPage((page) => page - 1)}>← Previous</button>
-            <span className={styles.muted}>{linkPage * 25 + 1}–{Math.min((linkPage + 1) * 25, openLinks.length)} of {openLinks.length}</span>
-            <button type="button" className={styles.ghost} disabled={(linkPage + 1) * 25 >= openLinks.length} onClick={() => setLinkPage((page) => page + 1)}>Next →</button>
-          </div>}
-          <div className={styles.actions}>
-            <button type="button" className={styles.primary} disabled={savingLinks || !chosenLinks.length} onClick={() => void saveLinks()}>{savingLinks ? 'Saving…' : `Save ${chosenLinks.length} BOQ ${chosenLinks.length === 1 ? 'link' : 'links'}`}</button>
-            <button type="button" className={styles.ghost} disabled={savingLinks} onClick={() => setLinkDrafts((current) => Object.fromEntries(Object.entries(current).map(([id, draft]) => [id, draft.state === 'open' ? { ...draft, state: 'dismissed' as const } : draft])))}>Discard all link suggestions</button>
-          </div>
-        </>}
-      </div>
 
       {result.insights.length > 0 && <div className={styles.section}><h4 className={styles.sectionTitle}>Insights ({result.insights.length})</h4><ul className={styles.list}>{result.insights.map((insight, index) => <li key={index} className={`${styles.insight} ${styles[insight.severity]}`}>
         <div className={styles.insightTitle}>{insight.severity === 'issue' ? 'Issue' : insight.severity === 'warning' ? 'Check' : 'Note'} · {insight.title}</div>

@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getAwardedBoqItemsByProjectId, createFullSubcontractPackage, updateFullSubcontractPackage } from '@/app/actions/subcontractingActions';
+import { subcontractorTrade } from '@/lib/subcontracting/subcontractor-trade';
 
 export default function UnifiedSubcontractWizard({ 
   projects, 
@@ -250,7 +251,7 @@ export default function UnifiedSubcontractWizard({
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#374151' }}>Subcontractor</label>
             <select name="subcontractorId" value={packageData.subcontractorId} onChange={handlePackageChange} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', color: '#111827' }}>
               <option value="">Select Subcontractor</option>
-              {subcontractors.map(s => <option key={s.id} value={s.id}>{s.name} ({s.tradeCategory})</option>)}
+              {subcontractors.map(s => <option key={s.id} value={s.id}>{s.name}{subcontractorTrade(s) ? ` (${subcontractorTrade(s)})` : ''}</option>)}
             </select>
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
@@ -349,7 +350,8 @@ export default function UnifiedSubcontractWizard({
                         style={{ width: '20px', height: '20px', cursor: 'pointer' }}
                       />
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 'bold', color: '#111827' }}>{item.category ? `[${item.category}] ` : ''}{item.itemCode}</div>
+                        {/* BOQs without item codes store the section name as the code; show it once. */}
+                        <div style={{ fontWeight: 'bold', color: '#111827' }}>{item.category ? `[${item.category}] ` : ''}{item.itemCode && item.itemCode !== item.category && item.itemCode !== item.description ? item.itemCode : ''}</div>
                         <div style={{ color: '#4b5563', fontSize: '0.9rem' }}>{item.description}</div>
                         <div style={{ fontSize: '0.8rem', color: '#9ca3af', marginTop: '4px' }}>Master BOQ: {item.quantity} {item.unit} @ ₱{item.combinedUnitCost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                       </div>

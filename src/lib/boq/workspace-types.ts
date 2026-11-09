@@ -68,10 +68,17 @@ export type WorkspaceAnalysis = {
   documentKind?: 'pdf' | 'docx' | 'txt' | 'image';
   extractedProjectName?: string | null;
   extractedContractAmount?: string | null;
+  /** Where the project name came from: a labelled cell, the AI cross-check, or (not found) the file name. */
+  projectNameSource?: 'document' | 'ai' | 'file-name';
+  projectNameEvidence?: string | null;
+  contractAmountSource?: 'document' | 'ai' | null;
+  contractAmountEvidence?: string | null;
+  /** Things to check before saving: name/contract value disagreements and contract value vs BOQ total. */
+  metadataChecks?: Array<{ field: 'projectName' | 'contractAmount'; message: string }>;
   documentExtraction?: unknown;
   fileName: string;
   fileHash: string;
-  sheets: Array<{ name: string; rowCount: number; candidate: boolean }>;
+  sheets: Array<{ name: string; rowCount: number; candidate: boolean; /** Looks like the main BOQ (POW, Bill of Quantities…) among several candidates. */ suggested?: boolean }>;
   selectedSheet: string | null;
   mapping: WorkspaceMapping | null;
   breakdownMapping: WorkspaceBreakdownMapping;

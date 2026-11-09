@@ -16,7 +16,11 @@ function harness(options: { locked?: boolean; mapped?: boolean } = {}) {
   const tx = {
     project: { findUnique: jest.fn().mockResolvedValue({ procurementBenchmarkLocked: !!options.locked }) },
     auditLog: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) },
-    bOQMapping: { findFirst: jest.fn().mockResolvedValue(options.mapped ? { id: 'm1' } : null) },
+    bOQMapping: {
+      findFirst: jest.fn().mockResolvedValue(options.mapped ? { id: 'm1' } : null),
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: options.mapped ? 1 : 0 }),
+    },
     procurementBenchmarkItem: {
       findMany: jest.fn().mockImplementation(({ where }: { where: { id: { in: string[] } } }) => Promise.resolve(where.id.in.filter((id) => id !== 'missing').map((id) => ({ id, itemCode: 'X', category: null, description: 'D', unit: 'pc', unitCost: 1, totalCost: 1 })))),
       update: jest.fn().mockResolvedValue({}), deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -53,13 +57,21 @@ describe('saving benchmark AI suggestions', () => {
     const saved = tx.auditLog.create.mock.calls[0][0].data;
     expect(saved.actionType).toBe('PROCUREMENT_BENCHMARK_BOQ_LINKS');
     expect(JSON.parse(saved.newValue)).toEqual({ links: { b9: 'boq-1', b2: 'boq-2' } });
-    expect(result).toEqual({ saved: 2, linked: 2 });
+    expect(result).toEqual({ saved: 2, linked: 2, materialsUpdated: 0 });
   });
 
-  it('refuses BOQ links after master materials exist or for another project\'s BOQ item', async () => {
-    let tx = harness({ mapped: true });
-    await expect(saveProcurementBenchmarkBoqLinks('p1', [{ rowId: 'b1', boqItemId: 'boq-1' }])).rejects.toThrow(/already generated/);
-    tx = harness();
+  it('keeps generated master materials in step: saved links update their mappings', async () => {
+    const tx = harness({ mapped: true });
+    Object.assign(tx, { awardedBOQItem: { findMany: jest.fn().mockResolvedValue([{ id: 'boq-1' }]) } });
+    tx.procurementBenchmarkItem.findMany.mockImplementation(({ where }: { where: { id?: { in: string[] } } }) => Promise.resolve((where.id ? where.id.in : ['b1', 'b2']).map((id) => ({ id }))));
+    const result = await saveProcurementBenchmarkBoqLinks('p1', [{ rowId: 'b1', boqItemId: 'boq-1' }, { rowId: 'b2', boqItemId: null }]);
+    expect(tx.bOQMapping.updateMany).toHaveBeenCalledWith({ where: { procurementBenchmarkItemId: 'b1', mappingType: { not: 'BENCHMARK_REVIEW' }, consolidatedBoqItem: { projectId: 'p1' } }, data: { awardedBoqItemId: 'boq-1' } });
+    expect(tx.bOQMapping.updateMany).toHaveBeenCalledWith({ where: { procurementBenchmarkItemId: 'b2', mappingType: { not: 'BENCHMARK_REVIEW' }, consolidatedBoqItem: { projectId: 'p1' } }, data: { awardedBoqItemId: null } });
+    expect(result).toEqual({ saved: 2, linked: 1, materialsUpdated: 2 });
+  });
+
+  it('refuses a BOQ link to another project\'s BOQ item', async () => {
+    const tx = harness();
     Object.assign(tx, { awardedBOQItem: { findMany: jest.fn().mockResolvedValue([]) } });
     await expect(saveProcurementBenchmarkBoqLinks('p1', [{ rowId: 'b1', boqItemId: 'other-project-item' }])).rejects.toThrow(/does not belong/);
     expect(tx.auditLog.create).not.toHaveBeenCalled();

@@ -9,6 +9,7 @@ import * as xlsx from 'xlsx';
 import { uploadToS3 as put } from '@/lib/s3'; // S3 upload utility remains in Next.js Server Action
 import { consolidateMaterialRows } from '@/lib/boq/consolidation-materials';
 import { randomUUID } from 'node:crypto';
+import { backendErrorMessage } from '@/lib/backend-error';
 
 const API_ROUTE_PREFIX = '/api/consolidation'; // The base route name for the AWS backend
 
@@ -43,7 +44,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Backend Error: ${res.status}: ${errorText}`);
+    throw new Error(backendErrorMessage(res.status, errorText));
   }
   // The backend now returns { success: true, ...data } or { success: false, error: ... }
   const result = await res.json();

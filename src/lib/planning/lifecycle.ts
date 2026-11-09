@@ -87,7 +87,7 @@ export function deriveIntakeLifecycle(input: IntakeLifecycleInput): PlanningLife
   } else if (!input.fileChosen) {
     next = { title: 'Next: choose the BOQ file', detail: 'Drop or choose an Excel, PDF or Word file. No project is created until you confirm.' };
   } else if (!input.analyzed) {
-    next = { title: 'Next: analyze the file', detail: 'Select “Analyze this workbook” to read its sheets, columns and items.' };
+    next = { title: 'Next: analyze the file', detail: 'Select “Analyze” to read the file’s sheets, columns and items.' };
   } else if (input.blockingIssues > 0) {
     next = { title: `Next: resolve ${plural(input.blockingIssues, 'blocking issue')}`, detail: 'Correct the sheet, header row or column choices below, then update the preview.' };
   } else {
@@ -236,8 +236,8 @@ export function deriveWpsLifecycle(input: WpsLifecycleInput): PlanningLifecycle 
   const stepList = [
     { key: 'packages', label: 'Create packages from the BOQ', done: approved || planned, lockedHint: '' },
     { key: 'scope', label: 'Allocate all BOQ scope', done: approved || (planned && !scopeMissing.length), lockedHint: 'Create packages first.' },
-    { key: 'schedule', label: 'Dates & sequence', done: approved || (planned && !scheduleMissing.length), lockedHint: 'Allocate the BOQ scope first.' },
-    { key: 'locations', label: 'Locations & constraints', done: approved || (planned && !locationMissing.length), lockedHint: 'Set dates and sequence first.' },
+    { key: 'schedule', label: 'Dates & schedule', done: approved || (planned && !scheduleMissing.length), lockedHint: 'Allocate the BOQ scope first.' },
+    { key: 'locations', label: 'Locations & constraints', done: approved || (planned && !locationMissing.length), lockedHint: 'Set dates and schedule first.' },
     { key: 'resources', label: 'Resources & DUPA', done: approved || (planned && !resourceMissing.length), lockedHint: 'Set locations and constraints first.' },
     { key: 'review', label: 'Engineering review', done: approved || (ready && input.reviewCurrent), lockedHint: 'Every preparation check must pass.' },
     { key: 'approve', label: 'PM approval & baseline', done: approved, lockedHint: 'Needs a current engineering review.' },
@@ -270,7 +270,7 @@ export function deriveWpsLifecycle(input: WpsLifecycleInput): PlanningLifecycle 
   } else if (scopeMissing.length) {
     next = prepare('Next: allocate all BOQ scope', `Every approved BOQ quantity must sit in a package, and package values must add up to the BOQ total. ${firstGap(scopeMissing)}`.trim(), { label: 'Open scope planner', view: 'scope' });
   } else if (scheduleMissing.length) {
-    next = prepare('Next: set dates and sequence', `${attention(scheduleMissing.length, 'schedule check')} ${firstGap(scheduleMissing)}`.trim(), { label: 'Open dates & sequence', view: 'sequence' });
+    next = prepare('Next: set dates and schedule', `${attention(scheduleMissing.length, 'schedule check')} ${firstGap(scheduleMissing)}`.trim(), { label: 'Open dates & schedule', view: 'sequence' });
   } else if (locationMissing.length) {
     next = prepare('Next: set locations and constraints', `${attention(locationMissing.length, 'location check')} ${firstGap(locationMissing)}`.trim(), { label: 'Open locations & constraints', view: 'locations' });
   } else if (resourceMissing.length) {

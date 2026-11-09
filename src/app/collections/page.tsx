@@ -12,7 +12,7 @@ export default async function CollectionsDashboard() {
   const formattedReceivables = receivables.map(r => {
     const netAmountDue = r.deductions[0]?.netAmountDue || r.currentBillingAmount;
     const amountPaid = r.payments.reduce((sum, p) => sum + p.amountPaid, 0);
-    const balance = netAmountDue - amountPaid;
+    const balance = Math.round((netAmountDue - amountPaid) * 100) / 100;
     
     totalOutstanding += balance;
 
@@ -89,10 +89,10 @@ export default async function CollectionsDashboard() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                      {new Intl.NumberFormat("en-PH", { style: "decimal", minimumFractionDigits: 2 }).format(rec.netAmountDue)}
+                      {new Intl.NumberFormat("en-PH", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(rec.netAmountDue)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 text-right">
-                      {new Intl.NumberFormat("en-PH", { style: "decimal", minimumFractionDigits: 2 }).format(rec.balance)}
+                      {new Intl.NumberFormat("en-PH", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(rec.balance)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
                       <Link 

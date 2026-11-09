@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { createJobOrder, updateJobOrder, getConsolidatedBoqItemsByProjectId } from '@/app/actions/jobOrderActions';
 import { useRouter } from 'next/navigation';
+import { subcontractorTrade } from '@/lib/subcontracting/subcontractor-trade';
 
 interface SelectedBoqItem {
   id: string;
@@ -302,7 +303,7 @@ export default function JobOrderFormClient({ projects, subcontractors, initialDa
           <select name="subcontractorId" value={formData.subcontractorId} onChange={handleChange} required style={{ padding: '10px', borderRadius: '4px', border: '1px solid #d1d5db', backgroundColor: '#f9fafb' }}>
             <option value="">Select Subcontractor</option>
             {subcontractors.map(s => (
-              <option key={s.id} value={s.id}>{s.name} ({s.tradeCategory})</option>
+              <option key={s.id} value={s.id}>{s.name}{subcontractorTrade(s) ? ` (${subcontractorTrade(s)})` : ''}</option>
             ))}
           </select>
         </div>

@@ -80,7 +80,10 @@ function metadata(text: string): Pick<NativeDocumentReading, 'projectName' | 'co
 }
 
 function isTotalLabel(value: string): boolean {
-  return /^(?:sub\s*total|grand\s*total|total amount|total price|contract sum|carried forward|brought forward)$/i.test(normalizedHeader(value));
+  const text = normalizedHeader(value);
+  // "Sub-total Concrete Works" style labels are totals too, not items.
+  return /^(?:sub\s*total|grand\s*total)(?:\s|$)/.test(text)
+    || /^(?:total amount|total price|contract sum|carried forward|brought forward)$/.test(text);
 }
 
 function looksLikeUnmappedPricedRow(row: Row): boolean {

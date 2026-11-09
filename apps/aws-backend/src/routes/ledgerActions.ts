@@ -14,7 +14,12 @@ router.post('/getProjectCostLedger', async (req, res) => {
 
     const entries = await prisma.projectCostLedger.findMany({
       where: { projectId },
-      orderBy: { costDate: 'desc' }
+      orderBy: { costDate: 'desc' },
+      // The ledger has no description column; the linked BOQ item names what the cost is for.
+      include: {
+        consolidatedBoqItem: { select: { itemCode: true, description: true } },
+        awardedBoqItem: { select: { itemCode: true, description: true } },
+      },
     });
 
     return res.json({ success: true, data: entries });

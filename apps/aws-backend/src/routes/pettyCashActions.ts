@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { postExpenseToCostLedger } from '../services/expense-cost-ledger';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -231,6 +232,7 @@ router.post('/submitPettyCashReplenishment', async (req, res) => {
 router.post('/processPettyCashReplenishment', async (req, res) => {
   try {
     const { id, action, reviewerRemarks, approverId } = req.body;
+    const actorId: string | undefined = req.body.sessionId || approverId; // signed-in reviewer
     const result = await prisma.$transaction(async (tx) => {
       const req = await tx.pettyCashReplenishment.findUnique({ where: { id } });
       if (!req) throw new Error('Request not found');
@@ -247,6 +249,18 @@ router.post('/processPettyCashReplenishment', async (req, res) => {
           approvalDate: action === 'APPROVE' ? new Date() : null,
         }
       });
+
+      // Approving the replenishment approves its project expenses (the liquidation was reviewed) and posts them to
+      // the project's actual cost; they used to stay DRAFT forever and never counted as project cost.
+      if (action === 'APPROVE') {
+        const linked = await tx.pettyCashExpense.findMany({ where: { replenishmentId: id, expenseId: { not: null } }, select: { expenseId: true } });
+        for (const { expenseId } of linked) {
+          const expense = await tx.expense.findUnique({ where: { id: expenseId! } });
+          if (!expense || expense.status === 'APPROVED' || expense.status === 'REJECTED') continue;
+          await tx.expense.update({ where: { id: expense.id }, data: { status: 'APPROVED', approvalStatus: 'APPROVED', approverId: actorId || null } });
+          await postExpenseToCostLedger(tx, expense, actorId || expense.loggedById, 'PETTY_CASH');
+        }
+      }
 
       // If rejected, unlink the expenses so they can be grouped again
       if (action === 'REJECT') {

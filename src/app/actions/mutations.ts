@@ -1120,8 +1120,8 @@ export async function saveProcurementBenchmarkBoqLinks(projectId: string, links:
   if (!Array.isArray(links) || !links.length) throw new Error('Choose at least one BOQ link to save.');
   if (links.length > 1500) throw new Error('Too many links at once.');
   const result = await prisma.$transaction(async tx => {
-    const generated = await tx.bOQMapping.findFirst({ where: { procurementBenchmarkItem: { is: { projectId } } }, select: { id: true } });
-    if (generated) throw new Error('The master materials list was already generated from this benchmark, so its BOQ links can no longer change here.');
+    // Links can be saved before and after the master materials list is generated: generated mappings are updated
+    // below so the list keeps the benchmark's BOQ links. Reviewed-benchmark mappings follow their own review.
     const rowIds = [...new Set(links.map(link => String(link.rowId)))];
     const rows = await tx.procurementBenchmarkItem.findMany({ where: { projectId, id: { in: rowIds } }, select: { id: true } });
     if (rows.length !== rowIds.length) throw new Error('Some benchmark lines no longer exist. Run the AI Check again.');
@@ -1136,7 +1136,15 @@ export async function saveProcurementBenchmarkBoqLinks(projectId: string, links:
       userId: actor.id, userRole: actor.role, moduleName: 'PROJECT_MANAGEMENT', transactionId: projectId, actionType: BENCHMARK_BOQ_LINKS_ACTION,
       oldValue: JSON.stringify({ links: current }), newValue: JSON.stringify({ links: next }),
     } });
-    return { saved: links.length, linked: Object.keys(next).length };
+    let materialsUpdated = 0;
+    for (const link of links) {
+      const updated = await tx.bOQMapping.updateMany({
+        where: { procurementBenchmarkItemId: String(link.rowId), mappingType: { not: 'BENCHMARK_REVIEW' }, consolidatedBoqItem: { projectId } },
+        data: { awardedBoqItemId: link.boqItemId || null },
+      });
+      materialsUpdated += updated.count;
+    }
+    return { saved: links.length, linked: Object.keys(next).length, materialsUpdated };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   revalidatePath(`/projects/${projectId}`);
   return result;

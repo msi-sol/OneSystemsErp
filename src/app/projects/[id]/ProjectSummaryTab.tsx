@@ -15,11 +15,15 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
       where: { id: projectId },
       include: {
         variationOrders: { where: { currentStatus: 'APPROVED' } },
-        billings: { where: { status: { in: ['APPROVED', 'SUBMITTED', 'PAID'] } }, include: { payments: true } },
+        // PARTIALLY_PAID was missing, so a billing dropped out of "Billed" and "Total Collections" as soon as the
+        // first payment was recorded.
+        billings: { where: { status: { in: ['APPROVED', 'SUBMITTED', 'PARTIALLY_PAID', 'PAID'] } }, include: { payments: true } },
         expenses: { where: { status: 'APPROVED' } },
         // Approved or paid only: drafts and billings still in validation are not costs yet.
         subcontractBillings: { where: { status: { in: ['APPROVED_FOR_PAYMENT', 'PAID'] } }, select: { currentGross: true } },
-        projectCostLedgers: { where: { approvalStatus: 'APPROVED' }, select: { netAmount: true } },
+        projectCostLedgers: { where: { approvalStatus: 'APPROVED' }, select: { netAmount: true, costCategory: true, referenceDocumentType: true } },
+        // Approved (or already billed) accomplishments: physical progress earned so far.
+        accomplishments: { where: { status: { in: ['APPROVED', 'BILLED'] } }, select: { approvedAmount: true } },
         materialRequests: true,
         workers: { where: { employmentStatus: 'ACTIVE' } },
         awardedBoqItems: { select: { id: true } },
@@ -66,12 +70,25 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
   const financialProgress = revisedContract > 0 ? (totalBilled / revisedContract) * 100 : 0;
 
   // Calculate Costs
-  const totalExpenses = project.expenses.reduce((sum, e) => sum + e.netAmount, 0);
+  // Approved direct and petty-cash expenses as posted to the actual-cost ledger. Summing approved Expense rows
+  // also counted supplier payment records (category MATERIALS), whose cost is already in the delivery postings.
+  const totalExpenses = project.projectCostLedgers
+    .filter(entry => entry.referenceDocumentType === 'DIRECT_EXPENSE' || entry.referenceDocumentType === 'PETTY_CASH')
+    .reduce((sum, entry) => sum + entry.netAmount, 0);
   const totalSubcontract = project.subcontractBillings.reduce((sum, sb) => sum + sb.currentGross, 0);
   // Match the approved actual-cost ledger used by the profitability module,
   // including delivery costs and avoiding a second sum of their source records.
   const totalCostToDate = project.projectCostLedgers.reduce((sum, entry) => sum + entry.netAmount, 0);
   const approvedActualCostEntries = project.projectCostLedgers.length;
+  // Actual cost by category (materials from approved deliveries, labor, subcontract…), so the breakdown adds up to
+  // the actual cost shown above. It used to list only petty-cash expenses and subcontract billings.
+  const costByCategory = Object.entries(project.projectCostLedgers.reduce<Record<string, number>>((totals, entry) => {
+    const key = (entry.costCategory || 'UNCODED').replaceAll('_', ' ');
+    totals[key] = (totals[key] || 0) + entry.netAmount;
+    return totals;
+  }, {})).sort((a, b) => b[1] - a[1]);
+  const earnedValue = project.accomplishments.reduce((sum, entry) => sum + (entry.approvedAmount || 0), 0);
+  const physicalProgress = revisedContract > 0 ? (earnedValue / revisedContract) * 100 : 0;
   
   // This balance excludes all future costs; keep the existing calculation but do not present it as a forecast.
   const contractLessActualCost = revisedContract - totalCostToDate;
@@ -151,6 +168,14 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
               <span>Billed: {formatCurrency(totalBilled)}</span>
               <span>Remaining: {formatCurrency(Math.max(0, revisedContract - totalBilled))}</span>
             </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', margin: '14px 0 8px' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Physical Progress (approved accomplishment)</span>
+              <span style={{ fontWeight: 'bold' }}>{physicalProgress < 0.1 && physicalProgress > 0 ? physicalProgress.toFixed(2) : physicalProgress.toFixed(1)}%</span>
+            </div>
+            <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.min(100, physicalProgress)}%`, height: '100%', background: '#10b981', borderRadius: '4px' }} />
+            </div>
+            <div style={{ fontSize: '0.8rem', marginTop: '8px', color: 'var(--text-secondary)' }}>Earned value: {formatCurrency(earnedValue)}</div>
           </div>
         </div>
 
@@ -316,6 +341,10 @@ export default async function ProjectSummaryTab({ projectId }: { projectId: stri
               <span style={{ color: 'var(--text-secondary)' }}>Subcontractor Billings (approved)</span>
               <span style={{ fontWeight: 'bold' }}>{formatCurrency(totalSubcontract)}</span>
             </div>
+            {costByCategory.map(([category, amount]) => <div key={category} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ color: 'var(--text-secondary)', textTransform: 'capitalize' }}>Actual cost · {category.toLowerCase()}</span>
+              <span style={{ fontWeight: 'bold' }}>{formatCurrency(amount)}</span>
+            </div>)}
             <div style={{ padding: '16px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '10px' }}>
               Detailed breakdowns are available in their respective tabs.
             </div>

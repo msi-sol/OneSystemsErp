@@ -8,10 +8,12 @@ export default function ProjectStatusOverride({ projectId, currentStatus }: { pr
   const [isEditing, setIsEditing] = useState(false);
   const [status, setStatus] = useState(currentStatus);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const router = useRouter();
 
   const handleSave = async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await fetch(`/api/projects/${projectId}`, {
         method: 'PUT',
@@ -19,13 +21,14 @@ export default function ProjectStatusOverride({ projectId, currentStatus }: { pr
         body: JSON.stringify({ status })
       });
       if (!res.ok) {
-        throw new Error('Failed to update project status');
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || 'The project status could not be changed.');
       }
       setIsEditing(false);
       router.refresh();
     } catch (error) {
-      console.error(error);
-      alert('Error updating status');
+      // Shown beside the control; alert() pop-ups were easy to miss.
+      setError(error instanceof Error ? error.message : 'The project status could not be changed.');
     } finally {
       setLoading(false);
     }
@@ -68,6 +71,7 @@ export default function ProjectStatusOverride({ projectId, currentStatus }: { pr
         <button onClick={() => { setIsEditing(false); setStatus(currentStatus); }} disabled={loading} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '4px' }}>
           <X size={16} />
         </button>
+        {error && <span role="alert" style={{ color: '#fca5a5', fontSize: '0.8rem' }}>{error}</span>}
       </div>
     );
   }

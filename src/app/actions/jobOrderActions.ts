@@ -4,6 +4,7 @@ import { verifySession } from '@/lib/dal/auth';
 
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
+import { backendErrorMessage } from '@/lib/backend-error';
 
 const API_ROUTE_PREFIX = '/api/jobOrderActions'; // New common prefix for all actions
 
@@ -27,7 +28,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Backend Error: ${res.status} ${errorText}`);
+    throw new Error(backendErrorMessage(res.status, errorText));
   }
   return res.json();
 }

@@ -4,6 +4,7 @@ import type { WorkspaceAnalysis, WorkspaceItem, WorkspaceMapping } from '@/lib/b
 import { RESOURCE_KINDS, type BreakdownKind, type PackageBreakdownUpload } from '@/lib/scheduling/package-breakdown';
 import type { PlanResource } from '@/lib/scheduling/work-package-details-types';
 import styles from '../planning/planning.module.css';
+import DupaAiCheck, { type DupaChoice } from './DupaAiCheck';
 
 type Props = { projectId: string; scheduleId: string; activityId: string; packageName: string; rowVersion: number;
   uploads: PackageBreakdownUpload[]; existingResourceCount: number; existingResources?: PlanResource[]; canEdit: boolean; onSaved: () => void;
@@ -33,10 +34,33 @@ export default function PackageBreakdownPanel(props: Props) {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [acknowledged, setAcknowledged] = useState<Record<string, boolean>>({});
   const [replacements, setReplacements] = useState<Record<string, string[]>>({});
+  /**
+   * How to use each uploaded DUPA (minutes 2026-11-09: the user picks the DUPA or the generated allowances):
+   * 'dupa' replaces every generated/draft line of the package, 'generated' keeps them (the DUPA stays as a reference
+   * file), 'advanced' picks individual lines to replace as before.
+   */
+  const [modes, setModes] = useState<Record<string, 'dupa' | 'generated' | 'advanced'>>({});
+  // Rows left out of the package when the DUPA is applied (saved from the DUPA AI Check, or toggled in the table).
+  const [excluded, setExcluded] = useState<Record<string, string[]>>({});
+  const isExcluded = (upload: PackageBreakdownUpload, row: string) => (excluded[upload.id] || []).includes(row);
+  const keptRows = (upload: PackageBreakdownUpload) => upload.rows.filter(row => !isExcluded(upload, String(row.sourceRowNumber)));
+  function saveAiChoices(upload: PackageBreakdownUpload, choices: DupaChoice[]) {
+    const nextCategories = { ...categories[upload.id] };
+    const nextExcluded = new Set(excluded[upload.id] || []);
+    for (const choice of choices) {
+      if (choice.kind === 'category') nextCategories[Number(choice.row)] = choice.proposed as BreakdownKind;
+      else if (choice.proposed === 'Leave out') nextExcluded.add(choice.row);
+      else nextExcluded.delete(choice.row);
+    }
+    setCategories({ ...categories, [upload.id]: nextCategories });
+    setExcluded({ ...excluded, [upload.id]: [...nextExcluded] });
+    setMessage(`Saved ${choices.length} suggestion${choices.length === 1 ? '' : 's'}. Check the rows below, then choose how to use this DUPA.`);
+  }
+  const replaceIdsFor = (upload: PackageBreakdownUpload) => modes[upload.id] === 'dupa' ? (props.existingResources ?? []).map(resource => resource.id) : replacements[upload.id] || [];
   const [version, setVersion] = useState({ source: props.rowVersion, value: props.rowVersion });
   const currentVersion = version.source === props.rowVersion ? version.value : props.rowVersion;
   // The user's choice wins; otherwise the category suggested by the row's DUPA section heading.
-  const chosenCategories = (upload: PackageBreakdownUpload) => Object.fromEntries(upload.rows.flatMap(row => {
+  const chosenCategories = (upload: PackageBreakdownUpload) => Object.fromEntries(upload.rows.filter(row => !(excluded[upload.id] || []).includes(String(row.sourceRowNumber))).flatMap(row => {
     const kind = categories[upload.id]?.[row.sourceRowNumber] ?? suggestedKind(row.section);
     return kind ? [[String(row.sourceRowNumber), kind]] : [];
   })) as Record<string, BreakdownKind>;
@@ -74,7 +98,7 @@ export default function PackageBreakdownPanel(props: Props) {
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(props.projectId)}/work-packages/details`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'apply-breakdown', scheduleId: props.scheduleId,
-          expectedRowVersion: currentVersion, fields: { uploadId: upload.id, categories: chosenCategories(upload), reason: reasons[upload.id] || '', acknowledgeExisting: acknowledged[upload.id] === true, replaceResourceIds: replacements[upload.id] || [] } }),
+          expectedRowVersion: currentVersion, fields: { uploadId: upload.id, categories: chosenCategories(upload), reason: reasons[upload.id] || (modes[upload.id] === 'dupa' ? 'Using the uploaded DUPA instead of the generated allowances.' : ''), acknowledgeExisting: modes[upload.id] === 'dupa' || acknowledged[upload.id] === true, replaceResourceIds: replaceIdsFor(upload), excludeRows: excluded[upload.id] || [] } }),
       });
       const result = await response.json(); if (!response.ok) throw new Error(result.error || 'The component costs could not be added.');
       setVersion({ source: props.rowVersion, value: result.rowVersion });
@@ -85,7 +109,7 @@ export default function PackageBreakdownPanel(props: Props) {
   function itemTable(items: WorkspaceItem[], upload?: PackageBreakdownUpload) {
     return <div className={styles.scroll} role="region" aria-label="Complete package breakdown rows" tabIndex={0}><table className={styles.table}>
       <thead><tr><th>Source row / section</th><th>Code / description</th><th>Quantity</th><th>Source rate</th><th>Amount</th>{upload && <th>Resource category</th>}</tr></thead>
-      <tbody>{items.map(row => <tr key={row.sourceRowNumber}><td>{row.sourceRowNumber} · {row.section}</td><th scope="row">{row.itemCode}<br/>{row.description}</th><td>{row.quantity} {row.unit}{(row.quantityDefaulted || row.unitDefaulted) && <p>Quantity or unit needs correction before adding costs.</p>}</td><td>{row.sourceUnitCost === null ? 'Not stated' : money(row.sourceUnitCost)}</td><td>{money(row.amount)}</td>{upload && <td>{upload.appliedAt ? upload.categories[String(row.sourceRowNumber)] : <select aria-label={`Category for source row ${row.sourceRowNumber}`} disabled={busy || !props.canEdit} value={chosenCategories(upload)[String(row.sourceRowNumber)] || ''} onChange={event => setCategories({ ...categories, [upload.id]: { ...categories[upload.id], [row.sourceRowNumber]: event.target.value as BreakdownKind } })}><option value="">Choose category</option>{RESOURCE_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select>}</td>}</tr>)}</tbody>
+      <tbody>{items.map(row => <tr key={row.sourceRowNumber} style={upload && !upload.appliedAt && isExcluded(upload, String(row.sourceRowNumber)) ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}><td>{row.sourceRowNumber} · {row.section}</td><th scope="row">{row.itemCode}<br/>{row.description}</th><td>{row.quantity} {row.unit}{(row.quantityDefaulted || row.unitDefaulted) && <p>Quantity or unit needs correction before adding costs.</p>}</td><td>{row.sourceUnitCost === null ? 'Not stated' : money(row.sourceUnitCost)}</td><td>{money(row.amount)}</td>{upload && <td>{upload.appliedAt ? (upload.excludedRows?.includes(String(row.sourceRowNumber)) ? 'Left out' : upload.categories[String(row.sourceRowNumber)]) : isExcluded(upload, String(row.sourceRowNumber)) ? <button type="button" className={styles.secondary} style={{ textDecoration: 'none' }} onClick={() => setExcluded({ ...excluded, [upload.id]: (excluded[upload.id] || []).filter(value => value !== String(row.sourceRowNumber)) })}>Left out · keep it</button> : <select aria-label={`Category for source row ${row.sourceRowNumber}`} disabled={busy || !props.canEdit} value={chosenCategories(upload)[String(row.sourceRowNumber)] || ''} onChange={event => setCategories({ ...categories, [upload.id]: { ...categories[upload.id], [row.sourceRowNumber]: event.target.value as BreakdownKind } })}><option value="">Choose category</option>{RESOURCE_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select>}</td>}</tr>)}</tbody>
     </table></div>;
   }
   return <section className={styles.panel} id="package-breakdown"><h3>Package breakdown / DUPA</h3>
@@ -115,11 +139,24 @@ export default function PackageBreakdownPanel(props: Props) {
       <a className={styles.link} href={`${endpoint}?scheduleId=${encodeURIComponent(props.scheduleId)}&uploadId=${encodeURIComponent(upload.id)}`}>Download preserved original</a>
       {itemTable(upload.rows, upload)}
       {!!upload.replacedResources?.length && <details><summary>{upload.replacedResources.length} replaced draft rows (retained history)</summary><ul>{upload.replacedResources.map(row => <li key={row.id}>{row.kind} · {row.description} · {row.quantity} {row.unit} · {money(row.amount)}</li>)}</ul></details>}{upload.appliedAt ? <p>Applied {new Date(upload.appliedAt).toLocaleString('en-PH')} · {upload.reason}. Imported resources retain this upload and source-row reference; later resource edits do not change the original.</p> : props.canEdit && <>
-        <p className={styles.muted}>Choose any existing draft allowance rows that this DUPA replaces. Unselected rows remain. Replaced values and your reason are retained in the upload history. BOQ scope and approved baselines stay unchanged; new costs require review.</p>
-        {!!props.existingResources?.length && <fieldset><legend>Draft rows to replace (optional)</legend>{props.existingResources.map(resource => <label key={resource.id} style={{display:'block',marginBottom:8}}><input type="checkbox" disabled={busy} checked={(replacements[upload.id] || []).includes(resource.id)} onChange={event => setReplacements(current => ({...current,[upload.id]: event.target.checked ? [...current[upload.id] || [],resource.id] : (current[upload.id] || []).filter(id => id !== resource.id)}))}/>{resource.kind} · {resource.description} · {resource.quantity} {resource.unit} · {money(resource.amount)}</label>)}</fieldset>}
-        <label htmlFor={`breakdown-reason-${upload.id}`}>Reason / relationship to generated or existing package costs</label><textarea id={`breakdown-reason-${upload.id}`} maxLength={500} value={reasons[upload.id] || ''} disabled={busy} onChange={event => setReasons({ ...reasons, [upload.id]: event.target.value })}/>
-        {props.existingResourceCount > 0 && <label><input type="checkbox" checked={acknowledged[upload.id] || false} disabled={busy} onChange={event => setAcknowledged({ ...acknowledged, [upload.id]: event.target.checked })}/> I reviewed the {props.existingResourceCount} existing resource rows. I checked the selected replacements and the additional costs that will remain.</label>}
-        <button className={styles.button} disabled={busy || upload.rows.some(row => !chosenCategories(upload)[String(row.sourceRowNumber)]) || (reasons[upload.id]?.trim().length || 0) < 5 || (props.existingResourceCount > 0 && !acknowledged[upload.id])} onClick={() => void apply(upload)}>Add reviewed component rows to draft resources</button>
+        <DupaAiCheck projectId={props.projectId} scheduleId={props.scheduleId} uploadId={upload.id} disabled={busy} onSave={choices => saveAiChoices(upload, choices)} />
+        <fieldset className={styles.panel} style={{ margin: '12px 0' }}>
+          <legend style={{ fontWeight: 600 }}>Which costs should this package use?</legend>
+          <label style={{ display: 'block', marginBottom: 8 }}><input type="radio" name={`dupa-mode-${upload.id}`} disabled={busy} checked={modes[upload.id] === 'dupa'} onChange={() => setModes({ ...modes, [upload.id]: 'dupa' })}/> <strong>Use this DUPA</strong> · its lines replace {props.existingResources?.length ? `the ${props.existingResources.length} current allowance line${props.existingResources.length === 1 ? '' : 's'}` : 'the package allowances'}</label>
+          <label style={{ display: 'block', marginBottom: 8 }}><input type="radio" name={`dupa-mode-${upload.id}`} disabled={busy} checked={modes[upload.id] === 'generated'} onChange={() => setModes({ ...modes, [upload.id]: 'generated' })}/> <strong>Keep the generated allowances</strong> · nothing changes; this DUPA stays as a reference file</label>
+          <label style={{ display: 'block' }}><input type="radio" name={`dupa-mode-${upload.id}`} disabled={busy} checked={modes[upload.id] === 'advanced'} onChange={() => setModes({ ...modes, [upload.id]: 'advanced' })}/> Advanced: add the DUPA lines and choose which current lines they replace</label>
+        </fieldset>
+        {modes[upload.id] === 'generated' && <p role="status" className={styles.muted}>The generated allowances stay as they are. You can switch to this DUPA later.</p>}
+        {(modes[upload.id] === 'dupa' || modes[upload.id] === 'advanced') && <>
+          {modes[upload.id] === 'advanced' && <>
+            <p className={styles.muted}>Tick the current lines this DUPA replaces. Unticked lines stay and the DUPA lines are added. Replaced values and your reason are kept in the upload history.</p>
+            {!!props.existingResources?.length && <fieldset><legend>Current lines to replace (optional)</legend>{props.existingResources.map(resource => <label key={resource.id} style={{display:'block',marginBottom:8}}><input type="checkbox" disabled={busy} checked={(replacements[upload.id] || []).includes(resource.id)} onChange={event => setReplacements(current => ({...current,[upload.id]: event.target.checked ? [...current[upload.id] || [],resource.id] : (current[upload.id] || []).filter(id => id !== resource.id)}))}/>{resource.kind} · {resource.description} · {resource.quantity} {resource.unit} · {money(resource.amount)}</label>)}</fieldset>}
+            {props.existingResourceCount > 0 && <label><input type="checkbox" checked={acknowledged[upload.id] || false} disabled={busy} onChange={event => setAcknowledged({ ...acknowledged, [upload.id]: event.target.checked })}/> I reviewed the {props.existingResourceCount} current lines, the ones I am replacing and the costs that will remain.</label>}
+          </>}
+          <label htmlFor={`breakdown-reason-${upload.id}`}>Reason (kept in the history)</label><textarea id={`breakdown-reason-${upload.id}`} maxLength={500} placeholder={modes[upload.id] === 'dupa' ? 'Using the uploaded DUPA instead of the generated allowances.' : 'Why these DUPA lines are added'} value={reasons[upload.id] || ''} disabled={busy} onChange={event => setReasons({ ...reasons, [upload.id]: event.target.value })}/>
+          {keptRows(upload).some(row => !chosenCategories(upload)[String(row.sourceRowNumber)]) && <p className={styles.muted}>Choose a category (material, labor or equipment) for every row in the table above first.</p>}
+          <button className={styles.button} disabled={busy || keptRows(upload).some(row => !chosenCategories(upload)[String(row.sourceRowNumber)]) || (modes[upload.id] === 'advanced' && ((reasons[upload.id]?.trim().length || 0) < 5 || (props.existingResourceCount > 0 && !acknowledged[upload.id]))) || (modes[upload.id] === 'dupa' && !!reasons[upload.id] && reasons[upload.id].trim().length < 5)} onClick={() => void apply(upload)}>{modes[upload.id] === 'dupa' ? 'Use this DUPA for the package' : 'Add the DUPA lines'}</button>
+        </>}
       </>}
     </details>)}
   </section>;

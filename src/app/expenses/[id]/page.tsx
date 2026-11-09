@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { redirect } from 'next/navigation';
 import styles from '../../projects/page.module.css';
 import Link from 'next/link';
+import ExpenseReviewButtons from './ExpenseReviewButtons';
 
 export default async function ExpenseDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -43,7 +44,9 @@ export default async function ExpenseDetailsPage({ params }: { params: Promise<{
 
   const getStatusColor = (status: string) => {
     switch(status.toUpperCase()) {
-      case 'LOGGED': return '#4ade80';
+      case 'LOGGED': return '#fbbf24';
+      case 'APPROVED': return '#4ade80';
+      case 'REJECTED': return '#f87171';
       case 'PAID': return '#00ffa3';
       case 'DRAFT': return '#fbbf24';
       default: return '#94a3b8';
@@ -77,6 +80,7 @@ export default async function ExpenseDetailsPage({ params }: { params: Promise<{
           )}
         </h1>
         <p style={{ color: '#aaa', margin: '5px 0 0 0' }}>Ref: {expense.receiptRef || expense.id}</p>
+        {['LOGGED', 'DRAFT', 'SUBMITTED'].includes(expense.status) && <ExpenseReviewButtons expenseId={expense.id} />}
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '30px' }}>

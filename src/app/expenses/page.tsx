@@ -87,13 +87,14 @@ export default async function ExpensesPage() {
               <th>Net Amount</th>
               <th>VAT Input</th>
               <th>Total Amount</th>
+              <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {expenses.length === 0 ? (
               <tr>
-                <td colSpan={8} className={styles.emptyState}>No expenses recorded.</td>
+                <td colSpan={9} className={styles.emptyState}>No expenses recorded.</td>
               </tr>
             ) : expenses.map(expense => {
               const payable = expense.receiptRef ? payableMap.get(expense.receiptRef) : null;
@@ -128,6 +129,10 @@ export default async function ExpensesPage() {
                 <td className={styles.amount} style={{ whiteSpace: 'nowrap', fontWeight: 'bold', color: 'var(--accent-color)' }}>
                   ₱ {expense.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
+                {/* LOGGED expenses await approval; only APPROVED ones count as project cost. */}
+                <td style={{ whiteSpace: 'nowrap', fontWeight: 600, fontSize: '0.8rem', color: expense.status === 'APPROVED' ? '#4ade80' : expense.status === 'REJECTED' ? '#f87171' : '#fbbf24' }}>
+                  {expense.status === 'LOGGED' ? 'For approval' : expense.status.replaceAll('_', ' ')}
+                </td>
                 <td>
                   <Link href={`/expenses/${expense.id}`} className={styles.actionLink}>View Details</Link>
                 </td>
@@ -148,6 +153,7 @@ export default async function ExpensesPage() {
                 <td className={styles.amount} style={{ whiteSpace: 'nowrap', color: 'var(--accent-color)' }}>
                   ₱ {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
+                <td></td>
                 <td></td>
               </tr>
             </tfoot>

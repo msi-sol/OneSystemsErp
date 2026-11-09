@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { requirePermission } from '../lib/permissions';
 // @ts-nocheck
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -7,7 +8,10 @@ const router = Router();
 // Helper for consistent error handling
 const handleError = (res: Response, error: any, message: string) => {
   console.error(message, error);
-  res.status(500).json({ success: false, error: error.message || 'An unexpected error occurred' });
+  // Database errors include the query and server paths; show a plain message instead (details stay in the log).
+  const isDatabaseError = typeof error?.name === 'string' && error.name.startsWith('PrismaClient');
+  const duplicate = error?.code === 'P2002';
+  res.status(duplicate ? 409 : 500).json({ success: false, error: duplicate ? 'A record with the same details already exists.' : isDatabaseError ? 'The record could not be saved. Check the entries and try again.' : (error.message || 'An unexpected error occurred') });
 };
 
 // --- SUBCONTRACTOR READ --- 
@@ -143,10 +147,32 @@ router.post('/getSubcontractPackageById', async (req: Request, res: Response) =>
 
 // --- MUTATIONS ---
 
+/**
+ * Maps the subcontractor form to the database columns. The form's "Trade category" is stored in `specialization`
+ * (the tradeCategory column was removed) and a GCash number goes to the bank fields when no bank is given; the raw
+ * form used to be passed straight to Prisma, so every registration failed with "Unknown argument tradeCategory".
+ */
+const SUBCONTRACTOR_TEXT_FIELDS = ['businessName', 'address', 'contactPerson', 'contactNumber', 'email', 'tin', 'birReg', 'dtiSecReg', 'mayorPermit', 'pcabLicense', 'bankName', 'bankAccountName', 'bankAccountNumber', 'remarks'] as const;
+const BUSINESS_TYPES = ['CORPORATION', 'PARTNERSHIP', 'SOLE_PROPRIATOR', 'INDIVIDUAL_CONTRACTOR'];
+function subcontractorData(input: any) {
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+  const data: Record<string, unknown> = {};
+  if (input?.name !== undefined) data.name = typeof input.name === 'string' ? input.name.trim().replace(/\s+/g, ' ') : '';
+  for (const field of SUBCONTRACTOR_TEXT_FIELDS) if (input?.[field] !== undefined) data[field] = text(input[field]);
+  if (input?.businessType !== undefined) data.businessType = BUSINESS_TYPES.includes(input.businessType) ? input.businessType : 'CORPORATION';
+  if (input?.tradeCategory !== undefined) data.specialization = text(input.tradeCategory) ? [text(input.tradeCategory)] : null;
+  const gcash = text(input?.gcashNumber);
+  if (gcash && !text(input?.bankAccountNumber)) { data.bankName = text(input?.bankName) ?? 'GCash'; data.bankAccountNumber = gcash; }
+  return data;
+}
+
 router.post('/createSubcontractor', async (req: Request, res: Response) => {
   try {
-    const { data } = req.body;
-    const result = await prisma.subcontractor.create({ data });
+    const data = subcontractorData(req.body.data);
+    if (!data.name) return res.status(400).json({ success: false, error: 'Enter the subcontractor name.' });
+    const sameName = (await prisma.subcontractor.findMany({ select: { name: true } })).some(other => other.name.trim().toLowerCase().replace(/\s+/g, ' ') === String(data.name).toLowerCase());
+    if (sameName) return res.status(409).json({ success: false, error: 'A subcontractor with the same name already exists.' });
+    const result = await prisma.subcontractor.create({ data: data as any });
     res.json({ success: true, data: result });
   } catch (error: any) {
     handleError(res, error, 'Prisma Error in createSubcontractor:');
@@ -155,9 +181,11 @@ router.post('/createSubcontractor', async (req: Request, res: Response) => {
 
 router.post('/updateSubcontractor', async (req: Request, res: Response) => {
   try {
-    const { id, data } = req.body;
+    const { id } = req.body;
     if (!id) return res.status(400).json({ success: false, error: 'Subcontractor ID is required' });
-    const result = await prisma.subcontractor.update({ where: { id }, data });
+    const data = subcontractorData(req.body.data);
+    if (data.name !== undefined && !data.name) return res.status(400).json({ success: false, error: 'Enter the subcontractor name.' });
+    const result = await prisma.subcontractor.update({ where: { id }, data: data as any });
     res.json({ success: true, data: result });
   } catch (error: any) {
     handleError(res, error, 'Prisma Error in updateSubcontractor:');
@@ -321,7 +349,34 @@ router.post('/updateSubcontractPackageStatus', async (req: Request, res: Respons
     const { id, status } = req.body;
     if (!id) return res.status(400).json({ success: false, error: 'Subcontract Package ID is required' });
     if (!status) return res.status(400).json({ success: false, error: 'Status is required' });
-    const result = await prisma.subcontractPackage.update({ where: { id }, data: { status } });
+    // The approval chain is Draft -> Checking (PM) -> Endorsement (PD) -> Approved. Any status used to be accepted
+    // from anyone, so a package could be approved in one step by any user.
+    const TRANSITIONS: Record<string, { from: string[]; permission: string }> = {
+      FOR_REVIEW: { from: ['DRAFT', 'RETURNED'], permission: 'canSubmit' },
+      FOR_FINAL_APPROVAL: { from: ['FOR_REVIEW'], permission: 'canApprove' },
+      APPROVED: { from: ['FOR_FINAL_APPROVAL'], permission: 'canApprove' },
+    };
+    const FAST_APPROVERS = ['SUPER_ADMIN', 'ADMIN', 'PROJECT_DIRECTOR'];
+    const transition = TRANSITIONS[status];
+    if (!transition) return res.status(400).json({ success: false, error: 'This status change is not supported here.' });
+    const userId = req.body.sessionId as string;
+    const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { role: true } }) : null;
+    if (!user) return res.status(401).json({ success: false, error: 'Unauthorized' });
+    const role = req.body.simulatedRole || user.role;
+    const current = await prisma.subcontractPackage.findUnique({ where: { id }, select: { status: true } });
+    if (!current) return res.status(404).json({ success: false, error: 'Subcontract package not found.' });
+    // Directors/admins may approve directly from any pre-approval stage (the "Fast Approve" shortcut).
+    const fastApproval = status === 'APPROVED' && FAST_APPROVERS.includes(role) && ['DRAFT', 'RETURNED', 'FOR_REVIEW', 'FOR_FINAL_APPROVAL'].includes(current.status);
+    if (!fastApproval && !transition.from.includes(current.status)) {
+      return res.status(409).json({ success: false, error: `This package is ${current.status.replace(/_/g, ' ').toLowerCase()}; it cannot move to ${status.replace(/_/g, ' ').toLowerCase()} from there.` });
+    }
+    await requirePermission(userId, 'SUBCONTRACTING', transition.permission, req.body.simulatedRole);
+    const moved = await prisma.subcontractPackage.updateMany({
+      where: { id, status: current.status },
+      data: { status, ...(status === 'APPROVED' ? { isLocked: true } : {}) },
+    });
+    if (moved.count !== 1) return res.status(409).json({ success: false, error: 'The package changed meanwhile. Refresh and try again.' });
+    const result = await prisma.subcontractPackage.findUnique({ where: { id } });
     res.json({ success: true, data: result });
   } catch (error: any) {
     handleError(res, error, 'Prisma Error in updateSubcontractPackageStatus:');

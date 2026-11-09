@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { saveWorkerProfile, deleteWorker } from '@/app/actions/workerActions';
 import { useRouter } from 'next/navigation';
 
-export default function WorkerFormModal({ worker, onClose }: { worker: any, onClose: () => void }) {
+export default function WorkerFormModal({ worker, projects = [], onClose }: { worker: any, projects?: Array<{ id: string; name: string }>, onClose: () => void }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -27,7 +27,10 @@ export default function WorkerFormModal({ worker, onClose }: { worker: any, onCl
     bankAccountName: '',
     rateType: 'DAILY_RATE',
     basicMonthlySalary: 0,
-    hourlyRate: 0
+    hourlyRate: 0,
+    // The site the worker is assigned to: counted under the project's "Active Site Workers" and charged with
+    // their payroll. No form set it before, so every project showed 0 site workers.
+    projectId: ''
   });
 
   const handlePayrollCategoryChange = (val: string) => {
@@ -65,7 +68,8 @@ export default function WorkerFormModal({ worker, onClose }: { worker: any, onCl
         bankAccountName: worker.bankAccountName || '',
         rateType: worker.rateType || 'DAILY_RATE',
         basicMonthlySalary: worker.basicMonthlySalary || 0,
-        hourlyRate: worker.hourlyRate || 0
+        hourlyRate: worker.hourlyRate || 0,
+        projectId: worker.projectId || ''
       });
     } else {
       // Pre-assign unique employee number for new workers
@@ -127,6 +131,14 @@ export default function WorkerFormModal({ worker, onClose }: { worker: any, onCl
         <form onSubmit={handleSubmit} style={{ padding: '35px' }}>
           {error && <div style={{ background: 'rgba(255, 107, 107, 0.1)', color: '#ff6b6b', padding: '15px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem', border: '1px solid rgba(255, 107, 107, 0.3)' }}>{error}</div>}
 
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>Assigned Project / Site</label>
+            <select value={formData.projectId} onChange={(e) => setFormData({...formData, projectId: e.target.value})} style={{ width: '100%', padding: '12px 15px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--glass-border)', color: '#fff', outline: 'none' }}>
+              <option value="">Not assigned (office / pool)</option>
+              {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>Employee No / ID</label>
@@ -134,7 +146,7 @@ export default function WorkerFormModal({ worker, onClose }: { worker: any, onCl
             </div>
             <div>
               <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>Position</label>
-              <select value={formData.workerCategory} onChange={(e) => setFormData({...formData, workerCategory: e.target.value})} style={{ width: '100%', padding: '12px 15px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--glass-border)', color: '#fff', outline: 'none' }}>
+              <select value={formData.workerCategory} onChange={(e) => setFormData({...formData, workerCategory: e.target.value, designation: e.target.value})} style={{ width: '100%', padding: '12px 15px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--glass-border)', color: '#fff', outline: 'none' }}>
                 <optgroup label="Management & Engineering" style={{ background: 'var(--bg-secondary)' }}>
                   <option value="Project Director">Project Director</option>
                   <option value="Project Manager">Project Manager</option>

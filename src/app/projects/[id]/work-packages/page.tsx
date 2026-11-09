@@ -75,7 +75,7 @@ export default async function WorkPackagesModulePage({params,searchParams}:{para
       }
     }
   }
-  const viewLabels:Record<string,string>={scope:'Scope',sequence:'Dates & sequence',locations:'Locations & constraints',constraints:'Locations & constraints',resources:'Resources & DUPA',review:'Review & approve','look-ahead':'Look-ahead',weekly:'Weekly commitments','site-logs':'Daily site logs','operational-constraints':'Site constraints'};
+  const viewLabels:Record<string,string>={scope:'Scope',sequence:'Dates & schedule',locations:'Locations & constraints',constraints:'Locations & constraints',resources:'Resources & DUPA',review:'Review & approve','look-ahead':'Look-ahead',weekly:'Weekly commitments','site-logs':'Daily site logs','operational-constraints':'Site constraints'};
   const openPackage=query.package?selected?.activities.find(activity=>activity.id===query.package):undefined;
   const trail=openPackage?[{label:`${openPackage.activityCode?`${openPackage.activityCode} · `:''}${openPackage.name}`}]:query.view&&viewLabels[query.view]?[{label:viewLabels[query.view]}]:[];
   return <PlanningModuleShell project={project} active="work-packages" trail={trail}><WorkPackageModuleClient key={`${selected?.id||'empty'}:${query.package||''}:${query.activity||''}`} projectId={id} projectStartDate={project.startDate?.toISOString()||null} projectSite={project.location?.trim().slice(0,191)||'Project site'}

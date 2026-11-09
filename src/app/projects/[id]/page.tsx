@@ -16,6 +16,7 @@ import ProjectVariationOrdersTab from './ProjectVariationOrdersTab';
 import ModuleKnowledgeTab from '@/app/knowledge-center/ModuleKnowledgeTab';
 import ProfitabilityTab from './ProfitabilityTab';
 import ProcurementBenchmarkTab from './ProcurementBenchmarkTab';
+import MaterialsFlowCard, { type MaterialsFlowState } from './MaterialsFlowCard';
 import type { Prisma } from '@prisma/client';
 import { readBenchmarkBoqLinks } from '@/lib/boq/benchmark-boq-links';
 import ProjectCostLedgerTab from './ProjectCostLedgerTab';
@@ -115,6 +116,15 @@ export default async function ProjectDetailsPage({
     const boqItems = boqIds.length ? await prisma.awardedBOQItem.findMany({ where: { projectId: id, id: { in: boqIds } }, select: { id: true, itemCode: true, description: true } }) : [];
     const labels = new Map(boqItems.map(item => [item.id, `${item.itemCode} · ${item.description.replace(/\s+/g, ' ').slice(0, 60)}`]));
     for (const [rowId, boqId] of Object.entries(links)) { const label = labels.get(boqId); if (label) benchmarkBoqLinks[rowId] = label; }
+  }
+  // Benchmark and Master Materials tabs share one progress card (upload → lock → generate → lock list).
+  let materialsFlow: MaterialsFlowState | null = null;
+  if (tab === 'benchmark' || tab === 'consolidation') {
+    const [materials, review] = await Promise.all([
+      prisma.consolidatedBOQItem.count({ where: { projectId: id } }),
+      prisma.auditLog.findFirst({ where: { moduleName: 'PROJECT_MANAGEMENT', transactionId: id, actionType: 'PROCUREMENT_BENCHMARK_REVIEW_STATE' }, select: { id: true } }),
+    ]);
+    materialsFlow = { benchmarkLines: project.procurementBenchmarkItems?.length ?? 0, benchmarkLocked: !!project.procurementBenchmarkLocked, materials, materialsLocked: !!project.consolidatedBOQLocked, reviewed: !!review };
   }
   const [boqEditAccess, boqApprovalAccess] = isDraftBoq ? await Promise.all([
     checkSchedulingAccess(actor.id, actor.role, id, 'canEditDraft'),
@@ -368,6 +378,8 @@ export default async function ProjectDetailsPage({
         </>
       )}
 
+      {materialsFlow && (tab === 'benchmark' || tab === 'consolidation') && <MaterialsFlowCard projectId={project.id} tab={tab} state={materialsFlow} />}
+
       {tab === 'benchmark' && (
         <ProcurementBenchmarkTab
           projectId={project.id} 
@@ -376,6 +388,8 @@ export default async function ProjectDetailsPage({
           totalItems={(project.procurementBenchmarkItems || []).length}
           totalAmount={(project.procurementBenchmarkItems || []).reduce((acc: number, cur: any) => acc + cur.totalCost, 0)}
           boqLinks={benchmarkBoqLinks}
+          contractAmount={project.contractAmount || 0}
+          materialsGenerated={(materialsFlow?.materials ?? 0) > 0}
         />
       )}
 

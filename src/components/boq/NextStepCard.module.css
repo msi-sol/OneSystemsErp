@@ -46,3 +46,5 @@
   .steps summary { padding-inline: 16px; }
   .steps ol { padding-inline: 16px; }
 }
+
+.letter { font-size: 0.72rem; font-weight: 800; line-height: 1; }

@@ -42,7 +42,7 @@ export default function PayslipModal({ payroll, dtrs, onClose }: { payroll: any,
           <h3 style={{ margin: '0 0 15px 0', color: 'var(--text-secondary)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Earnings</h3>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ccc' }}>
             <span>{payroll.worker?.rateType === 'MONTHLY_SALARY' ? 'Monthly Rate' : payroll.worker?.rateType === 'HOURLY_RATE' ? 'Hourly Rate' : 'Daily Rate'}</span>
-            <span>₱{(payroll.worker?.rateType === 'MONTHLY_SALARY' ? payroll.worker?.basicMonthlySalary : payroll.worker?.rateType === 'HOURLY_RATE' ? payroll.worker?.hourlyRate : payroll.worker?.dailyRate)?.toLocaleString(undefined, {minimumFractionDigits: 2}) || '0.00'}</span>
+            <span>₱{(payroll.worker?.rateType === 'MONTHLY_SALARY' ? payroll.worker?.basicMonthlySalary : payroll.worker?.rateType === 'HOURLY_RATE' ? payroll.worker?.hourlyRate : payroll.worker?.dailyRate)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ccc' }}>
             <span>Days Worked</span>
@@ -50,15 +50,15 @@ export default function PayslipModal({ payroll, dtrs, onClose }: { payroll: any,
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#fff' }}>
             <span>Basic Pay</span>
-            <span>₱{payroll.basicPay?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span>₱{payroll.basicPay?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#fff' }}>
             <span>Overtime Pay</span>
-            <span>₱{payroll.overtimePay?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span>₱{payroll.overtimePay?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px', paddingTop: '15px', borderTop: '1px solid var(--glass-border)', color: '#00ffa3', fontWeight: 'bold' }}>
             <span>Gross Pay</span>
-            <span>₱{payroll.grossPay?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span>₱{payroll.grossPay?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
         </div>
 
@@ -67,48 +67,48 @@ export default function PayslipModal({ payroll, dtrs, onClose }: { payroll: any,
           {payroll.sssDeduction > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ffcccb' }}>
               <span>SSS Contribution</span>
-              <span>- ₱{payroll.sssDeduction?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+              <span>- ₱{payroll.sssDeduction?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
           {payroll.philhealthDeduction > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ffcccb' }}>
               <span>PhilHealth</span>
-              <span>- ₱{payroll.philhealthDeduction?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+              <span>- ₱{payroll.philhealthDeduction?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
           {payroll.pagibigDeduction > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ffcccb' }}>
               <span>Pag-IBIG</span>
-              <span>- ₱{payroll.pagibigDeduction?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+              <span>- ₱{payroll.pagibigDeduction?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
           {payroll.withholdingTax > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ffcccb' }}>
               <span>Withholding Tax (BIR)</span>
-              <span>- ₱{payroll.withholdingTax?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+              <span>- ₱{payroll.withholdingTax?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
           {payroll.cashAdvance > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ffcccb' }}>
               <span>Cash Advance</span>
-              <span>- ₱{payroll.cashAdvance?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+              <span>- ₱{payroll.cashAdvance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
           {payroll.loanDeduction > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', color: '#ffcccb' }}>
               <span>Loan Installment</span>
-              <span>- ₱{payroll.loanDeduction?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+              <span>- ₱{payroll.loanDeduction?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px', paddingTop: '15px', borderTop: '1px solid var(--glass-border)', color: '#ff6b6b', fontWeight: 'bold' }}>
             <span>Total Deductions</span>
-            <span>- ₱{payroll.totalDeductions?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+            <span>- ₱{payroll.totalDeductions?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(46, 204, 113, 0.1)', border: '1px solid rgba(46, 204, 113, 0.3)', padding: '20px', borderRadius: '12px', marginBottom: '20px' }}>
           <span style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 'bold' }}>Net Take Home Pay</span>
-          <span style={{ color: '#2ecc71', fontSize: '1.5rem', fontWeight: 'bold' }}>₱{payroll.netPay?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+          <span style={{ color: '#2ecc71', fontSize: '1.5rem', fontWeight: 'bold' }}>₱{payroll.netPay?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
 
         <div style={{ background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '12px', border: '1px solid var(--glass-border)', marginBottom: '20px' }}>

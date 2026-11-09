@@ -272,7 +272,7 @@ export default function PayrollClient({ periods, workers, projects, currentUserI
                 <tr key={worker.id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
                   <td style={{ padding: '15px 20px', fontWeight: 'bold' }}>{worker.workerId || 'N/A'}</td>
                   <td style={{ padding: '15px 20px' }}>{worker.lastName}, {worker.firstName} {worker.middleName || ''}</td>
-                  <td style={{ padding: '15px 20px' }}>{worker.designation}</td>
+                  <td style={{ padding: '15px 20px' }}>{worker.designation || worker.workerCategory || '—'}</td>
                   <td style={{ padding: '15px 20px' }}>
                     <span style={{ background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', border: '1px solid var(--glass-border)' }}>
                       {worker.employmentType.replace('_', ' ')}
@@ -309,6 +309,7 @@ export default function PayrollClient({ periods, workers, projects, currentUserI
       {isWorkerModalOpen && (
         <WorkerFormModal 
           worker={editingWorker}
+          projects={projects}
           onClose={() => { setIsWorkerModalOpen(false); setEditingWorker(null); }}
         />
       )}

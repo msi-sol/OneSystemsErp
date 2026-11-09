@@ -10,7 +10,7 @@ export default async function EditJobOrderPage({ params }: { params: Promise<{ i
   const [joRes, projects, subcontractors] = await Promise.all([
     getJobOrderById(id),
     prisma.project.findMany({ select: { id: true, name: true, contractNumber: true } }),
-    prisma.subcontractor.findMany({ select: { id: true, name: true, /* tradeCategory removed */ } })
+    prisma.subcontractor.findMany({ select: { id: true, name: true, specialization: true } })
   ]);
 
   if (!joRes.success || !joRes.data) {

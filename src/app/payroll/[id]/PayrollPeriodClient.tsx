@@ -431,9 +431,9 @@ export default function PayrollPeriodClient({ period, workers, boqItems = [], ba
                         {p.worker?.payrollCategory || 'Uncategorized'} | {p.paymentMethod || 'Manual Hold'}
                       </span>
                     </td>
-                    <td style={{ padding: '15px 20px' }}>₱{p.grossPay.toLocaleString()}</td>
-                    <td style={{ padding: '15px 20px', color: '#ff6b6b' }}>- ₱{p.totalDeductions.toLocaleString()}</td>
-                    <td style={{ padding: '15px 20px', fontWeight: 'bold', fontSize: '1.1rem', color: '#00ffa3' }}>₱{p.netPay.toLocaleString()}</td>
+                    <td style={{ padding: '15px 20px' }}>₱{p.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style={{ padding: '15px 20px', color: '#ff6b6b' }}>- ₱{p.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style={{ padding: '15px 20px', fontWeight: 'bold', fontSize: '1.1rem', color: '#00ffa3' }}>₱{p.netPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td style={{ padding: '15px 20px' }}>
                       {p.paymentStatus === 'EXCEPTION' ? (
                         <span style={{ background: 'rgba(255,107,107,0.1)', color: '#ff6b6b', border: '1px solid rgba(255,107,107,0.3)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', display: 'inline-block', lineHeight: 1.2 }}>
@@ -475,9 +475,9 @@ export default function PayrollPeriodClient({ period, workers, boqItems = [], ba
               <tfoot>
                 <tr style={{ background: 'rgba(0,0,0,0.3)', borderTop: '2px solid var(--glass-border)', fontWeight: 'bold' }}>
                   <td style={{ padding: '15px 20px', color: 'var(--text-secondary)', textAlign: 'right' }}>TOTAL:</td>
-                  <td style={{ padding: '15px 20px', color: '#fff' }}>₱{period.payrolls.reduce((sum: number, p: any) => sum + p.grossPay, 0).toLocaleString()}</td>
-                  <td style={{ padding: '15px 20px', color: '#ff6b6b' }}>- ₱{period.payrolls.reduce((sum: number, p: any) => sum + p.totalDeductions, 0).toLocaleString()}</td>
-                  <td style={{ padding: '15px 20px', color: '#00ffa3', fontSize: '1.2rem' }}>₱{period.payrolls.reduce((sum: number, p: any) => sum + p.netPay, 0).toLocaleString()}</td>
+                  <td style={{ padding: '15px 20px', color: '#fff' }}>₱{period.payrolls.reduce((sum: number, p: any) => sum + p.grossPay, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={{ padding: '15px 20px', color: '#ff6b6b' }}>- ₱{period.payrolls.reduce((sum: number, p: any) => sum + p.totalDeductions, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={{ padding: '15px 20px', color: '#00ffa3', fontSize: '1.2rem' }}>₱{period.payrolls.reduce((sum: number, p: any) => sum + p.netPay, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td colSpan={2} style={{ padding: '15px 20px' }}></td>
                 </tr>
               </tfoot>

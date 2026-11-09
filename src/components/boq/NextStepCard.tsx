@@ -7,6 +7,9 @@ import styles from './NextStepCard.module.css';
  * The shared "where am I / what next" card for BOQ Workspace, BOQ and Work Packages.
  * Orientation only: approval and access remain enforced by each module.
  */
+/** Sub-steps use letters (A, B, C…) so they are not confused with the numbered 1-2-3 stages above them. */
+const stepLetter = (index: number) => String.fromCharCode(65 + index);
+
 export default function NextStepCard({ lifecycle, stepsLabel = 'Steps in this stage' }: { lifecycle: PlanningLifecycle; stepsLabel?: string }) {
   const { phase, complete, steps, next } = lifecycle;
   const doneCount = steps.filter(step => step.state === 'done').length;
@@ -23,7 +26,7 @@ export default function NextStepCard({ lifecycle, stepsLabel = 'Steps in this st
     </ol>
     <div className={styles.next}>
       <div className={styles.nextText}>
-        {currentIndex >= 0 && <p className={styles.eyebrow}>Step {currentIndex + 1} of {steps.length}</p>}
+        {currentIndex >= 0 && <p className={styles.eyebrow}>Step {stepLetter(currentIndex)} of {stepLetter(steps.length - 1)}</p>}
         <h2 className={styles.title}>{next.title}</h2>
         <p className={styles.detail}>{next.detail}</p>
         {next.waitingOn && <p className={styles.waiting}><UserRound size={15} aria-hidden="true" /><span><strong>Who acts next:</strong> {next.waitingOn}</span></p>}
@@ -33,11 +36,11 @@ export default function NextStepCard({ lifecycle, stepsLabel = 'Steps in this st
         : <Link className={styles.cta} href={next.cta.href}>{next.cta.label} <ArrowRight size={16} aria-hidden="true" /></Link>)}
     </div>
     {steps.length > 0 && <details className={styles.steps}>
-      <summary>{stepsLabel} · {doneCount} of {steps.length} done</summary>
+      <summary>{stepsLabel} A–{stepLetter(steps.length - 1)} · {doneCount === steps.length ? 'all done' : `${doneCount} done`}</summary>
       <ol>
-        {steps.map(step => <li key={step.key} className={styles[step.state]} aria-current={step.state === 'current' ? 'step' : undefined}>
-          <span className={styles.stepIcon} aria-hidden="true">{step.state === 'done' ? <Check size={14} strokeWidth={2.5} /> : step.state === 'locked' ? <Lock size={13} /> : <span className={styles.dot} />}</span>
-          <span><span className={styles.stepLabel}>{step.label}</span><span className={styles.srOnly}>{step.state === 'done' ? ' (done)' : step.state === 'current' ? ' (current step)' : step.state === 'locked' ? ' (locked)' : ''}</span>
+        {steps.map((step, index) => <li key={step.key} className={styles[step.state]} aria-current={step.state === 'current' ? 'step' : undefined}>
+          <span className={styles.stepIcon} aria-hidden="true">{step.state === 'done' ? <Check size={14} strokeWidth={2.5} /> : step.state === 'locked' ? <Lock size={13} /> : <span className={styles.letter}>{stepLetter(index)}</span>}</span>
+          <span><span className={styles.stepLabel}>{stepLetter(index)}. {step.label}</span><span className={styles.srOnly}>{step.state === 'done' ? ' (done)' : step.state === 'current' ? ' (current step)' : step.state === 'locked' ? ' (locked)' : ''}</span>
             {step.state === 'locked' && step.hint && <span className={styles.stepHint}>{step.hint}</span>}
             {step.state === 'done' && step.hint && <span className={styles.stepHint}>{step.hint}</span>}
           </span>
