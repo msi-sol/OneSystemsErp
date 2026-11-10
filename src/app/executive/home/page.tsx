@@ -132,8 +132,8 @@ export default async function ExecutiveHomePage() {
               <span style={{ fontWeight: 600, color: '#f59e0b' }}>{formatCurrency(data.totalOutstandingReceivables)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
-              <span style={{ color: '#374151', fontWeight: 600 }}>Total Project Expenses To Date</span>
-              <span style={{ fontWeight: 700, color: '#ef4444' }}>{formatCurrency(data.totalProjectExpensesToDate)}</span>
+              <span style={{ color: '#374151', fontWeight: 600 }}>Total Payables Outstanding</span>
+              <span style={{ fontWeight: 700, color: '#ef4444' }}>{formatCurrency(data.totalPayablesOutstanding)}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '16px', borderLeft: '2px solid #f3f4f6', marginTop: '-4px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem' }}>

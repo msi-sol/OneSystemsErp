@@ -176,6 +176,7 @@ export default function ProfitabilityTab({ projectId }: Props) {
             <h3 style={{ margin: 0, color: '#ef4444', fontSize: '1.5rem' }}>
               ₱ {data.cashFlow.totalPayables.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </h3>
+            <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Owed for received deliveries and approved subcontract billings</p>
           </div>
           
           <div style={{ background: 'var(--bg-dark)', padding: '20px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>

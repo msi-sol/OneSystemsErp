@@ -18,6 +18,8 @@ router.post('/getJobOrders', async (req, res) => {
       include: {
         subcontractor: true,
         project: true,
+        // Billed totals on the dashboards come from these approved billings.
+        subcontractBillings: { select: { currentGross: true, approvalStatus: true, status: true, packageId: true } },
       },
       orderBy: { createdAt: 'desc' }
     });

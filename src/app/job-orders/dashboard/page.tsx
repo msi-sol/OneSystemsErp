@@ -14,6 +14,7 @@ const joModules = [
 ];
 
 import { cookies } from 'next/headers';
+import { billedAmount } from '@/lib/subcontracting/billed-amount';
 
 export default async function JobOrderDashboard() {
   const cookieStore = await cookies();
@@ -63,7 +64,7 @@ export default async function JobOrderDashboard() {
         </div>
         <div className={styles.statCard}>
           <h3>Total Billed Amount</h3>
-          <div className={styles.statValue}>₱{jobOrders.reduce((sum: number, jo: any) => sum + (jo.totalBilledAmount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div className={styles.statValue}>₱{jobOrders.reduce((sum: number, jo: any) => sum + billedAmount(jo.subcontractBillings), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
         </div>
         <div className={styles.statCard}>
           <h3>Total Payable</h3>

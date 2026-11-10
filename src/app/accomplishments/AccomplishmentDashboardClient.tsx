@@ -262,7 +262,25 @@ export default function AccomplishmentDashboardClient({ projects }: { projects: 
                             <td style={{ padding: '20px', textAlign: 'right' }} onClick={e => e.stopPropagation()}>{renderTemplateActions(file)}</td>
                           </tr>
                         ))}
-                        {billingFiles.length === 0 && (
+                        {(project.billings ?? []).map((billing: { id: string; billingNumber: string; billingDate: string | Date; currentBillingAmount: number; totalBillingToDate: number; status: string }) => (
+                          <tr key={billing.id} style={{ borderBottom: '1px solid rgba(59,130,246,0.2)' }}>
+                            <td style={{ padding: '20px', fontSize: '17px', fontWeight: '600', color: 'white' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <FiFileText size={22} color="#34d399" style={{ flexShrink: 0 }} />
+                                <span>{billing.billingNumber}</span>
+                              </div>
+                              <div style={{ fontSize: '13px', fontWeight: 400, color: '#93c5fd', marginTop: '4px', paddingLeft: '34px' }}>
+                                Billed ₱{Number(billing.currentBillingAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · to date ₱{Number(billing.totalBillingToDate || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · {String(billing.status).replaceAll('_', ' ').toLowerCase()}
+                              </div>
+                            </td>
+                            <td style={{ padding: '20px', fontSize: '17px', color: '#d1d5db', whiteSpace: 'nowrap' }}>{new Date(billing.billingDate).toLocaleDateString()}</td>
+                            <td style={{ padding: '20px', fontSize: '15px', color: '#9ca3af', whiteSpace: 'nowrap' }}>Billing record</td>
+                            <td style={{ padding: '20px', textAlign: 'right' }}>
+                              <a href="/progress-billings" style={{ color: '#60a5fa', fontWeight: 'bold', fontSize: '14px' }}>Open in Progress Billings</a>
+                            </td>
+                          </tr>
+                        ))}
+                        {billingFiles.length === 0 && !(project.billings ?? []).length && (
                           <tr>
                             <td colSpan={4} style={{ padding: '30px', fontSize: '16px', color: '#6b7280', fontStyle: 'italic', textAlign: 'center' }}>No progress billings saved yet.</td>
                           </tr>

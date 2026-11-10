@@ -7,6 +7,8 @@ import SubcontractListClient from './SubcontractListClient';
 import { getSubcontractPackages } from '@/app/actions/subcontractingActions';
 import { getJobOrders } from '@/app/actions/jobOrderActions';
 import { getAllSubcontractorVariationOrders } from '@/app/actions/variationOrderActions';
+import { billedAmount } from '@/lib/subcontracting/billed-amount';
+import type { SubcontractBillingLike } from '@/lib/finance/payables';
 
 const subModules = [
   { name: 'Dashboard', href: '/subcontracting/dashboard', icon: '📊', description: 'Overview and KPIs' },
@@ -48,6 +50,11 @@ export default async function SubcontractingDashboard() {
   const ACTIVE_PACKAGE_STATUSES = ['APPROVED', 'AGREEMENT_ISSUED', 'JOB_ORDER_ISSUED', 'ONGOING', 'FOR_INSPECTION', 'PARTIALLY_ACCOMPLISHED'];
   const activePackages = (packages ?? []).filter((p: any) => ACTIVE_PACKAGE_STATUSES.includes(p.status));
   const draftPackages = (packages ?? []).filter((p: any) => p.status === 'DRAFT').length;
+  type BillingRow = SubcontractBillingLike & { packageId?: string | null };
+  type WithBillings = { billings?: BillingRow[]; subcontractBillings?: BillingRow[] };
+  // Approved subcontract billings, plus job-order billings not already counted under a package.
+  const subcontractBilled = ((packages ?? []) as WithBillings[]).reduce((sum, p) => sum + billedAmount(p.billings), 0)
+    + ((jobOrders ?? []) as WithBillings[]).reduce((sum, jo) => sum + billedAmount((jo.subcontractBillings ?? []).filter(b => !b.packageId)), 0);
 
   return (
     <div className={styles.dashboardContainer} style={{ maxWidth: '1400px' }}>
@@ -71,7 +78,7 @@ export default async function SubcontractingDashboard() {
         </div>
         <div className={styles.statCard}>
           <h3>Total Billed Amount</h3>
-          <div className={styles.statValue}>₱{(packages?.reduce((sum: number, p: any) => sum + (p.totalBilledAmount || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div className={styles.statValue}>₱{subcontractBilled.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
         </div>
         <div className={styles.statCard}>
           <h3>Total Payable</h3>

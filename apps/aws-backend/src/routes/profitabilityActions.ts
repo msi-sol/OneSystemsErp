@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 // @ts-nocheck
 import { Router, Request, Response } from 'express';
 import { computeProfitability } from '../../../../src/lib/finance/project-profitability';
+import { subcontractBillingOutstanding, supplierPayableOutstanding } from '../../../../src/lib/finance/payables';
 const router = Router();
 
 router.post('/getProjectProfitability', async (req: Request, res: Response) => {
@@ -46,7 +47,7 @@ router.post('/getProjectProfitability', async (req: Request, res: Response) => {
       commitments: commitmentLedger.map(entry => ({ approvedAmount: entry.approvedAmount, remainingCommitment: entry.remainingCommitment, commitmentType: entry.commitmentType, consolidatedBoqItemId: entry.consolidatedBoqItemId, awardedBoqItemId: entry.awardedBoqItemId, createdAt: entry.createdAt })),
       orderedLines,
     });
-    const { actualCostIncurred, committedCost } = result;
+    const { actualCostIncurred } = result;
 
     // 6. Cash Flow Calculations
     const billings = await prisma.billing.findMany({
@@ -65,8 +66,15 @@ router.post('/getProjectProfitability', async (req: Request, res: Response) => {
     // Outstanding Receivables
     const uncollectedBilling = totalBilled - totalCollected;
 
-    // Supplier & Subcon Payables
-    const totalPayables = committedCost; // simplify by using committed cost for now
+    // Supplier & subcontract payables: what is owed now for received deliveries and approved billings (same as
+    // the Supplier Payables screen). Undelivered PO balances are commitments, shown under committed cost.
+    const [supplierPayables, subcontractBillings] = await Promise.all([
+      prisma.accountsPayable.findMany({ where: { po: { mr: { projectId } } }, select: { amount: true, paidAmount: true, status: true } }),
+      prisma.subcontractBilling.findMany({ where: { projectId, approvalStatus: { not: 'REJECTED' } },
+        select: { netPayable: true, approvalStatus: true, status: true, paymentStatus: true, payments: { select: { amountPaid: true } } } }),
+    ]);
+    const totalPayables = supplierPayables.reduce((sum, payable) => sum + supplierPayableOutstanding(payable), 0)
+      + subcontractBillings.reduce((sum, billing) => sum + subcontractBillingOutstanding(billing), 0);
 
     // Cash Deficit / Surplus
     const cashSurplus = totalCollected - actualCostIncurred;

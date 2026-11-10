@@ -1,3 +1,4 @@
+import PendingLabel from '@/components/ui/PendingLabel';
 import { verifySession } from '@/lib/dal/auth';
 import { prisma } from '@/lib/prisma';
 import Link from 'next/link';
@@ -166,11 +167,7 @@ export default async function UnifiedPayablesPage() {
                     </span>
                   </td>
                   <td>
-                    <Link href={`/supplier-payables/${payable.id}`}>
-                      <button style={{ padding: '6px 12px', background: 'var(--accent-color)', color: '#000', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-                        {payable.status === 'ACCRUED' ? 'Clear Payment' : 'Issue Payment'}
-                      </button>
-                    </Link>
+                    <Link href={`/supplier-payables/${payable.id}`} style={{ padding: '6px 12px', background: 'var(--accent-color)', color: '#000', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', display: 'inline-block', textDecoration: 'none' }}><PendingLabel>{payable.status === 'ACCRUED' ? 'Clear Payment' : 'Issue Payment'}</PendingLabel></Link>
                   </td>
                 </tr>
               );
@@ -214,19 +211,17 @@ export default async function UnifiedPayablesPage() {
                   ₱{bill.netPayable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 <td>
-                  <Link href={`/supplier-payables/subcontract/${bill.id}`}>
-                    <button style={{
+                  <Link href={`/supplier-payables/subcontract/${bill.id}`} style={{
                       padding: '6px 12px',
                       background: (bill as any).endorsedForPayment ? 'rgba(245, 158, 11, 0.15)' : 'var(--accent-color)',
                       color: (bill as any).endorsedForPayment ? '#fbbf24' : '#000',
                       border: (bill as any).endorsedForPayment ? '1px solid rgba(245, 158, 11, 0.3)' : 'none',
                       borderRadius: '4px',
                       fontWeight: 'bold',
-                      cursor: 'pointer'
-                    }}>
-                      {(bill as any).endorsedForPayment ? 'Review Endorsement' : 'Issue Payment'}
-                    </button>
-                  </Link>
+                      cursor: 'pointer',
+                      display: 'inline-block',
+                      textDecoration: 'none'
+                    }}><PendingLabel>{(bill as any).endorsedForPayment ? 'Review Endorsement' : 'Issue Payment'}</PendingLabel></Link>
                 </td>
               </tr>
             ))}
@@ -267,19 +262,17 @@ export default async function UnifiedPayablesPage() {
                   ₱{bill.netPayable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 <td>
-                  <Link href={`/supplier-payables/subcontract/${bill.id}`}>
-                    <button style={{
+                  <Link href={`/supplier-payables/subcontract/${bill.id}`} style={{
                       padding: '6px 12px',
                       background: (bill as any).endorsedForPayment ? 'rgba(245, 158, 11, 0.15)' : 'var(--accent-color)',
                       color: (bill as any).endorsedForPayment ? '#fbbf24' : '#000',
                       border: (bill as any).endorsedForPayment ? '1px solid rgba(245, 158, 11, 0.3)' : 'none',
                       borderRadius: '4px',
                       fontWeight: 'bold',
-                      cursor: 'pointer'
-                    }}>
-                      {(bill as any).endorsedForPayment ? 'Review Endorsement' : 'Issue Payment'}
-                    </button>
-                  </Link>
+                      cursor: 'pointer',
+                      display: 'inline-block',
+                      textDecoration: 'none'
+                    }}><PendingLabel>{(bill as any).endorsedForPayment ? 'Review Endorsement' : 'Issue Payment'}</PendingLabel></Link>
                 </td>
               </tr>
             ))}

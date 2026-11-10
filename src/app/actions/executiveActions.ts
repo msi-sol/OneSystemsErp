@@ -3,6 +3,7 @@ import { verifySession } from '@/lib/dal/auth';
 
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
+import { isApprovedBilling, subcontractBillingOutstanding, supplierCostNotYetExpensed, supplierPayableOutstanding } from '@/lib/finance/payables';
 
 async function _getAccessDetails() {
   const cookieStore = await cookies();
@@ -88,16 +89,15 @@ export async function getCompanyOverview(projectId?: string) {
           select: { netPay: true }
         },
         subcontractBillings: {
-          where: { approvalStatus: 'APPROVED' },
-          select: { currentGross: true, remainingBalance: true, packageId: true, jobOrderId: true }
+          where: { approvalStatus: { not: 'REJECTED' } },
+          select: { currentGross: true, netPayable: true, approvalStatus: true, status: true, paymentStatus: true, packageId: true, jobOrderId: true, payments: { select: { amountPaid: true } } }
         },
         materialRequests: {
           select: {
             purchaseOrders: {
               select: {
                 payables: {
-                  where: { status: { not: 'PAID' } },
-                  select: { amount: true, paidAmount: true, status: true }
+                  select: { amount: true, paidAmount: true, netAmount: true, status: true }
                 }
               }
             }
@@ -141,27 +141,21 @@ export async function getCompanyOverview(projectId?: string) {
       // Costs
       const projectExpenses = p.expenses.reduce((sum, e) => sum + e.netAmount, 0);
       const projectPayrolls = p.payrolls.reduce((sum, pr) => sum + (pr.netPay || 0), 0);
-      const projectSubcontract = p.subcontractBillings.reduce((sum, sb) => sum + sb.currentGross, 0);
-      
-      totalActualCost += (projectExpenses + projectPayrolls + projectSubcontract);
+      const approvedSubcontract = p.subcontractBillings.filter(isApprovedBilling);
+      const projectSubcontract = approvedSubcontract.reduce((sum, sb) => sum + sb.currentGross, 0);
+      const supplierPayables = p.materialRequests.flatMap(mr => mr.purchaseOrders.flatMap(po => po.payables));
+      // Delivered materials are a cost once received; paid/accrued ones are already in expenses.
+      const projectMaterialsNotExpensed = supplierPayables.reduce((sum, payable) => sum + supplierCostNotYetExpensed(payable), 0);
 
-      // Payables
-      p.subcontractBillings.forEach(sb => {
-        if (sb.packageId) totalSubcontractPayables += sb.remainingBalance;
-        if (sb.jobOrderId) totalJobOrderPayables += sb.remainingBalance;
-      });
+      totalActualCost += (projectExpenses + projectPayrolls + projectSubcontract + projectMaterialsNotExpensed);
 
-      p.materialRequests.forEach(mr => {
-        mr.purchaseOrders.forEach(po => {
-          po.payables.forEach(payable => {
-            if (payable.status === 'ACCRUED') {
-              totalSupplierPayables += payable.amount;
-            } else {
-              totalSupplierPayables += (payable.amount - payable.paidAmount);
-            }
-          });
-        });
+      // Payables: what is still owed (not the unbilled contract balance).
+      approvedSubcontract.forEach(sb => {
+        const owed = subcontractBillingOutstanding(sb);
+        if (sb.packageId) totalSubcontractPayables += owed;
+        else if (sb.jobOrderId) totalJobOrderPayables += owed;
       });
+      supplierPayables.forEach(payable => { totalSupplierPayables += supplierPayableOutstanding(payable); });
 
       // Risks
       totalCriticalRisks += p._count.projectValidations;
@@ -179,7 +173,7 @@ export async function getCompanyOverview(projectId?: string) {
       totalSubcontractPayables,
       totalJobOrderPayables,
       totalSupplierPayables,
-      totalProjectExpensesToDate: totalSubcontractPayables + totalJobOrderPayables + totalSupplierPayables,
+      totalPayablesOutstanding: totalSubcontractPayables + totalJobOrderPayables + totalSupplierPayables,
       totalCriticalRisks,
       
       // Derived Metrics

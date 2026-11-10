@@ -39,13 +39,13 @@ export default async function KnowledgeCenterPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px' }}>
         <div style={{ background: 'rgba(0,0,0,0.3)', padding: '25px', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
           <h2 style={{ margin: '0 0 15px 0' }}>Gemini Notebooks</h2>
           <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
             Link Gemini NotebookLM workspaces to act as the knowledge base for specific ERP modules.
           </p>
-          <Link href="/knowledge-center/notebooks" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold' }}>
+          <Link href="/knowledge-center/notebooks" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold', display: 'inline-block', textAlign: 'center', lineHeight: 1.3 }}>
             Manage Notebooks
           </Link>
         </div>
@@ -55,7 +55,7 @@ export default async function KnowledgeCenterPage() {
           <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
             Define rigid business rules that the AI Rule Checker will enforce across the ERP.
           </p>
-          <Link href="/knowledge-center/business-rules" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold' }}>
+          <Link href="/knowledge-center/business-rules" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold', display: 'inline-block', textAlign: 'center', lineHeight: 1.3 }}>
             Manage Rules
           </Link>
         </div>
@@ -65,7 +65,7 @@ export default async function KnowledgeCenterPage() {
           <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
             Chat with the AI Data Center to query projects, workers, and read uploaded files.
           </p>
-          <Link href="/knowledge-center/chat" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold' }}>
+          <Link href="/knowledge-center/chat" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold', display: 'inline-block', textAlign: 'center', lineHeight: 1.3 }}>
             Open Chat
           </Link>
         </div>
@@ -75,7 +75,7 @@ export default async function KnowledgeCenterPage() {
           <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
             View standard operating procedures, daily tasks, and best practices for all ERP roles.
           </p>
-          <Link href="/knowledge-center/manual" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold' }}>
+          <Link href="/knowledge-center/manual" style={{ padding: '10px 20px', background: 'var(--accent-color)', color: '#000', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold', display: 'inline-block', textAlign: 'center', lineHeight: 1.3 }}>
             Read Manual
           </Link>
         </div>
@@ -86,7 +86,7 @@ export default async function KnowledgeCenterPage() {
             <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
               Master settings for Bulk Autodiscovery, RAG Keyword Registry, and Embeddings.
             </p>
-            <Link href="/knowledge-center/admin-center" style={{ padding: '10px 20px', background: '#e74c3c', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold' }}>
+            <Link href="/knowledge-center/admin-center" style={{ padding: '10px 20px', background: '#e74c3c', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold', display: 'inline-block', textAlign: 'center', lineHeight: 1.3 }}>
               Open Admin AI Center
             </Link>
           </div>

@@ -13,6 +13,12 @@ export default async function AccomplishmentDashboard() {
       documentTemplates: true,
       projectAccomplishmentFiles: {
         orderBy: { createdAt: 'desc' }
+      },
+      // Progress billing records (same ones the Executive dashboard counts as billed).
+      billings: {
+        where: { status: { not: 'DRAFT' } },
+        orderBy: { billingDate: 'desc' },
+        select: { id: true, billingNumber: true, billingDate: true, billingPeriodFrom: true, billingPeriodTo: true, currentBillingAmount: true, totalBillingToDate: true, status: true }
       }
     },
   });
