@@ -214,7 +214,9 @@ export async function runBenchmarkAiCheck(actor: { id: string; role: string }, p
 3) suggestions: concrete, confident fixes a reviewer can accept: "description" (typos, cut-off or garbled text), "unit" (the same item written with different units, e.g. pc/pcs/piece, use the most common form), "category" or "itemCode" (clearly wrong or missing), or "remove" (a line that is not a real budget item: a section heading, subtotal or total row, or an exact accidental duplicate). For "remove" use an empty proposed value. NEVER suggest quantity, unit cost or total changes. At most 60.
 4) summary: two or three sentences.`,
     `Project: ${clip(project.name, 200)}\nContract value: ${contractAmount.toFixed(2)}\nBenchmark total: ${benchmarkTotal.toFixed(2)}\nBenchmark lines: ${JSON.stringify(benchmarkRows)}\nBOQ items: ${JSON.stringify(boqRefs)}`,
-    32_000);
+    // One link per line plus reasoning: 32k is enough up to ~500 lines; larger benchmarks (up to the 1,500-line
+    // cap) get more room so the answer is not cut off ("did not finish").
+    Math.min(64_000, Math.max(32_000, 12_000 + rows.length * 40)));
 
   // One BOQ link suggestion per benchmark line, next to the link already saved (if any). High and medium
   // suggestions that differ from what is saved start ticked; low-confidence and "not in the BOQ" ones start unticked.
@@ -320,11 +322,12 @@ export async function runDatesAiCheck(actor: { id: string; role: string }, proje
     10_000);
 
   const pkgLabel = (ref: number) => { const row = packages[ref]; return row ? { id: row.id, label: `${row.activityCode ? `${row.activityCode} · ` : ''}${clip(row.name, 70)}` } : null; };
+  const named = (text: string) => nameRefs(text, (ref) => pkgLabel(ref)?.label);
   const clampInt = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(value)));
   const plan = packages.map((row, ref) => {
     const proposal = data.packages.find((item) => item.ref === ref);
     return proposal
-      ? { startDay: clampInt(proposal.startDay, 1, 3650), durationDays: clampInt(proposal.durationDays, 1, 3650), reason: clip(proposal.reason, 300), fromAi: true }
+      ? { startDay: clampInt(proposal.startDay, 1, 3650), durationDays: clampInt(proposal.durationDays, 1, 3650), reason: named(clip(proposal.reason, 300)), fromAi: true }
       : { startDay: clampInt(assumptions[row.id]?.plannedStartDay ?? 1, 1, 3650), durationDays: clampInt(row.plannedDuration || 14, 1, 3650), reason: 'Not covered by the AI Check; kept the current assumption.', fromAi: false };
   });
 
@@ -343,7 +346,7 @@ export async function runDatesAiCheck(actor: { id: string; role: string }, proje
     const lagDays = clampInt(link.lagDays, 0, 365);
     outgoing.set(link.before, [...(outgoing.get(link.before) ?? []), link.after]);
     kept.push({ before: link.before, after: link.after, lagDays });
-    sequence.push({ before, after, lagDays, reason: clip(link.reason, 300) });
+    sequence.push({ before, after, lagDays, reason: named(clip(link.reason, 300)) });
   }
 
   // Make the suggested days respect every finish-to-start link (current and suggested): a successor starts the day
@@ -359,10 +362,10 @@ export async function runDatesAiCheck(actor: { id: string; role: string }, proje
     if (!changed) break;
   }
 
-  const insights: AiInsight[] = data.insights.slice(0, 10).map((insight) => ({ severity: insight.severity, title: clip(insight.title, 140), detail: clip(insight.detail, 600), refs: uniqueRefs(insight.refs.map(pkgLabel).filter((row): row is { id: string; label: string } => !!row)).slice(0, 12) }));
+  const insights: AiInsight[] = data.insights.slice(0, 10).map((insight) => ({ severity: insight.severity, title: named(clip(insight.title, 140)), detail: named(clip(insight.detail, 600)), refs: uniqueRefs(insight.refs.map(pkgLabel).filter((row): row is { id: string; label: string } => !!row)).slice(0, 12) }));
   await audit(actor, projectId, 'dates', model, { packages: packages.length, links: sequence.length, adjusted: adjustedRefs.size });
   return {
-    scope: 'dates' as const, model, summary: clip(data.summary, 900), insights,
+    scope: 'dates' as const, model, summary: named(clip(data.summary, 900)), insights,
     projectStart: day(project.startDate), contractEnd: day(project.endDate),
     packages: packages.map((row, ref) => ({ ...pkgLabel(ref)!, currentStart: day(row.plannedStartDate), currentFinish: day(row.plannedFinishDate), startDay: plan[ref].startDay, durationDays: plan[ref].durationDays, reason: plan[ref].reason, fromAi: plan[ref].fromAi, adjusted: adjustedRefs.has(ref) })),
     sequence,
@@ -429,22 +432,29 @@ export async function runWorkPackageAiCheck(actor: { id: string; role: string },
   const proposedGroups = groups.filter((group) => group.sections.length).map((group) => ({ ...group, sections: [...group.sections].sort((a, b) => a - b) }));
 
   const pkgLabel = (ref: number) => { const row = packages[ref]; return row ? { id: row.id, label: `${row.activityCode} · ${clip(row.name, 70)}` } : null; };
+  // "section 3" names a BOQ section; any other ref ("package 2", "ref 2") names a current package.
+  const named = (text: string) => nameRefs(text.replace(/\bsections?\s+refs?\.?\s*#?\s*(\d+)\b/gi, (match, digits: string) => sections[Number(digits)] ? clip(sections[Number(digits)].name, 70) : match), (ref) => pkgLabel(ref)?.label);
   const existingLinks = new Set((schedule?.dependencies || []).map((link) => `${link.predecessorId}>${link.successorId}`));
-  // Drop links that already exist, repeat an earlier suggestion, or reverse one (A→B and B→A would form a loop);
-  // otherwise "Add selected links" stops part-way on the duplicate or the loop.
+  // Drop links that already exist, repeat an earlier suggestion, or would close a loop with the existing and
+  // earlier suggested links (A→B→C→A, not only A→B→A); otherwise "Save all" stops part-way on the duplicate or loop.
   const proposedLinks = new Set<string>();
-  const sequence = data.sequence.slice(0, 40).map((link) => ({ before: pkgLabel(link.before), after: pkgLabel(link.after), reason: clip(link.reason, 300) }))
+  const outgoing = new Map<string, string[]>();
+  for (const link of schedule?.dependencies || []) outgoing.set(link.predecessorId, [...(outgoing.get(link.predecessorId) ?? []), link.successorId]);
+  const reaches = (from: string, to: string) => { const pending = [from], seen = new Set<string>(); while (pending.length) { const current = pending.pop()!; if (current === to) return true; if (seen.has(current)) continue; seen.add(current); pending.push(...(outgoing.get(current) ?? [])); } return false; };
+  const sequence = data.sequence.slice(0, 40).map((link) => ({ before: pkgLabel(link.before), after: pkgLabel(link.after), reason: named(clip(link.reason, 300)) }))
     .filter((link): link is { before: { id: string; label: string }; after: { id: string; label: string }; reason: string } => {
       if (!link.before || !link.after || link.before.id === link.after.id) return false;
       const key = `${link.before.id}>${link.after.id}`, reverse = `${link.after.id}>${link.before.id}`;
       if (existingLinks.has(key) || existingLinks.has(reverse) || proposedLinks.has(key) || proposedLinks.has(reverse)) return false;
+      if (reaches(link.after.id, link.before.id)) return false;
       proposedLinks.add(key);
+      outgoing.set(link.before.id, [...(outgoing.get(link.before.id) ?? []), link.after.id]);
       return true;
     });
-  const insights: AiInsight[] = data.insights.slice(0, 15).map((insight) => ({ severity: insight.severity, title: clip(insight.title, 140), detail: clip(insight.detail, 600), refs: uniqueRefs(insight.refs.map(pkgLabel).filter((row): row is { id: string; label: string } => !!row)).slice(0, 12) }));
+  const insights: AiInsight[] = data.insights.slice(0, 15).map((insight) => ({ severity: insight.severity, title: named(clip(insight.title, 140)), detail: named(clip(insight.detail, 600)), refs: uniqueRefs(insight.refs.map(pkgLabel).filter((row): row is { id: string; label: string } => !!row)).slice(0, 12) }));
   await audit(actor, projectId, 'work-packages', model, { sections: sections.length, packages: packages.length, groups: proposedGroups.length, links: sequence.length });
   return {
-    scope: 'work-packages' as const, model, summary: clip(data.summary, 900), insights,
+    scope: 'work-packages' as const, model, summary: named(clip(data.summary, 900)), insights,
     sections: sections.map((section, ref) => ({ ref, key: section.key, name: section.name, items: section.items.length, amount: sectionRows[ref].amount })),
     grouping: proposedGroups, groupingAdjusted: adjusted, sequence,
     schedule: schedule ? { id: schedule.id, rowVersion: schedule.rowVersion, workflowStatus: schedule.workflowStatus, packageCount: packages.length } : null,
@@ -494,30 +504,37 @@ export async function runDupaAiCheck(actor: { id: string; role: string }, projec
     const quantity = Number(allocation.allocatedQuantity ?? allocation.mappedQuantity ?? item.quantity);
     return `B${index + 1}. ${clip(item.itemCode, 30)} | ${clip(item.description)} | ${quantity} ${clip(item.unit, 20)} | allocated ${Number(allocation.allocatedAmount ?? 0).toFixed(2)}`;
   });
-  const dupaLines = upload.rows.map((row, index) => `${index + 1}. row ${row.sourceRowNumber} | section: ${clip(row.section, 60) || '-'} | ${clip(row.description)} | ${row.quantity} ${clip(row.unit, 20)} | rate ${row.sourceUnitCost ?? row.unitCost} | amount ${row.amount}`);
+  // The leading "ref N" is what refs point to; the sheet row number is shown separately so the two are not confused.
+  const dupaLines = upload.rows.map((row, index) => `ref ${index + 1} (sheet row ${row.sourceRowNumber}) | section: ${clip(row.section, 60) || '-'} | ${clip(row.description)} | ${row.quantity} ${clip(row.unit, 20)} | rate ${row.sourceUnitCost ?? row.unitCost} | amount ${row.amount}`);
   const instructions = `You review a DUPA (detailed unit price analysis) uploaded for one work package of a Philippine construction project. ${SHARED_RULES}
-Return: a short summary; insights about coverage of the package's BOQ items (refs = DUPA row numbers), rows unrelated to this package's scope, duplicates, rows whose quantity × rate does not give the amount, and unusual rates; and for EVERY DUPA row its resource category (MATERIAL, LABOR or EQUIPMENT) and remove=true only when the row clearly does not belong in this package (a duplicate, a subtotal or total line, or another package's scope), with a short reason. Never propose new amounts or rates.`;
+Every "ref" you return (in rows and in insight refs) is the number after "ref" at the start of a DUPA line, never its sheet row number.
+Return: a short summary; insights (at most 12) about coverage of the package's BOQ items (refs = DUPA line refs), rows unrelated to this package's scope, duplicates, rows whose quantity × rate does not give the amount, and unusual rates; and for EVERY DUPA row its resource category (MATERIAL, LABOR or EQUIPMENT) and remove=true only when the row clearly does not belong in this package (a duplicate, a subtotal or total line, or another package's scope), with a short reason. Never propose new amounts or rates.`;
   const prompt = `Package: ${clip(activity.activityCode, 20)} ${clip(activity.name)}\nPackage BOQ value: ${packageValue.toFixed(2)}\nDUPA total: ${dupaTotal.toFixed(2)} (${packageValue > 0 ? (dupaTotal / packageValue * 100).toFixed(1) : 'n/a'}% of the package value)\n\nBOQ items in this package:\n${boqLines.join('\n') || '(none)'}\n\nDUPA rows (refs):\n${dupaLines.join('\n')}`;
   const { data, model } = await askModel(dupaResponseSchema, 'dupa_ai_check', instructions, prompt, 6000);
 
   const rowRef = (ref: number) => upload.rows[ref - 1];
   const kindNames: Record<string, string> = { MATERIAL: 'Material', LABOR: 'Labor', EQUIPMENT: 'Equipment' };
+  const named = (text: string) => nameRefs(text, (ref) => rowRef(ref) ? `Row ${rowRef(ref).sourceRowNumber}` : undefined);
   const suggestions: DupaSuggestion[] = [];
+  const seenRows = new Set<string>();
   for (const entry of data.rows) {
     const row = rowRef(entry.ref);
     if (!row) continue;
     const key = String(row.sourceRowNumber);
+    // One suggestion per row: a repeated ref would show twice (duplicate keys) and could both remove and recategorise it.
+    if (seenRows.has(key)) continue;
+    seenRows.add(key);
     if (entry.remove) {
-      suggestions.push({ id: `remove-${key}`, row: key, description: clip(row.description), amount: Number(row.amount), kind: 'remove', current: 'Included', proposed: 'Leave out', reason: clip(entry.reason, 300) });
+      suggestions.push({ id: `remove-${key}`, row: key, description: clip(row.description), amount: Number(row.amount), kind: 'remove', current: 'Included', proposed: 'Leave out', reason: named(clip(entry.reason, 300)) });
     } else {
       const current = upload.categories?.[key] ?? '';
-      if (current !== entry.category) suggestions.push({ id: `category-${key}`, row: key, description: clip(row.description), amount: Number(row.amount), kind: 'category', current: current ? kindNames[current] : 'Not set', proposed: entry.category, reason: clip(entry.reason, 300) });
+      if (current !== entry.category) suggestions.push({ id: `category-${key}`, row: key, description: clip(row.description), amount: Number(row.amount), kind: 'category', current: current ? kindNames[current] : 'Not set', proposed: entry.category, reason: named(clip(entry.reason, 300)) });
     }
   }
-  const insights: AiInsight[] = data.insights.map((insight) => ({
-    severity: insight.severity, title: clip(insight.title, 120), detail: clip(insight.detail, 400),
-    refs: uniqueRefs(insight.refs.flatMap((ref) => { const row = rowRef(ref); return row ? [{ id: String(row.sourceRowNumber), label: `Row ${row.sourceRowNumber}` }] : []; })),
+  const insights: AiInsight[] = data.insights.slice(0, 12).map((insight) => ({
+    severity: insight.severity, title: named(clip(insight.title, 120)), detail: named(clip(insight.detail, 400)),
+    refs: uniqueRefs(insight.refs.flatMap((ref) => { const row = rowRef(ref); return row ? [{ id: String(row.sourceRowNumber), label: `Row ${row.sourceRowNumber}` }] : []; })).slice(0, 12),
   }));
   await audit(actor, projectId, 'dupa', model, { rows: upload.rows.length, suggestions: suggestions.length, insights: insights.length });
-  return { scope: 'dupa' as const, model, summary: clip(data.summary, 600), insights, suggestions, packageValue, dupaTotal, uploadId: upload.id };
+  return { scope: 'dupa' as const, model, summary: named(clip(data.summary, 600)), insights, suggestions, packageValue, dupaTotal, uploadId: upload.id };
 }

@@ -33,6 +33,8 @@ const FRIENDLY: Record<string, string> = {
   SCHEDULE_VERSION_CONFLICT: 'The plan changed since the check. Run the AI Check again.',
   EVERY_BOQ_SECTION_NEEDS_A_PACKAGE: 'Every BOQ section must be in a package.',
   INVALID_PACKAGE_NAME: 'Each package needs a name of 3 to 180 characters.',
+  DEPENDENCY_CYCLE: 'This link would make a loop (A before B before A). Remove it and save the rest.',
+  DEPENDENCY_ALREADY_EXISTS: 'This link already exists. Remove it and save the rest.',
 };
 async function call(url: string, method: string, body: unknown) {
   const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -159,10 +161,16 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
         version = result.rowVersion; added++;
       }
       setMessage(`Added ${added} sequence ${added === 1 ? 'link' : 'links'}. Check that planned dates still respect them.`);
-      setWp({ ...wp, sequence: wp.sequence.filter((_, index) => !chosen.some((item) => item.index === index)) }); setLinks({});
-      router.refresh();
     } catch (caught) { setError(`${added ? `Added ${added}, then stopped: ` : ''}${caught instanceof Error ? caught.message : 'The link could not be added.'}`); }
-    finally { setRowVersion(version); setBusy(false); }
+    finally {
+      // Links that were added leave the list even when a later one fails, so saving again does not repeat them.
+      if (added) {
+        const addedIndexes = new Set(chosen.slice(0, added).map((item) => item.index));
+        setWp({ ...wp, sequence: wp.sequence.filter((_, index) => !addedIndexes.has(index)) }); setLinks({});
+        router.refresh();
+      }
+      setRowVersion(version); setBusy(false);
+    }
   }
 
   const result = scope === 'boq' ? boq : wp;

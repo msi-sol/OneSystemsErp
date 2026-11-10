@@ -237,6 +237,8 @@ function amountArithmeticReconciles(quantityValue: unknown, unitCostValue: unkno
   }
 }
 
+const DERIVED_UNIT_RATE_DECIMALS = 4;
+
 function assertStoredDraftLinesAreValid(items: readonly DraftBOQLine[]): void {
   if (items.some((item) => typeof item.description !== 'string' || !item.description.trim() || typeof item.unit !== 'string' || !item.unit.trim())) {
     fail('BOQ_LINE_TEXT_REQUIRED', 400);
@@ -246,7 +248,9 @@ function assertStoredDraftLinesAreValid(items: readonly DraftBOQLine[]): void {
     if (values.some((value) => !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER)) {
       fail('BOQ_LINE_NUMERIC_VALUE_INVALID', 400);
     }
-    if (new Prisma.Decimal(String(item.combinedUnitCost)).decimalPlaces() > 2 || new Prisma.Decimal(String(item.totalCost)).decimalPlaces() > 2) {
+    // Amounts are money (cents). Unit rates may carry four decimals: when a file's stated rate does not
+    // reproduce its amount, the reader keeps the amount and derives the rate to four places.
+    if (new Prisma.Decimal(String(item.combinedUnitCost)).decimalPlaces() > DERIVED_UNIT_RATE_DECIMALS || new Prisma.Decimal(String(item.totalCost)).decimalPlaces() > 2) {
       fail('BOQ_LINE_MONEY_PRECISION_INVALID', 400);
     }
   }

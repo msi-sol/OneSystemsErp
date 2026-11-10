@@ -85,17 +85,17 @@ export default function DupaAiCheck({ projectId, scheduleId, uploadId, disabled,
                 : <select aria-label={`Leave out row ${item.row}`} disabled={!!done} value={valueOf(item)} onChange={event => setEdits(current => ({ ...current, [item.id]: event.target.value }))}><option value="Leave out">Leave this row out</option><option value="Keep">Keep this row</option></select>}</td>
               <td className={styles.muted}>{item.reason}</td>
               <td>{done ? (done === 'saved' ? 'Saved' : 'Removed') : <span style={{ display: 'flex', gap: 6 }}>
-                <button type="button" className={styles.button} onClick={() => save([item])}>Save</button>
-                <button type="button" className={styles.secondary} onClick={() => remove([item])}>Remove</button>
+                <button type="button" className={styles.button} disabled={disabled || running} onClick={() => save([item])}>Save</button>
+                <button type="button" className={styles.secondary} disabled={disabled || running} onClick={() => remove([item])}>Remove</button>
               </span>}</td>
             </tr>;
           })}</tbody>
         </table></div>
         {open.length > 0 && <div className={styles.actions} style={{ marginTop: 10 }}>
-          <button type="button" className={styles.button} disabled={!chosen.length} onClick={() => save(chosen)}>Save selected ({chosen.length})</button>
-          <button type="button" className={styles.secondary} onClick={() => save(open)}>Save all ({open.length})</button>
-          <button type="button" className={styles.secondary} disabled={!chosen.length} onClick={() => remove(chosen)}>Remove selected</button>
-          <button type="button" className={styles.secondary} onClick={() => remove(open)}>Remove all</button>
+          <button type="button" className={styles.button} disabled={disabled || running || !chosen.length} onClick={() => save(chosen)}>Save selected ({chosen.length})</button>
+          <button type="button" className={styles.secondary} disabled={disabled || running} onClick={() => save(open)}>Save all ({open.length})</button>
+          <button type="button" className={styles.secondary} disabled={disabled || running || !chosen.length} onClick={() => remove(chosen)}>Remove selected</button>
+          <button type="button" className={styles.secondary} disabled={disabled || running} onClick={() => remove(open)}>Remove all</button>
         </div>}
       </>}
       <p className={styles.muted} style={{ marginTop: 8 }}>Suggestions by {result.model}. AI can be wrong: check each row against the original DUPA.</p>

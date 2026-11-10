@@ -4,9 +4,11 @@
 .badge { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: rgba(138, 43, 226, 0.2); color: #c084fc; }
 .muted { color: var(--text-secondary); font-size: 0.85rem; margin: 6px 0 0; line-height: 1.5; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
-.primary, .secondary, .ghost { border-radius: 8px; padding: 7px 14px; font-weight: 600; font-size: 0.85rem; cursor: pointer; border: 1px solid transparent; }
+.primary, .secondary, .ghost, .reject { border-radius: 8px; padding: 7px 14px; font-weight: 600; font-size: 0.85rem; cursor: pointer; border: 1px solid transparent; }
 .primary { background: #8a2be2; color: #fff; }
-.primary:disabled, .secondary:disabled, .ghost:disabled { opacity: 0.55; cursor: not-allowed; }
+.primary:disabled, .secondary:disabled, .ghost:disabled, .reject:disabled { opacity: 0.55; cursor: not-allowed; }
+.reject { background: rgba(239, 68, 68, 0.1); color: #fca5a5; border-color: rgba(239, 68, 68, 0.45); }
+.reject:hover:not(:disabled) { background: rgba(239, 68, 68, 0.18); }
 .secondary { background: transparent; color: var(--text-primary); border-color: var(--glass-border); }
 .ghost { background: transparent; color: var(--text-secondary); border-color: transparent; padding: 7px 8px; }
 .error { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5; font-size: 0.85rem; }

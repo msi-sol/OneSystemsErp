@@ -47,6 +47,8 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   const [message, setMessage] = useState('');
 
   const datesFrom = (start: string, data: Result, keep?: Record<string, Row>) => Object.fromEntries(data.packages.map((row) => {
+    // A package already saved from this panel keeps the dates that were saved; only open suggestions move.
+    if (keep?.[row.id]?.saved) return [row.id, keep[row.id]];
     const first = addDays(start, row.startDay - 1);
     return [row.id, { start: first, finish: addDays(first, row.durationDays - 1), on: keep?.[row.id]?.on ?? !row.currentStart, saved: keep?.[row.id]?.saved ?? false }];
   }));

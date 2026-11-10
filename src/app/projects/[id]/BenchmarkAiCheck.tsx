@@ -64,6 +64,8 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
   const openLinks = (result?.links ?? []).filter((link) => linkDrafts[link.rowId]?.state === 'open')
     .sort((a, b) => (a.boqId ? order[a.confidence] : 0) - (b.boqId ? order[b.confidence] : 0));
   const chosenLinks = openLinks.filter((link) => linkDrafts[link.rowId]?.selected);
+  // Saving or removing links shrinks the list; stay on the last page that still has rows instead of showing an empty one.
+  const page = Math.min(linkPage, Math.max(0, Math.ceil(openLinks.length / 25) - 1));
   const sameAsSaved = (result?.links ?? []).filter((link) => link.boqId && link.boqId === link.savedBoqId).length;
   const notInBoq = (result?.links ?? []).filter((link) => !link.boqId);
   const setLinkDraft = (id: string, patch: Partial<LinkDraft>) => setLinkDrafts((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
@@ -98,9 +100,10 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The changes could not be saved.'); }
     finally { setSaving(false); }
   }
-  function discardAll() {
+  function rejectAll() {
+    const count = openSuggestions.length;
     setDrafts((current) => Object.fromEntries(Object.entries(current).map(([id, draft]) => [id, draft.state === 'open' ? { ...draft, state: 'dismissed' as const } : draft])));
-    setSaveMessage('All suggestions discarded. Nothing was changed.');
+    setSaveMessage(`Rejected ${count} suggested fix${count === 1 ? '' : 'es'}. Nothing in the benchmark was changed.`);
   }
 
   const checks = result?.checks;
@@ -131,7 +134,7 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
         {!openLinks.length ? <p className={styles.muted}>No link changes left to review.</p> : <>
           <div className={styles.tableWrap}><table className={styles.table}>
             <thead><tr><th><span className="sr-only">Use</span></th><th>Budget line</th><th>BOQ item</th><th>Confidence</th><th><span className="sr-only">Remove suggestion</span></th></tr></thead>
-            <tbody>{openLinks.slice(linkPage * 25, (linkPage + 1) * 25).map((link) => {
+            <tbody>{openLinks.slice(page * 25, (page + 1) * 25).map((link) => {
               const draft = linkDrafts[link.rowId];
               return <tr key={link.rowId}>
                 <td><input type="checkbox" aria-label={`Use BOQ link for ${link.label}`} checked={draft.selected} disabled={savingLinks} onChange={(event) => setLinkDraft(link.rowId, { selected: event.target.checked })} /></td>
@@ -149,9 +152,9 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
             })}</tbody>
           </table></div>
           {openLinks.length > 25 && <div className={styles.actions}>
-            <button type="button" className={styles.ghost} disabled={linkPage === 0} onClick={() => setLinkPage((page) => page - 1)}>← Previous</button>
-            <span className={styles.muted}>{linkPage * 25 + 1}–{Math.min((linkPage + 1) * 25, openLinks.length)} of {openLinks.length}</span>
-            <button type="button" className={styles.ghost} disabled={(linkPage + 1) * 25 >= openLinks.length} onClick={() => setLinkPage((page) => page + 1)}>Next →</button>
+            <button type="button" className={styles.ghost} disabled={page === 0} onClick={() => setLinkPage(page - 1)}>← Previous</button>
+            <span className={styles.muted}>{page * 25 + 1}–{Math.min((page + 1) * 25, openLinks.length)} of {openLinks.length}</span>
+            <button type="button" className={styles.ghost} disabled={(page + 1) * 25 >= openLinks.length} onClick={() => setLinkPage(page + 1)}>Next →</button>
           </div>}
           <div className={styles.actions}>
             <button type="button" className={styles.primary} disabled={savingLinks || !chosenLinks.length} onClick={() => void saveLinks()}>{savingLinks ? 'Saving…' : `Save ${chosenLinks.length} BOQ ${chosenLinks.length === 1 ? 'link' : 'links'}`}</button>
@@ -187,13 +190,15 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
               </tr>;
             })}</tbody>
           </table></div>
-          {editable
-            ? <div className={styles.actions}>
+          <div className={styles.actions}>
+            {editable && <>
               <button type="button" className={styles.primary} disabled={saving || !chosen.length} onClick={() => void saveSelected()}>{saving ? 'Saving…' : `Save ${chosen.length} selected ${chosen.length === 1 ? 'change' : 'changes'}`}</button>
               <button type="button" className={styles.secondary} disabled={saving} onClick={() => void saveSelected(openSuggestions)}>Save all ({openSuggestions.length})</button>
-              <button type="button" className={styles.ghost} disabled={saving} onClick={discardAll}>Discard all suggestions</button>
-            </div>
-            : <p className={styles.muted}>This benchmark is locked, so the suggestions are for information only.</p>}
+            </>}
+            {/* Rejecting only clears the list here; nothing in the benchmark changes, so it is allowed when locked too. */}
+            <button type="button" className={styles.reject} disabled={saving} onClick={rejectAll}>Reject all ({openSuggestions.length})</button>
+          </div>
+          {!editable && <p className={styles.muted}>This benchmark is locked, so the suggestions are for information only.</p>}
         </>}
       </div>}
 

@@ -395,6 +395,27 @@ describe('draft awarded BOQ workflow', () => {
     }, invalidNumber.client)).rejects.toMatchObject({ code: 'BOQ_LINE_NUMERIC_VALUE_INVALID', status: 400 });
   });
 
+  it('approves lines whose unit rate was derived to four decimals but still rejects sub-cent amounts', async () => {
+    const derived = makeHarness({ contractAmount: 832836.73, items: [makeLine({ quantity: 4016.21, combinedUnitCost: 207.3688, totalCost: 832836.73 })] });
+    await expect(approveAndLockDraftBOQ(PROJECT_ID, ACTOR_ID, {
+      versionId: VERSION_ID,
+      expectedChecksum: derived.state.version.checksum,
+    }, derived.client)).resolves.toMatchObject({ success: true, boqTotal: '832836.73' });
+    expect(derived.state.project.boqLocked).toBe(true);
+
+    const subCentAmount = makeHarness({ contractAmount: 20.005, items: [makeLine({ totalCost: 20.005 })] });
+    await expect(approveAndLockDraftBOQ(PROJECT_ID, ACTOR_ID, {
+      versionId: VERSION_ID,
+      expectedChecksum: subCentAmount.state.version.checksum,
+    }, subCentAmount.client)).rejects.toMatchObject({ code: 'BOQ_LINE_MONEY_PRECISION_INVALID', status: 400 });
+
+    const tooPreciseRate = makeHarness({ items: [makeLine({ combinedUnitCost: 2.00001 })] });
+    await expect(approveAndLockDraftBOQ(PROJECT_ID, ACTOR_ID, {
+      versionId: VERSION_ID,
+      expectedChecksum: tooPreciseRate.state.version.checksum,
+    }, tooPreciseRate.client)).rejects.toMatchObject({ code: 'BOQ_LINE_MONEY_PRECISION_INVALID', status: 400 });
+  });
+
   it('approves the exact contract total, locks the BOQ, and pins only editable schedules', async () => {
     const harness = makeHarness();
     const checksum = harness.state.version.checksum;
