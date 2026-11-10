@@ -132,6 +132,7 @@ export async function attachWorkPackageBreakdown(args: {
   projectId: string; scheduleId: string; activityId: string; expectedRowVersion: number; actor: Actor;
   buffer: Buffer; fileName: string; fileHash: string; selectedSheet: string; mapping: WorkspaceMapping;
   documentToken?: string | null;
+  linkedBoqItems?: PackageBreakdownUpload['linkedBoqItems'];
 }) {
   const capacity = await planningCapacity(args.actor, args.projectId);
   if (!capacity.canEditPlan) fail('PLANNING_EDIT_PERMISSION_REQUIRED', 403);
@@ -159,7 +160,8 @@ export async function attachWorkPackageBreakdown(args: {
       const upload: PackageBreakdownUpload = { id: uploadId, activityId: args.activityId, fileName: args.fileName,
         fileHash: analysis.fileHash, storagePath: stored, sheetName: analysis.selectedSheet!, mapping: analysis.mapping!, rows: items,
         uploadedAt: new Date().toISOString(), uploadedById: args.actor.id, originScheduleId: schedule.id,
-        appliedAt: null, appliedById: null, resourceIds: [], categories: {}, reason: null };
+        appliedAt: null, appliedById: null, resourceIds: [], categories: {}, reason: null,
+        ...(args.linkedBoqItems?.length ? { linkedBoqItems: args.linkedBoqItems.slice(0, 50) } : {}) };
       details.breakdownUploads = [...uploads, upload];
       return bumpAndSave(tx, schedule, expected, args.actor, 'WPS_PACKAGE_BREAKDOWN_PRESERVED', details, null, { uploadId, activityId: args.activityId, fileHash: analysis.fileHash, rows: items.length });
     });

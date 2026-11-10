@@ -136,6 +136,7 @@ export default function PackageBreakdownPanel(props: Props) {
     })}
     {props.uploads.map(upload => <details key={upload.id} className={styles.history}><summary>{upload.fileName} · {upload.sheetName} · {upload.rows.length} rows · {upload.appliedAt ? 'Added to draft resources' : 'Evidence only'}</summary>
       <p className={styles.muted}>Preserved {new Date(upload.uploadedAt).toLocaleString('en-PH')}. Source quantities and financial values remain available below.</p>
+      {!!upload.linkedBoqItems?.length && <p>Prices BOQ item{upload.linkedBoqItems.length === 1 ? '' : 's'}: {upload.linkedBoqItems.map(item => `${item.itemCode} ${item.description}`).join('; ')}</p>}
       <a className={styles.link} href={`${endpoint}?scheduleId=${encodeURIComponent(props.scheduleId)}&uploadId=${encodeURIComponent(upload.id)}`}>Download preserved original</a>
       {itemTable(upload.rows, upload)}
       {!!upload.replacedResources?.length && <details><summary>{upload.replacedResources.length} replaced draft rows (retained history)</summary><ul>{upload.replacedResources.map(row => <li key={row.id}>{row.kind} · {row.description} · {row.quantity} {row.unit} · {money(row.amount)}</li>)}</ul></details>}{upload.appliedAt ? <p>Applied {new Date(upload.appliedAt).toLocaleString('en-PH')} · {upload.reason}. Imported resources retain this upload and source-row reference; later resource edits do not change the original.</p> : props.canEdit && <>

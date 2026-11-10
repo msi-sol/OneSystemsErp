@@ -13,6 +13,8 @@ export type PackageBreakdownUpload = {
   replacedResources?: PlanResource[];
   /** Source rows left out when the DUPA was applied (e.g. removed after an AI Check suggestion). */
   excludedRows?: string[];
+  /** Original BOQ items this DUPA prices (suggested by the bulk-upload AI check, confirmed by the uploader). */
+  linkedBoqItems?: Array<{ id: string; itemCode: string; description: string }>;
 };
 
 export class PackageBreakdownError extends Error {

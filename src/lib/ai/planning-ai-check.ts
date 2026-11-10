@@ -44,7 +44,7 @@ const insightSchema = z.object({
 
 export type AiInsight = { severity: 'issue' | 'warning' | 'info'; title: string; detail: string; refs: { id: string; label: string }[] };
 
-async function askModel<T>(schema: z.ZodType<T>, name: string, instructions: string, input: string, maxOutputTokens: number): Promise<{ data: T; model: string }> {
+export async function askModel<T>(schema: z.ZodType<T>, name: string, instructions: string, input: string, maxOutputTokens: number): Promise<{ data: T; model: string }> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) fail('The AI Check is not configured. Ask your administrator to set the OpenAI key.', 503);
   const model = openAIModelName();
