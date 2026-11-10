@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import styles from '@/components/ai/AiCheckPanel.module.css';
 import AiThinking, { AI_THINKING_MESSAGES } from '@/components/ai/AiThinking';
 
@@ -45,6 +45,9 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  // After saving, the suggestions fold away and the panel scrolls back to its top, where the result shows.
+  const [collapsed, setCollapsed] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
 
   const datesFrom = (start: string, data: Result, keep?: Record<string, Row>) => Object.fromEntries(data.packages.map((row) => {
     // A package already saved from this panel keeps the dates that were saved; only open suggestions move.
@@ -54,7 +57,7 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
   }));
 
   async function run() {
-    setBusy(true); setRunning(true); setError(''); setMessage('');
+    setBusy(true); setRunning(true); setError(''); setMessage(''); setCollapsed(false);
     try {
       const data = await call(`/api/projects/${projectId}/ai-check`, { scope: 'dates' }) as Result;
       const start = data.projectStart || today();
@@ -104,7 +107,9 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
       });
       setRows((current) => Object.fromEntries(Object.entries(current).map(([id, row]) => [id, chosenRows.some((item) => item.id === id) ? { ...row, saved: true } : row])));
       setLinks((current) => current.map((row, index) => chosenLinks.some((item) => item.index === index) ? { ...row, saved: true } : row));
-      setMessage(`Saved ${data.dated} package ${data.dated === 1 ? 'date' : 'dates'}${data.linked ? ` and ${data.linked} sequence ${data.linked === 1 ? 'link' : 'links'}` : ''}. You can still change any of them below in the table.`);
+      setMessage(`Saved ${data.dated} package ${data.dated === 1 ? 'date' : 'dates'}${data.linked ? ` and ${data.linked} sequence ${data.linked === 1 ? 'link' : 'links'}` : ''}. You can still change any date in the package table.`);
+      setCollapsed(true);
+      requestAnimationFrame(() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
       onSaved();
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The suggestions could not be saved.'); }
     finally { setBusy(false); }
@@ -152,19 +157,20 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
     setRow(id, { start, finish: start ? addDays(start, Math.max(1, length) - 1) : row.finish, on: true });
   };
 
-  return <section className={styles.panel} aria-labelledby="ai-check-dates">
+  return <section ref={panelRef} className={styles.panel} aria-labelledby="ai-check-dates" style={{ scrollMarginTop: 90 }}>
     <div className={styles.header}>
       <div>
         <h3 id="ai-check-dates" className={styles.title}>AI Check · dates &amp; schedule <span className={styles.badge}>Optional</span></h3>
-        <p className={styles.muted}>Have AI propose a start and finish for every package and which packages must finish before others start. Change any date or link, tick what you want, then save. Nothing changes until you save.</p>
+        <p className={styles.muted}>AI suggests start and finish dates and the order of packages. Edit, tick what you want, then save.</p>
       </div>
-      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Suggest dates'}</button>
+      <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Run AI Check'}</button>
     </div>
     {running && <AiThinking messages={AI_THINKING_MESSAGES.dates} note="This usually takes 30–60 seconds. You can keep working on other steps." />}
     {error && <div className={styles.error} role="alert">{error}</div>}
     {message && <div className={styles.success} role="status">{message}</div>}
 
-    {result && <>
+    {result && collapsed && <div className={styles.actions}><button type="button" className={styles.secondary} onClick={() => setCollapsed(false)}>Show the suggestions again</button></div>}
+    {result && !collapsed && <>
       <div className={styles.summary}><strong>Summary.</strong> {result.summary}</div>
       {result.insights.length > 0 && <div className={styles.section}><h4 className={styles.sectionTitle}>Insights ({result.insights.length})</h4><ul className={styles.list}>{result.insights.map((insight, index) => <li key={index} className={`${styles.insight} ${styles[insight.severity]}`}>
         <div className={styles.insightTitle}>{insight.severity === 'issue' ? 'Issue' : insight.severity === 'warning' ? 'Check' : 'Note'} · {insight.title}</div>
@@ -233,7 +239,7 @@ export default function AiDatesPanel({ projectId, scheduleId, rowVersion, canEdi
         {invalidLag && <span className={styles.muted}>Lag must be a whole number of days.</span>}
         {!invalidRow && !invalidLag && clashingLinks.length > 0 && <span className={styles.muted}>{clashingLinks.length} ticked {clashingLinks.length === 1 ? 'link clashes' : 'links clash'} with the dates. Shift the starts, change a date, or untick the link before saving.</span>}
       </div> : <p className={styles.muted}>{canEdit ? 'This plan is locked in its current status, so the suggestions are for information only.' : 'You can view these suggestions; saving needs permission to edit the plan.'}</p>}
-      <p className={styles.muted} style={{ marginTop: 14 }}>Suggestions by {result.model}. AI can be wrong: review before saving. Saved dates and links are recorded in the history like any other edit.</p>
+      <p className={styles.muted} style={{ marginTop: 14 }}>AI can be wrong. Review before saving.</p>
     </>}
   </section>;
 }

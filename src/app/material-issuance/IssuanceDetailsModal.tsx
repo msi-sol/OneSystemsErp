@@ -12,6 +12,7 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [allocationWarnings, setAllocationWarnings] = useState<string[]>([]);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   
   // Track quantities entered by warehouseman
@@ -68,7 +69,9 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
 
     try {
       const res = await approveIssuanceSlip(issuance.id, accountant.id);
-      if (res.success) { router.refresh(); onClose(); }
+      // Released above the destination section's allocation: keep the slip open so the flag is seen.
+      if (res.success && res.warnings?.length) { setAllocationWarnings(res.warnings); router.refresh(); }
+      else if (res.success) { router.refresh(); onClose(); }
       else setError(res.error || 'Failed to approve');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to approve');
@@ -159,9 +162,15 @@ export default function IssuanceDetailsModal({ issuance, users, onClose }: { iss
         </div>
 
         <div className={styles.dialogBody} style={{ padding: '35px', display: 'flex', flexDirection: 'column', gap: '30px' }}>
+          {allocationWarnings.length > 0 && (
+            <div role="status" style={{ background: 'rgba(252, 211, 77, 0.1)', borderLeft: '4px solid #fcd34d', color: '#fcd34d', padding: '15px 20px', borderRadius: '0 8px 8px 0' }}>
+              <strong>Released, above the section&apos;s allocation (recorded in its history):</strong>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{allocationWarnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
+            </div>
+          )}
           {error && (
-            <div style={{ 
-              background: 'rgba(255, 107, 107, 0.1)', 
+            <div style={{
+              background: 'rgba(255, 107, 107, 0.1)',
               borderLeft: '4px solid #ff6b6b', 
               color: '#ff6b6b', 
               padding: '15px 20px', 

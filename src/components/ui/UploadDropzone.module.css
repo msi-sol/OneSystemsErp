@@ -1,0 +1,16 @@
+/* Same as the BOQ Workspace upload (src/app/boq-template/boqTemplate.module.css), shared by the other uploads. */
+.dropzone { position: relative; min-height: 258px; border: 1px dashed #527085; border-radius: 14px; background: rgba(0, 240, 255, .025); padding: 30px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; transition: background-color 150ms ease-out, border-color 150ms ease-out; }
+.dragging { background: rgba(0, 240, 255, .09); border-color: var(--accent-color); }
+.uploadIcon { width: 56px; height: 56px; border-radius: 14px; background: rgba(0, 240, 255, .08); color: var(--accent-color); display: grid; place-items: center; margin-bottom: 18px; }
+.dropzone h2 { font-size: 1.05rem; line-height: 1.5; font-weight: 600; margin: 0 0 5px; max-width: 100%; overflow-wrap: anywhere; color: var(--text-primary); }
+.dropzone p { color: var(--text-secondary); font-size: .875rem; margin: 0 0 20px; }
+.fileButton { display: inline-flex; gap: 10px; align-items: center; justify-content: center; position: relative; border: 1px solid #526373; border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); padding: 12px 20px; min-height: 46px; font-weight: 600; font-size: 1rem; cursor: pointer; margin: 0; }
+.fileButton:hover { border-color: var(--accent-color); }
+.fileButton:focus-within { outline: 2px solid var(--accent-color); outline-offset: 3px; }
+.fileButton:has(input:disabled) { opacity: .5; cursor: default; }
+.fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.clearFile { position: absolute; right: 12px; top: 12px; color: var(--text-secondary); background: transparent; border: 1px solid var(--glass-border); border-radius: 7px; min-width: 36px; min-height: 36px; display: grid; place-items: center; cursor: pointer; }
+.clearFile:hover { color: var(--text-primary); border-color: var(--accent-color); }
+.actionBar { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+@media (max-width: 600px) { .dropzone { min-height: 240px; padding: 26px 18px; } .actionBar > * { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .dropzone { transition: none; } }

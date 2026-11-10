@@ -6,8 +6,6 @@ import { cookies } from 'next/headers';
 import PermissionGuard from '@/components/PermissionGuard';
 import { getUserPermissions } from '@/lib/permissions';
 import NewProjectButton from './NewProjectButton';
-import ManagerAssigner from './ManagerAssigner';
-import DeleteProjectButton from './DeleteProjectButton';
 import { groupProjectsByAction } from '@/lib/projects/project-action-groups';
 
 export const dynamic = 'force-dynamic';
@@ -143,111 +141,26 @@ export default async function ProjectsPage() {
           <span className={styles.actionCount}>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</span>
         </div>
 
-        {projects.length === 0 ? <p className={styles.actionEmpty}>No projects found.</p> : <div className={styles.actionGroups}>
-          {([
-            ['boq', 'Needs BOQ decision', 'No approved and locked BOQ baseline is recorded. Review the BOQ module for the current version and its status.'],
-            ['wps', 'Needs WPS decision', 'An approved BOQ is recorded, but the latest schedule has no verified active baseline. Review its actual workflow status in WPS.'],
-            ['other', 'Everything else', 'Projects with a verified active WPS baseline or archived projects.'],
-          ] as const).map(([group, title, description]) => {
-            const entries = projectActionGroups[group];
-            if (!entries.length) return null;
-            return <section className={styles.actionGroup} key={group} aria-labelledby={`project-group-${group}`}>
-              <header className={styles.actionGroupHeader}>
-                <div><h3 id={`project-group-${group}`}>{title}</h3><p>{description}</p></div>
-                <span className={styles.actionCount}>{entries.length}</span>
-              </header>
-              <ul className={styles.actionList}>
-                {entries.map(entry => {
-                  const project = entry.project.record;
-                  const schedule = entry.project.scheduleRecord;
-                  return <li className={styles.actionCard} key={project.id}>
-                    <div className={styles.actionCardTop}>
-                      <div className={styles.actionProjectText}>
-                        <h4>{project.name}</h4>
-                        <p>{project.location || 'No location specified'}</p>
-                      </div>
-                      <span className={`${styles.badge} ${styles['status-' + project.status.toLowerCase()] || styles.badgeDefault}`}>{project.status.replaceAll('_', ' ')}</span>
-                    </div>
-                    <dl className={styles.actionFacts}>
-                      <div><dt>BOQ status</dt><dd>{entry.boqLabel}</dd></div>
-                      <div><dt>WPS status</dt><dd>{entry.wpsLabel}{schedule ? ` · ${schedule._count.activities} ${schedule._count.activities === 1 ? 'package' : 'packages'}` : ''}</dd></div>
-                    </dl>
-                    {schedule && <p className={styles.scheduleName}>{schedule.name}{schedule.baselineCode ? ` · ${schedule.baselineCode}` : schedule.revisionCode ? ` · ${schedule.revisionCode}` : ''}</p>}
-                    <div className={styles.actionCardLinks}>
-                      {/* One action per project: it opens the BOQ or WPS stage the project is at. */}
-                      <Link className={styles.primaryProjectAction} href={entry.nextHref}>{entry.nextLabel}</Link>
-                    </div>
-                  </li>;
-                })}
-              </ul>
-            </section>;
-          })}
-        </div>}
+        {/* One table; the BOQ and WPS status columns show where each project stands. Projects needing a BOQ decision first. */}
+        {projects.length === 0 ? <p className={styles.actionEmpty}>No projects found.</p> : <div className={styles.projectTableWrap}><table className={styles.projectTable}>
+          <thead><tr><th>Project</th><th>Status</th><th>BOQ status</th><th>WPS status</th><th><span className="sr-only">Action</span></th></tr></thead>
+          <tbody>
+            {[...projectActionGroups.boq, ...projectActionGroups.wps, ...projectActionGroups.other].map(entry => {
+              const project = entry.project.record;
+              const schedule = entry.project.scheduleRecord;
+              return <tr key={project.id}>
+                <td><strong>{project.name}</strong><span className={styles.projectTableSub}>{project.location || 'No location specified'}</span></td>
+                <td><span className={`${styles.badge} ${styles['status-' + project.status.toLowerCase()] || styles.badgeDefault}`}>{project.status.replaceAll('_', ' ')}</span></td>
+                <td>{entry.boqLabel}</td>
+                <td>{entry.wpsLabel}{schedule ? ` · ${schedule._count.activities} ${schedule._count.activities === 1 ? 'package' : 'packages'}` : ''}</td>
+                {/* One action per project: it opens the BOQ or WPS stage the project is at. */}
+                <td className={styles.projectTableAction}><Link className={styles.primaryProjectAction} href={entry.nextHref}>{entry.nextLabel}</Link></td>
+              </tr>;
+            })}
+          </tbody>
+        </table></div>}
       </section>
 
-      <details className={styles.registerDetails}>
-        <summary>Full project register · {projects.length}</summary>
-      <div className={styles.tableContainer}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Project Name</th>
-              <th>Status</th>
-              <th>Contract Amounts</th>
-              <th>Timeline</th>
-              <th>Manager</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.length === 0 ? (
-              <tr>
-                <td colSpan={6} className={styles.emptyState}>No projects found.</td>
-              </tr>
-            ) : projects.map(project => {
-              const formatDate = (d: Date | string | null) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA';
-              const consolidatedCost = project.consolidatedBoqItems?.reduce((sum, i) => sum + (i.totalCost || 0), 0) || 0;
-              return (
-              <tr key={project.id}>
-                <td>
-                  <div className={styles.projectName}>{project.name}</div>
-                  <div className={styles.projectLocation}>{project.location || 'No location specified'}</div>
-                </td>
-                <td>
-                  <span className={`${styles.badge} ${styles['status-' + project.status.toLowerCase()] || styles.badgeDefault}`}>
-                    {project.status}
-                  </span>
-                </td>
-                <td className={styles.amount}>
-                  <div><strong>Awarded:</strong> ₱ {project.contractAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '4px' }}><strong>Materials:</strong> ₱ {consolidatedCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                </td>
-                <td style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                  <div><strong>Start:</strong> {formatDate(project.startDate)}</div>
-                  <div style={{ marginTop: '4px' }}><strong>Target:</strong> {formatDate(project.revisedCompletionDate || project.originalCompletionDate)}</div>
-                </td>
-                <td>
-                  <ManagerAssigner 
-                    projectId={project.id} 
-                    currentManager={project.manager} 
-                    users={users} 
-                    canEdit={canAssignManager} 
-                  />
-                </td>
-                <td>
-                  <div className={styles.rowActions}>
-                    <Link href={`/projects/${project.id}`} className={styles.actionLink}>View Details</Link>
-                    <PermissionGuard permissions={permissions} moduleName="PROJECT_MANAGEMENT" action="canDelete">
-                      <DeleteProjectButton projectId={project.id} />
-                    </PermissionGuard>
-                  </div>
-                </td>
-              </tr>
-            )})}
-          </tbody>
-        </table>
-      </div>
-      </details>
     </div>
   );
 }

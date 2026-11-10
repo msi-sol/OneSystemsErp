@@ -58,7 +58,7 @@ export default function DupaAiCheck({ projectId, scheduleId, uploadId, disabled,
 
   return <div className={styles.panel} style={{ margin: '12px 0' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-      <div><strong>AI Check this DUPA</strong> <span className={styles.muted}>· compares it with the package’s BOQ items and value. Nothing changes until you save a suggestion and apply the DUPA.</span></div>
+      <div><strong>AI Check this DUPA</strong> <span className={styles.muted}>· checks it against the package’s BOQ items and value. Nothing changes until you save.</span></div>
       <button type="button" className={result ? styles.secondary : styles.button} disabled={disabled || running} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Run AI Check'}</button>
     </div>
     {running && <AiThinking messages={AI_THINKING_MESSAGES.dupa} note="This usually takes 20–60 seconds." />}
@@ -98,7 +98,7 @@ export default function DupaAiCheck({ projectId, scheduleId, uploadId, disabled,
           <button type="button" className={styles.secondary} disabled={disabled || running} onClick={() => remove(open)}>Remove all</button>
         </div>}
       </>}
-      <p className={styles.muted} style={{ marginTop: 8 }}>Suggestions by {result.model}. AI can be wrong: check each row against the original DUPA.</p>
+      <p className={styles.muted} style={{ marginTop: 8 }}>AI can be wrong. Check each row against the DUPA.</p>
     </>}
   </div>;
 }

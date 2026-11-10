@@ -2,10 +2,9 @@ import { verifySession } from '@/lib/dal/auth';
 import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import AutoConsolidateButton from './AutoConsolidateButton';
+import MaterialsListSource from './MaterialsListSource';
 import ConsolidatedBOQViewer from './ConsolidatedBOQViewer';
 
-import UploadMasterMaterialsButton from './UploadMasterMaterialsButton';
 import Link from 'next/link';
 import { Prisma } from '@prisma/client';
 import { readMaterialAllowanceUsage } from '@/lib/boq/material-allowance-usage';
@@ -75,28 +74,8 @@ export default async function BOQConsolidationTab({
         </div>
       );
     }
-    if (!isBenchmarkLocked) {
-      return (
-        <div className={styles.empty} id="materials-generate">
-          <h3>Lock the procurement benchmark first</h3>
-          <p>The Master Materials List is generated from the procurement benchmark, so every benchmark line carries over. Check the benchmark, lock it, then come back here.</p>
-          <Link className={styles.cta} href={`/projects/${projectId}?tab=benchmark`}>Open Procurement Benchmark →</Link>
-          <details className={styles.alt}>
-            <summary>No benchmark? Upload a materials list from Excel instead</summary>
-            <UploadMasterMaterialsButton projectId={projectId} />
-          </details>
-        </div>
-      );
-    }
-    return (
-      <div className={styles.empty} id="materials-generate">
-        <AutoConsolidateButton projectId={projectId} />
-        <details className={styles.alt}>
-          <summary>Or upload a materials list from Excel instead</summary>
-          <UploadMasterMaterialsButton projectId={projectId} />
-        </details>
-      </div>
-    );
+    // Two choices: generate from the (locked) procurement benchmark, or upload an own list.
+    return <MaterialsListSource projectId={projectId} benchmarkLocked={isBenchmarkLocked} />;
   }
 
   // Calculate totals

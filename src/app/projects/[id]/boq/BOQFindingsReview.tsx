@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { BOQReviewDocument } from '@/lib/boq/review-state';
 import styles from './BOQFindingsReview.module.css';
@@ -22,7 +21,7 @@ const DECISION_LABEL: Record<string, string> = { CONFIRMED: 'Confirmed as read',
 const FIELD_LABEL: Record<string, string> = { quantity: 'Quantity', unit: 'Unit', unitCost: 'Unit rate', amount: 'Amount', itemCode: 'Item code', description: 'Description', total: 'BOQ total' };
 
 /** One open finding at a time, so the reviewer always knows what to decide next. */
-export default function BOQFindingsReview({ projectId, findings, canReview, pending, onDecide }: {
+export default function BOQFindingsReview({ findings, canReview, pending, onDecide }: {
   projectId: string;
   findings: Finding[];
   canReview: boolean;
@@ -48,8 +47,8 @@ export default function BOQFindingsReview({ projectId, findings, canReview, pend
 
   return <section className={styles.review} id="boq-findings" aria-labelledby="boq-findings-heading">
     <header className={styles.header}>
-      <div><h4 id="boq-findings-heading">Reading findings</h4><p>Points where the file was unclear or did not add up. Each one needs a decision before the engineering review.</p></div>
-      <span className={styles.count}>{open.length ? `${open.length} to decide` : 'All decided'} · {decided} of {findings.length} done</span>
+      <div><h4 id="boq-findings-heading">Reading findings</h4></div>
+      <span className={styles.count}>{decided} of {findings.length} done</span>
     </header>
     <div className={styles.progress} role="progressbar" aria-label="Findings decided" aria-valuemin={0} aria-valuemax={findings.length} aria-valuenow={decided}><span style={{ width: `${findings.length ? decided / findings.length * 100 : 0}%` }} /></div>
 
@@ -60,12 +59,8 @@ export default function BOQFindingsReview({ projectId, findings, canReview, pend
       </div>
       <h5 id={`finding-${finding.id}-title`}>{FIELD_LABEL[finding.field] ?? finding.field}{finding.rowNumber ? ` · file row ${finding.rowNumber}` : ''}</h5>
       <p className={styles.message}>{finding.message}</p>
-      <p className={styles.help}>{blocking
-        ? 'Confirm it if the file is right as read, or set it aside with a reason. If the reading is wrong, correct the item first.'
-        : 'Confirm it, set it aside, or defer it with a reason. If the reading is wrong, correct the item first.'}
-        {' '}<Link href={`/projects/${projectId}/boq?view=compare`}>Check it against the file</Link> · <Link href={`/projects/${projectId}/boq?view=items`}>Correct BOQ items</Link></p>
       {canReview ? <>
-        <label htmlFor={`finding-reason-${finding.id}`}>Reason {blocking ? '(needed to set aside)' : '(needed to set aside or defer)'}</label>
+        <label htmlFor={`finding-reason-${finding.id}`}>Reason</label>
         <ReasonSelect id={`finding-reason-${finding.id}`} options={FINDING_REASONS} value={reasons[finding.id] || ''} maxLength={300} disabled={pending} placeholder="Why this decision is right"
           onChange={value => setReasons({ ...reasons, [finding.id]: value })} />
         <div className={styles.decisions}>

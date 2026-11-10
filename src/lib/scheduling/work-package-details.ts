@@ -3,7 +3,7 @@ import { Prisma, ProjectScheduleWorkflowStatus } from '@prisma/client';
 import { prisma, transactionContext } from '@/lib/prisma';
 import { planningCapacity } from '@/lib/scheduling/planning-capacity';
 import { estimatePhPublicWorksBudget } from './work-package-budget';
-import { buildBreakdownResources, PackageBreakdownError, resourceFingerprint, type PackageBreakdownUpload, type BreakdownKind } from './package-breakdown';
+import { buildBreakdownResources, PackageBreakdownError, resourceFingerprint, suggestedBreakdownKind, type PackageBreakdownUpload, type BreakdownKind } from './package-breakdown';
 import { parseWorkspaceWorkbook } from '@/lib/boq/workspace-parser';
 import type { WorkspaceMapping } from '@/lib/boq/workspace-types';
 import { storeWorkspaceOriginal, removeWorkspaceOriginal } from '@/lib/boq/workspace-service';
@@ -259,6 +259,8 @@ export async function updateWorkPackageDetails(args: { projectId: string; actor:
     'confirm-resources': ['action','scheduleId','expectedRowVersion','activityId','activityIds'],
     'package-assumptions': ['action','scheduleId','expectedRowVersion','activityId','plannedStartDay','procurementLeadDays','laborCrew'],
     'apply-breakdown': ['action','scheduleId','expectedRowVersion','uploadId','categories','reason','acknowledgeExisting','replaceResourceIds','excludeRows'],
+    'use-dupas': ['action','scheduleId','expectedRowVersion','uploadIds'],
+    'remove-dupas': ['action','scheduleId','expectedRowVersion','activityId','uploadId'],
   };
   if (!allowed[action]) fail('UNKNOWN_ACTION');
   onlyKeys(body, allowed[action]!);
@@ -280,6 +282,56 @@ export async function updateWorkPackageDetails(args: { projectId: string; actor:
       if (!activity) fail('The uploaded breakdown does not belong to a package in this plan.', 409);
       applyBreakdown(details, upload, body, args.actor.id);
       return bumpAndSave(tx, schedule, expected, args.actor, 'WPS_PACKAGE_BREAKDOWN_APPLIED', details, { uploadId: upload.id, appliedAt: null, replacedResources: upload.replacedResources || [] }, { uploadId: upload.id, resourceIds: upload.resourceIds });
+    }
+    if (action === 'remove-dupas') {
+      // Remove one uploaded DUPA (uploadId) or every DUPA of one package (activityId), and put back the allowances
+      // they replaced, newest first, so the package returns to what it had before (e.g. when a DUPA pushes it above
+      // its BOQ value).
+      if ((body.uploadId === undefined) === (body.activityId === undefined)) fail('USE_ACTIVITY_ID_OR_UPLOAD_ID');
+      const single = body.uploadId !== undefined ? (details.breakdownUploads ?? []).find(entry => entry.id === requiredText(body.uploadId, 'UPLOAD_ID_REQUIRED')) : undefined;
+      if (body.uploadId !== undefined && !single) fail('This DUPA is no longer in the plan.', 404);
+      const activityId = single ? single.activityId : requiredText(body.activityId, 'ACTIVITY_ID_REQUIRED');
+      const uploads = single ? [single] : (details.breakdownUploads ?? []).filter(entry => entry.activityId === activityId);
+      if (!uploads.length) fail('This package has no uploaded DUPA.', 404);
+      const removedIds = new Set(uploads.map(entry => entry.id));
+      const before = { resources: details.resources.filter(row => row.activityId === activityId), uploads };
+      for (const upload of [...uploads].sort((left, right) => String(right.appliedAt ?? right.uploadedAt).localeCompare(String(left.appliedAt ?? left.uploadedAt)))) {
+        details.resources = details.resources.filter(row => row.breakdownUploadId !== upload.id);
+        const present = new Set(details.resources.map(row => row.id));
+        details.resources.push(...(upload.replacedResources ?? []).filter(row => !present.has(row.id)));
+      }
+      details.breakdownUploads = (details.breakdownUploads ?? []).filter(entry => !removedIds.has(entry.id));
+      const saved = await bumpAndSave(tx, schedule, expected, args.actor, 'WPS_PACKAGE_BREAKDOWNS_REMOVED', details, before, { activityId, removedUploads: uploads.map(entry => entry.id), resources: details.resources.filter(row => row.activityId === activityId) });
+      return { ...saved, removed: uploads.length, storagePaths: uploads.map(entry => entry.storagePath).filter(Boolean) };
+    }
+    if (action === 'use-dupas') {
+      // Use several uploaded DUPAs for the packages they are under, in one save. Each DUPA replaces its package's
+      // generated or manual allowances (never lines from another DUPA, so a package's DUPAs add up). A DUPA that
+      // cannot be applied as it is (a row with no clear category, amounts that do not compute) is skipped and
+      // reported; the others still apply.
+      const ids = Array.isArray(body.uploadIds) && body.uploadIds.length > 0 && body.uploadIds.length <= 200 && body.uploadIds.every(id => typeof id === 'string')
+        ? [...new Set(body.uploadIds as string[])] : fail('Choose the uploaded DUPAs to use.');
+      const packageIds = new Set((await tx.scheduleActivity.findMany({ where: { scheduleId }, select: { id: true } })).map(row => row.id));
+      const results: Array<{ uploadId: string; ok: boolean; message: string }> = [];
+      for (const uploadId of ids) {
+        const upload = details.breakdownUploads?.find(entry => entry.id === uploadId);
+        try {
+          if (!upload) fail('This DUPA is no longer in the plan.', 404);
+          if (!packageIds.has(upload.activityId)) fail('Its package is no longer in this plan.', 409);
+          const categories = Object.fromEntries(upload.rows.flatMap(row => { const kind = suggestedBreakdownKind(row.section); return kind ? [[String(row.sourceRowNumber), kind]] : []; }));
+          const unknown = upload.rows.filter(row => !categories[String(row.sourceRowNumber)]);
+          if (unknown.length) fail(`Row${unknown.length === 1 ? '' : 's'} ${unknown.slice(0, 5).map(row => row.sourceRowNumber).join(', ')} need${unknown.length === 1 ? 's' : ''} a category; open this DUPA to choose.`);
+          const replaceResourceIds = details.resources.filter(row => row.activityId === upload.activityId && !row.breakdownUploadId).map(row => row.id);
+          applyBreakdown(details, upload, { categories, reason: 'Using the uploaded DUPA for this package.', acknowledgeExisting: true, replaceResourceIds }, args.actor.id);
+          results.push({ uploadId, ok: true, message: `${upload.rows.length} line${upload.rows.length === 1 ? '' : 's'} now set the package allowances.` });
+        } catch (error) {
+          if (!(error instanceof WorkPackageDetailsError)) throw error;
+          results.push({ uploadId, ok: false, message: error.message });
+        }
+      }
+      if (!results.some(result => result.ok)) return { results, rowVersion: schedule.rowVersion };
+      const saved = await bumpAndSave(tx, schedule, expected, args.actor, 'WPS_PACKAGE_BREAKDOWNS_APPLIED', details, { uploadIds: results.filter(result => result.ok).map(result => result.uploadId), appliedAt: null }, { results });
+      return { ...saved, results };
     }
     const before = JSON.parse(JSON.stringify(details)) as PlanDetails;
     const activities = await tx.scheduleActivity.findMany({ where: { scheduleId }, select: { id: true, name: true, allocatedAmount: true } });

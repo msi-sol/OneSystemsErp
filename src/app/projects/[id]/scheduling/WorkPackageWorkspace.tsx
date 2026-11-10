@@ -56,7 +56,7 @@ const workflowLabels: Record<string, string> = {
   ARCHIVED_BASELINE: 'Archived baseline',
 };
 
-export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, onReview, canEditDraft = false, rowVersion = 0, onRefresh, moduleMode = false, onOpenPackage, completionWeights, allowances }: WorkPackageWorkspaceProps) {
+export default function WorkPackageWorkspace({ projectId, summary, workflowStatus, baselineCode, boqLocked, onPlan, canEditDraft = false, rowVersion = 0, onRefresh, moduleMode = false, onOpenPackage, completionWeights, allowances }: WorkPackageWorkspaceProps) {
   const [query, setQuery] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
   // Package whose BOQ scope is open in the side panel; focus returns to its "Review BOQ scope" button on close.
@@ -93,11 +93,11 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
       <div className={styles.header}>
         <div>
           <h2 id="work-package-heading">{moduleMode ? 'Package list and schedule' : 'Work packages'}</h2>
-          <p>{moduleMode ? 'Open a package to check its scope, dates, resources and DUPA.' : 'Turn the approved BOQ into a plan the project team can follow.'}</p>
+          {!moduleMode && <p>Turn the approved BOQ into a plan the project team can follow.</p>}
         </div>
-        <a className={styles.link} href={moduleMode ? `/projects/${encodeURIComponent(projectId)}/boq` : `/projects/${encodeURIComponent(projectId)}?tab=awarded-boq`}>
+        {!moduleMode && <a className={styles.link} href={`/projects/${encodeURIComponent(projectId)}?tab=awarded-boq`}>
           <BookOpen size={16} aria-hidden="true" /> View contract BOQ <ArrowRight size={16} aria-hidden="true" />
-        </a>
+        </a>}
       </div>
 
       {!moduleMode && <ol className={styles.workflow} aria-label="BOQ to work package workflow">
@@ -106,44 +106,34 @@ export default function WorkPackageWorkspace({ projectId, summary, workflowStatu
         <li><span>3</span><div><strong>Review and approve</strong><small>{workflowLabels[workflowStatus] || workflowStatus.replaceAll('_', ' ')}</small></div></li>
       </ol>}
 
-      <div className={styles.standing}>
+      {/* In the Work Packages module the steps and the Review & approve tab already show the plan status. */}
+      {!moduleMode && <div className={styles.standing}>
         <div>
           <strong>{summary.isImmutable && <LockKeyhole size={16} aria-hidden="true" />} {workflowLabels[workflowStatus] || 'Project plan'}{baselineCode ? ` · ${baselineCode}` : ''}</strong>
-          <p>{summary.isImmutable
-            ? 'This baseline is locked. Planning changes follow the existing revision and approval workflow.'
-            : 'Review the allocated BOQ scope and dates, then use the schedule review controls to request approval.'}</p>
+          {summary.isImmutable && <p>This baseline is locked. Changes go through a plan revision.</p>}
         </div>
-        {moduleMode && onReview ? <button type="button" className={styles.link} onClick={onReview}>Review workflow <ArrowRight size={16} aria-hidden="true" /></button> : <a className={styles.link} href="#schedule-review">Review workflow <ArrowRight size={16} aria-hidden="true" /></a>}
-      </div>
+        <a className={styles.link} href="#schedule-review">Review workflow <ArrowRight size={16} aria-hidden="true" /></a>
+      </div>}
 
-      <dl className={styles.facts}>
+      {/* The Work Packages module shows these totals in its plan summary above, so only the standalone view repeats them. */}
+      {!moduleMode && <dl className={styles.facts}>
         <div><dt>Contract BOQ value</dt><dd>{money(summary.contractAmount)}</dd></div>
         <div><dt>Package allocation value</dt><dd>{money(summary.allocatedAmount)}</dd></div>
         <div><dt>BOQ scope to review</dt><dd>{scopeIssues} of {summary.coverage.length} items</dd></div>
         <div><dt>Packages without BOQ links</dt><dd>{summary.missingScopeCount}</dd></div>
-      </dl>
+      </dl>}
 
-      <details className={styles.explanation}>
-        <summary>How do BOQ items and work packages connect?</summary>
-        <div>
-          <p>The BOQ defines the contract items, quantities and amounts. A work package is an existing schedule activity with a defined portion of that scope. One BOQ item can be split between several packages; one package can contain several BOQ items.</p>
-          <p>For example, 1,000 m³ of excavation can be planned as 400 m³ in one package and 600 m³ in another. The scope table compares all allocations with the BOQ quantity.</p>
-          <p><strong>BOQ value share is a planning weight, not actual completion.</strong> Calendar bars show stored planned dates. Recorded activity progress is shown separately; this view does not treat dates, spending or material deliveries as completed work.</p>
-          <p>Legacy mapped quantities are labelled for review. Package values use the stored allocations, preserving the BOQ amounts rather than recalculating them from unit rates.</p>
-        </div>
-      </details>
 
       <div className={styles.toolbar}>
         <label className={styles.search}><Search size={17} aria-hidden="true" /><span className={styles.srOnly}>Search work packages and BOQ items</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search packages or BOQ items" /></label>
         <label className={styles.check}><input type="checkbox" checked={issuesOnly} onChange={event => setIssuesOnly(event.target.checked)} /> Needs attention only</label>
-        <button className={styles.action} type="button" onClick={onPlan}>{moduleMode ? 'Open scope planner' : summary.isImmutable ? 'View WBS & activities' : 'Plan in WBS & activities'} <ArrowRight size={16} aria-hidden="true" /></button>
+        {!moduleMode && <button className={styles.action} type="button" onClick={onPlan}>{summary.isImmutable ? 'View WBS & activities' : 'Plan in WBS & activities'} <ArrowRight size={16} aria-hidden="true" /></button>}
       </div>
 
-      <div className={styles.scheduleHeading}>
-        <div><h3>Package schedule and scope</h3><p>Stored planned dates · {summary.datedCount} of {summary.packages.length} packages fully dated</p></div>
-        {windowStart !== null && windowFinish !== null && <span><CalendarDays size={16} aria-hidden="true" />{dateText(starts[0])} – {dateText(finishes[finishes.length - 1])}</span>}
-      </div>
-      <p className={styles.result} role="status">Showing {packages.length} of {summary.packages.length} packages</p>
+      {/* Only the plan's date range is kept here; the package count and dating status show in the plan summary. */}
+      {windowStart !== null && windowFinish !== null && <div className={styles.scheduleHeading}>
+        <span><CalendarDays size={16} aria-hidden="true" />{dateText(starts[0])} – {dateText(finishes[finishes.length - 1])}</span>
+      </div>}
 
       {packages.length === 0 ? <p className={styles.empty}>{summary.packages.length ? 'No packages match these filters. Clear the search or turn off the attention filter.' : 'No work packages are recorded in this schedule yet.'}</p> : (
         <ul className={styles.packages}>

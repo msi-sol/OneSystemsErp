@@ -29,6 +29,7 @@ import { compareBOQLines, summarizeComparison } from '@/lib/boq/comparison';
 import BOQSourcePreview from './BOQSourcePreview';
 import BOQReadingNotes from './BOQReadingNotes';
 import type { WorkspaceIssue } from '@/lib/boq/workspace-types';
+import { boqFindingsRequired } from '@/lib/boq/findings-mode';
 
 export const dynamic = 'force-dynamic';
 const money = (value: number | string) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(value));
@@ -64,7 +65,8 @@ export default async function ProjectBOQModule({ params, searchParams }: { param
   const sectionIdentities = persistedReview?.document.sectionIdentityByItemId ?? {};
   const sections = boqSections(project.awardedBoqItems, sectionIdentities);
   const selectedSection = sections.some(section => section.id === query.section) ? query.section! : 'all';
-  const openFindingCount = persistedReview?.document.findings.filter(finding => finding.status === 'OPEN' && !finding.invalidatedAt).length ?? 0;
+  // With findings switched off they never count as open, so the next-step card does not ask for them.
+  const openFindingCount = boqFindingsRequired() ? persistedReview?.document.findings.filter(finding => finding.status === 'OPEN' && !finding.invalidatedAt).length ?? 0 : 0;
   const lifecycle = deriveBoqLifecycle({
     projectId: id, hasVersion: Boolean(version), draft, approved, reviewPrepared: Boolean(persistedReview),
     openFindings: openFindingCount, contractVerified: Boolean(persistedReview?.document.contract.verified),
@@ -125,10 +127,10 @@ export default async function ProjectBOQModule({ params, searchParams }: { param
           versionNumber={version.versionNumber} approvedBy={version.approvedBy ? actorNames[version.approvedBy] ?? 'Recorded approver' : null} approvedAt={version.approvedAt?.toISOString() ?? null}
           approvalNote={persistedReview?.document.finalApproval?.note ?? null} reviewer={review ? { name: review.reviewerName, at: review.decidedAt } : null} originalHref={originalHref}
           sourceName={sourceFile?.originalFilename ?? persistedReview?.document.source.fileName ?? null} />
-      : version && <section className={styles.panel} aria-label="BOQ overview"><h3>Review this BOQ before approval</h3><dl className={styles.reconciliationFacts}><div><dt>BOQ total</dt><dd>{money(total.toString())}</dd></div><div><dt>Signed contract value</dt><dd>{money(project.contractAmount)}</dd></div><div><dt>Sections · items</dt><dd>{sections.length} · {project.awardedBoqItems.length}</dd></div><div><dt>Findings to resolve</dt><dd>{openFindingCount}</dd></div>{comparisonSummary && <div><dt>Items that differ from the file</dt><dd>{comparisonSummary.differences}</dd></div>}</dl><div className={styles.actions}>{comparisonSummary && <Link className={styles.link} href={`/projects/${id}/boq?view=compare`}>Compare with file</Link>}<Link className={styles.link} href={`/projects/${id}/boq?view=items`}>Review BOQ items</Link><Link className={styles.link} href={`/projects/${id}/boq?view=sections`}>Review sections</Link></div></section>}
+      : null}
     {/* Optional AI Check: insights + editable suggestions; only runs when the user asks. */}
     {version && project.awardedBoqItems.length > 0 && <AiCheckPanel projectId={id} scope="boq" />}
-    {draft && version && (persistedReview ? <BOQEngineeringReview projectId={id} versionId={version.id} checksum={checksum} canReview={capacity.canEngineerReview} canApprove={capacity.canApprove} review={review} reconciliation={{ contractAmount: String(project.contractAmount), boqTotal: total.toFixed(2), difference: total.minus(String(project.contractAmount)).abs().toFixed(2), matches: total.equals(String(project.contractAmount)) }} reviewState={{ rowVersion: persistedReview.rowVersion, findings: persistedReview.document.findings, contract: persistedReview.document.contract, revisions: persistedReview.document.revisions, readingHistory: persistedReview.document.readingHistory, correctedSources: persistedReview.document.correctedSources, provenance: persistedReview.document.source.provenance, firstReadAvailable: persistedReview.document.source.firstReadAvailable }} /> : <BOQReviewPreparation projectId={id} versionId={version.id} canPrepare={capacity.canEdit} />)}
+    {draft && version && (persistedReview ? <BOQEngineeringReview projectId={id} versionId={version.id} checksum={checksum} canReview={capacity.canEngineerReview} canApprove={capacity.canApprove} review={review} reconciliation={{ contractAmount: String(project.contractAmount), boqTotal: total.toFixed(2), difference: total.minus(String(project.contractAmount)).abs().toFixed(2), matches: total.equals(String(project.contractAmount)) }} reviewState={{ rowVersion: persistedReview.rowVersion, findings: persistedReview.document.findings, contract: { ...persistedReview.document.contract, verifiedBy: persistedReview.document.contract.verifiedBy ? actorNames[persistedReview.document.contract.verifiedBy] ?? 'Recorded user' : null }, revisions: persistedReview.document.revisions, readingHistory: persistedReview.document.readingHistory, correctedSources: persistedReview.document.correctedSources, provenance: persistedReview.document.source.provenance, firstReadAvailable: persistedReview.document.source.firstReadAvailable }} /> : <BOQReviewPreparation projectId={id} versionId={version.id} canPrepare={capacity.canEdit} />)}
     </>}
     {view === 'sections' && <BOQSections projectId={id} sections={sections} locked={approved}
       edit={draft && version && capacity.canEdit ? { versionId: version.id, checksum, reviewRowVersion: persistedReview?.rowVersion } : null}

@@ -2,6 +2,7 @@ import { WorkPackageExecutionError } from '@/lib/scheduling/work-package-executi
 import { NextResponse } from 'next/server';
 import { getSessionActor } from '@/lib/scheduling/authUtils';
 import { updateWorkPackageDetails, WorkPackageDetailsError } from '@/lib/scheduling/work-package-details';
+import { removeWorkspaceOriginal } from '@/lib/boq/workspace-service';
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -13,6 +14,12 @@ export async function POST(request: Request, { params }: Context) {
     try { body = await request.json(); }
     catch { return NextResponse.json({ error: 'INVALID_JSON_BODY' }, { status: 400 }); }
     const result = await updateWorkPackageDetails({ projectId, actor, body });
+    // Removed DUPAs: delete their stored originals only after the plan change is saved (best effort).
+    if (result && typeof result === 'object' && 'storagePaths' in result) {
+      const { storagePaths, ...rest } = result as { storagePaths?: string[] } & Record<string, unknown>;
+      for (const path of storagePaths ?? []) await removeWorkspaceOriginal(path).catch(() => undefined);
+      return NextResponse.json(rest);
+    }
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof WorkPackageExecutionError) return NextResponse.json({error:error.message},{status:error.status});

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { uploadProcurementBenchmark, lockProcurementBenchmark, deleteProcurementBenchmark } from '@/app/actions/mutations';
 import BenchmarkAiCheck from './BenchmarkAiCheck';
 import styles from './materialsFlow.module.css';
+import UploadDropzone from '@/components/ui/UploadDropzone';
 
 type BenchmarkItem = { id?: string; itemCode?: string | null; description: string; quantity?: number | null; unit?: string | null; unitCost?: number | null; totalCost?: number | null };
 const peso = (value: number) => `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -44,7 +45,7 @@ export default function ProcurementBenchmarkTab({
   const [isLocking, setIsLocking] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
-  const [fileName, setFileName] = useState('');
+  const [benchmarkFiles, setBenchmarkFiles] = useState<File[]>([]);
   // Confirmation is asked on the page itself. The browser's confirm() popup is not shown in every browser (in the app's
   // built-in browser it returns "Cancel" instantly), which made Delete and Lock silently do nothing.
   const [confirming, setConfirming] = useState<'delete' | 'lock' | null>(null);
@@ -60,7 +61,7 @@ export default function ProcurementBenchmarkTab({
       const formData = new FormData(form);
       formData.append('projectId', projectId);
       await uploadProcurementBenchmark(formData);
-      form.reset(); setFileName('');
+      form.reset(); setBenchmarkFiles([]);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : 'The file could not be uploaded. Check that it is an Excel file and try again.');
@@ -105,23 +106,13 @@ export default function ProcurementBenchmarkTab({
 
   if (items.length === 0) {
     return (
-      <div className={styles.empty}>
-        <h3>Upload the procurement benchmark</h3>
-        <p>
-          The benchmark is the internal spending limit for this project. It can be lower than the BOQ and contract value.
-          After you check and lock it, the Master Materials List is generated from it.
-        </p>
+      // Same upload as the BOQ Workspace: drop or choose the file, then upload.
+      <form onSubmit={handleUpload} aria-label="Upload the procurement benchmark">
         {errorBox}
-        <form onSubmit={handleUpload} className={styles.fileRow}>
-          <label className={styles.ghost} style={{ cursor: 'pointer' }}>
-            {fileName ? `📄 ${fileName}` : 'Choose Excel file (.xlsx)'}
-            <input type="file" name="benchmarkFile" accept=".xlsx,.xls" required className="sr-only" onChange={event => setFileName(event.target.files?.[0]?.name || '')} />
-          </label>
-          <button type="submit" className={styles.cta} disabled={isUploading || !fileName}>
-            {isUploading ? 'Reading the file…' : 'Upload benchmark'}
-          </button>
-        </form>
-      </div>
+        <UploadDropzone prompt="Drop the benchmark file here" hint="Excel (.xlsx or .xls)" accept=".xlsx,.xls" name="benchmarkFile"
+          inputLabel="Choose the benchmark file" files={benchmarkFiles} onFiles={setBenchmarkFiles} disabled={isUploading} status="ready to upload"
+          action={<button type="submit" className={styles.cta} disabled={isUploading || !benchmarkFiles.length}>{isUploading ? 'Reading the file…' : 'Upload benchmark'}</button>} />
+      </form>
     );
   }
 

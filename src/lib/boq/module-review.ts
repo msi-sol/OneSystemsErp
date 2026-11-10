@@ -3,6 +3,7 @@ import { prisma, transactionContext } from '@/lib/prisma';
 import { planningCapacity } from '@/lib/scheduling/planning-capacity';
 import { approveAndLockDraftBOQ, buildDraftBOQChecksum, DraftBOQWorkflowError, type DraftBOQDatabase, type DraftBOQTransaction } from './draft-workflow';
 import { assertBOQReviewReady, parseBOQReviewDocument, reviewDocumentJson } from './review-state';
+import { boqFindingsRequired } from './findings-mode';
 
 export class BOQModuleReviewError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -143,7 +144,7 @@ export async function reviewBOQModule(projectId: string, actor: { id: string; ro
       const document = parseBOQReviewDocument(state.dataJson, projectId, versionId);
       if (!document) fail('The BOQ source review record is invalid.', 409);
       if (!document.contract.verified) fail('Verify the signed contract value before BOQ review.', 409);
-      try { assertBOQReviewReady(document); } catch { fail('Resolve or record a decision for every required BOQ finding before review.', 409); }
+      if (boqFindingsRequired()) { try { assertBOQReviewReady(document); } catch { fail('Resolve or record a decision for every required BOQ finding before review.', 409); } }
       if (body.action === 'review') {
         await tx.auditLog.create({ data: { userId: actor.id, userRole: actor.role, moduleName: 'PROJECT_BOQ', transactionId: version.id,
           actionType: REVIEW_ACTION, newValue: JSON.stringify({ projectId, checksum, comments, reviewerName: actor.name || actor.id }) } });
@@ -158,7 +159,7 @@ export async function reviewBOQModule(projectId: string, actor: { id: string; ro
         fail(`PM approval is blocked: the BOQ total is PHP ${reconciliation.boqTotal} and the signed contract value is PHP ${reconciliation.contractValue} (difference PHP ${reconciliation.difference}). Correct the BOQ lines or explicitly revise the contract value with a reason; neither amount was changed.`, 400);
       }
       const setAsideFindings = document.findings.filter(finding => finding.status === 'SET_ASIDE' && !finding.invalidatedAt);
-      if (setAsideFindings.length && !document.setAsideAcknowledgement) {
+      if (boqFindingsRequired() && setAsideFindings.length && !document.setAsideAcknowledgement) {
         if (body.setAsideAcknowledged !== true || typeof body.setAsideReason !== 'string' || body.setAsideReason.trim().length < 5 || body.setAsideReason.trim().length > 300) {
           fail('Acknowledge the BOQ source rows set aside during review and enter a reason.', 409);
         }

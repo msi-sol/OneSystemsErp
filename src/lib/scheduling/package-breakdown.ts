@@ -4,6 +4,12 @@ import type { PlanResource } from './work-package-details-types';
 
 export const RESOURCE_KINDS = ['MATERIAL', 'LABOR', 'EQUIPMENT', 'ALLOWANCE'] as const;
 export type BreakdownKind = typeof RESOURCE_KINDS[number];
+
+/** A DUPA usually groups rows under Materials / Labor / Equipment headings; the row starts in that category. */
+export function suggestedBreakdownKind(section: string | null | undefined): BreakdownKind | undefined {
+  const text = (section || '').toLowerCase();
+  return /material/.test(text) ? 'MATERIAL' : /labou?r|manpower|crew/.test(text) ? 'LABOR' : /equipment|tool/.test(text) ? 'EQUIPMENT' : undefined;
+}
 export type PackageBreakdownUpload = {
   id: string; activityId: string; fileName: string; fileHash: string; storagePath: string;
   sheetName: string; mapping: WorkspaceMapping; rows: WorkspaceItem[];

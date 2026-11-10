@@ -1,7 +1,9 @@
 .card { margin: 0 0 24px; padding: 22px; border: 1px solid rgba(79, 191, 154, .35); border-radius: 12px; background: linear-gradient(180deg, rgba(79, 191, 154, .06), transparent 60%), var(--bg-secondary); min-width: 0; }
 .header { margin-bottom: 18px; }
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(79, 191, 154, .14); color: #91dfc1; font-size: .75rem; font-weight: 650; }
-.header h3 { margin: 10px 0 4px; font-size: 1.1rem; }
+.titleRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.header h3 { margin: 0; font-size: 1.1rem; }
+.badge { flex-shrink: 0; white-space: nowrap; }
 .header p { margin: 0; color: var(--text-secondary); font-size: .875rem; line-height: 1.6; max-width: 75ch; }
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 24px; margin: 0; }
 .facts dt { color: var(--text-secondary); font-size: .78rem; }

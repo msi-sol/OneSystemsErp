@@ -5,6 +5,8 @@
  * validated by its own API route.
  */
 import { WPS_STEPS } from '@/lib/scheduling/wps-overview';
+import { wpsCapacitiesRequired } from '@/lib/scheduling/wps-capacity-mode';
+import { boqFindingsRequired } from '@/lib/boq/findings-mode';
 
 export type PlanningPhase = 1 | 2 | 3;
 export type PlanningStepState = 'done' | 'current' | 'todo' | 'locked';
@@ -152,8 +154,8 @@ export function deriveBoqLifecycle(input: BoqLifecycleInput): PlanningLifecycle 
   const steps = sequence([
     { key: 'source', label: 'Confirm the BOQ source', done: input.hasVersion, lockedHint: '' },
     { key: 'prepare', label: 'Prepare the review', done: input.approved || (input.hasVersion && input.reviewPrepared), lockedHint: 'Confirm a BOQ source first.' },
-    { key: 'findings', label: 'Resolve reading findings', done: input.approved || (input.reviewPrepared && input.openFindings === 0), lockedHint: 'Prepare the review first.' },
-    { key: 'contract', label: 'Verify the signed contract value', done: input.approved || input.contractVerified, lockedHint: 'Resolve the reading findings first.' },
+    ...(boqFindingsRequired() ? [{ key: 'findings', label: 'Resolve reading findings', done: input.approved || (input.reviewPrepared && input.openFindings === 0), lockedHint: 'Prepare the review first.' }] : []),
+    { key: 'contract', label: 'Verify the signed contract value', done: input.approved || input.contractVerified, lockedHint: boqFindingsRequired() ? 'Resolve the reading findings first.' : 'Prepare the review first.' },
     { key: 'reconcile', label: 'Match BOQ total to contract', done: input.approved || input.totalsMatch, lockedHint: 'Verify the contract value first.' },
     { key: 'review', label: 'Engineering review', done: input.approved || input.reviewCurrent, lockedHint: 'Needs findings resolved, a verified contract and matching totals.' },
     { key: 'approve', label: 'PM approval & lock', done: input.approved, lockedHint: 'Needs a current engineering review.' },
@@ -252,7 +254,7 @@ export function deriveWpsLifecycle(input: WpsLifecycleInput): PlanningLifecycle 
   /** `cta` omitted when the action is a button on the same page. */
   const prepare = (title: string, detail: string, cta?: { label: string; view: string }): PlanningNextAction => input.canEdit
     ? { title, detail, ...(cta ? { cta: { label: cta.label, href: `${base}?view=${cta.view}` } } : {}) }
-    : { title, detail, waitingOn: 'A project Planner or Project Engineer prepares the plan. Project WPS capacities are granted on this page.' };
+    : { title, detail, waitingOn: wpsCapacitiesRequired() ? 'A project Planner or Project Engineer prepares the plan. Project WPS capacities are granted on this page.' : 'A project editor prepares the plan.' };
 
   let next: PlanningNextAction;
   if (!input.approvedBOQ) {
@@ -266,7 +268,7 @@ export function deriveWpsLifecycle(input: WpsLifecycleInput): PlanningLifecycle 
   } else if (!input.hasPlan || !input.adopted) {
     next = prepare('Next: start the work-package plan', `Select “${input.hasPlan ? 'Prepare existing draft' : 'Start work-package plan'}” below. You can then generate suggested packages from the approved BOQ sections or add packages yourself.`);
   } else if (input.packageCount === 0) {
-    next = prepare('Next: create work packages', 'Select “Generate suggested work packages” below (related BOQ sections are grouped into packages), or add packages yourself. Suggestions stay drafts until reviewed.');
+    next = prepare('Next: create work packages', 'Generate suggested packages below, or add your own.');
   } else if (scopeMissing.length) {
     next = prepare('Next: allocate all BOQ scope', `Every approved BOQ quantity must sit in a package, and package values must add up to the BOQ total. ${firstGap(scopeMissing)}`.trim(), { label: 'Open scope planner', view: 'scope' });
   } else if (scheduleMissing.length) {

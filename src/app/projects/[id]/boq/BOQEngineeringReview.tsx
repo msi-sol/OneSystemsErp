@@ -1,5 +1,6 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useState, useTransition, type ReactNode } from 'react';
+import { Check } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Decimal from 'decimal.js';
 import type { BOQReviewDocument } from '@/lib/boq/review-state';
@@ -30,6 +31,7 @@ const PM_APPROVAL_NOTES = [
   'Approved with the contract check on record',
 ];
 import BOQFindingsReview from './BOQFindingsReview';
+import { boqFindingsRequired } from '@/lib/boq/findings-mode';
 
 type Review = { current: boolean; reviewerName: string; comments: string; decidedAt: string } | null;
 const money = (value: string) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(value));
@@ -60,7 +62,9 @@ export default function BOQEngineeringReview({ projectId, versionId, checksum, c
   const [revisedContract, setRevisedContract] = useState('');
   const [setAsideReason, setSetAsideReason] = useState('');
   const [acknowledgeSetAside, setAcknowledgeSetAside] = useState(false);
-  const openFindings = reviewState?.findings.filter(finding => finding.status === 'OPEN' && !finding.invalidatedAt) || [];
+  // With findings switched off they are hidden and never block the review or approval (the server agrees).
+  const findingsOn = boqFindingsRequired();
+  const openFindings = findingsOn ? reviewState?.findings.filter(finding => finding.status === 'OPEN' && !finding.invalidatedAt) || [] : [];
   const proposedDifference = /^\d+(?:\.\d{1,2})?$/.test(revisedContract) && new Decimal(revisedContract).gt(0)
     ? new Decimal(revisedContract).minus(reconciliation.boqTotal).abs().toFixed(2) : null;
   async function action(value: 'review' | 'approve' | 'finding-decision' | 'verify-contract' | 'revise-contract', extra: Record<string, unknown> = {}): Promise<boolean> {
@@ -78,37 +82,67 @@ export default function BOQEngineeringReview({ projectId, versionId, checksum, c
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The review could not be saved.'); return false; }
     finally { setBusy(false); }
   }
+  // The approval runs in order: 1 contract, 2 engineering review, 3 PM approval. Only the current step is open;
+  // done steps collapse to one line and later steps wait.
+  const contractDone = !!reviewState?.contract.verified && reconciliation.matches;
+  const reviewDone = !!review?.current;
+  const current = !contractDone ? 1 : !reviewDone ? 2 : 3;
+  const step = (number: 1 | 2 | 3, title: string, done: boolean, summary: ReactNode, body: ReactNode, waiting: string) => {
+    const state = done ? 'done' : number === current ? 'current' : 'waiting';
+    return <li className={`${styles.flowStep} ${styles[`flow_${state}`]}`} aria-current={state === 'current' ? 'step' : undefined}>
+      <div className={styles.flowHead}><span className={styles.flowNumber} aria-hidden="true">{done ? <Check size={16} strokeWidth={3} /> : number}</span><strong>{title}</strong></div>
+      <div className={styles.flowBody}>{done ? <p className={styles.flowSummary}>{summary}</p> : state === 'current' ? body : <p className={styles.flowSummary}>{waiting}</p>}</div>
+    </li>;
+  };
+  const noPermission = (who: string) => <p className={styles.flowSummary}>Waiting for {who}.</p>;
   return <section className={styles.panel} aria-labelledby="boq-approval-heading"><h3 id="boq-approval-heading">BOQ review and approval</h3>
-    <p className={styles.muted}>An engineer reviews the exact BOQ draft. The Project Manager then approves and locks that reviewed version. Editing the BOQ makes the previous review stale.</p>
-    <ol aria-label="BOQ approval requirements" className={styles.reviewSteps}>
-      <li><strong>Check the contract and BOQ total</strong><span>{reviewState?.contract.verified ? 'Contract verified' : 'Record your signed-document check below'} · {reconciliation.matches ? 'Amounts match' : `${money(reconciliation.difference)} difference to resolve`}</span></li>
-      <li><strong>Resolve workbook findings</strong><span>{openFindings.length ? `${openFindings.length} decisions required below` : 'No open findings'}</span></li>
-      <li><strong>Record the Engineer review</strong><span>{review?.current ? 'Current version reviewed' : 'Enter comments and record the review after completing the checks'}</span></li>
-      <li><strong>PM approves and locks the BOQ</strong><span>After the current Engineer review, approve the baseline to continue to Work Packages.</span></li>
-    </ol>
     {error && <div className={styles.error} role="alert"><p>{error}</p>{/changed|refresh|concurrent/i.test(error) && <button type="button" className={styles.secondary} disabled={pending} onClick={() => { setConfirmApproval(false); setError(''); startRefresh(() => router.refresh()); }}>Refresh current BOQ</button>}</div>}{message && <p className={styles.success} role="status">{message}</p>}
-    {review && <div className={styles.status}><strong>{review.current ? 'Engineering review is current' : 'BOQ changed — a new engineering review is required'}</strong><p>{review.reviewerName} · {new Date(review.decidedAt).toLocaleString('en-PH')}</p><p>{review.comments}</p></div>}
-    {reviewState && <>
-      {!reviewState.firstReadAvailable && <div className={styles.status}><strong>Legacy canonical snapshot</strong><p>No original workbook or first reading was preserved. Findings and source comparisons are limited to this saved BOQ.</p></div>}
-      <div className={styles.status} id="boq-contract-check">
-        <strong>Signed contract value {reviewState.contract.verified ? 'verified' : 'needs verification'}</strong>
-        <dl className={styles.reconciliationFacts}><div><dt>Recorded contract value</dt><dd>{money(reconciliation.contractAmount)}</dd></div><div><dt>BOQ item total</dt><dd>{money(reconciliation.boqTotal)}</dd></div><div><dt>Difference to resolve</dt><dd>{money(reconciliation.difference)}</dd></div></dl>
-        {reviewState.contract.verified && <p>{reviewState.contract.verifiedBy} · {reviewState.contract.verificationReason}</p>}
-      </div>
-      {!reconciliation.matches && <div className={styles.status} role="alert"><h4>Resolve the BOQ and contract difference</h4><p>This draft is saved. Approval stays blocked by the {money(reconciliation.difference)} difference. Check the signed contract and choose what needs correcting.</p><div className={styles.actions}><a className={styles.link} href={`/projects/${projectId}/boq?view=items`}>Review and correct BOQ items</a>{canApprove && <button type="button" className={styles.secondary} disabled={pending} onClick={() => { setRevisedContract(reconciliation.boqTotal); setConfirmApproval(false); }}>Use BOQ total as proposed contract value</button>}</div><p>Choosing a proposed value does not save it. A contract revision requires a reason and explicit confirmation below.</p></div>}
-      {canApprove && <div style={{ marginTop: 12 }}>
-        <div className={styles.fields}><div><label htmlFor="boq-contract-verification-reason">Contract check or revision reason</label><ReasonSelect id="boq-contract-verification-reason" options={CONTRACT_REASONS} value={contractReason} onChange={setContractReason} maxLength={300} placeholder="Record the signed-document check" disabled={pending}/><p className={styles.muted}>Choose a reason or type your own. Verification records your check; it does not change the BOQ or remove an amount difference.</p></div><div><label htmlFor="boq-revised-contract">Revised signed contract value (optional)</label><input id="boq-revised-contract" aria-label="Revised signed contract value" type="number" min="0.01" step="0.01" value={revisedContract} onChange={event => { setRevisedContract(event.target.value); setConfirmApproval(false); }} placeholder="Enter only for a contract revision" disabled={pending}/><p className={styles.muted}>Leave this blank when verifying the current contract value.</p></div></div>
-        {proposedDifference !== null && <div className={styles.status}><strong>Proposed contract revision · not saved</strong><p>Current {money(reconciliation.contractAmount)} → proposed {money(revisedContract)} · difference to BOQ {money(proposedDifference)}</p><p>The BOQ items stay unchanged. The revision and its reason are recorded in history.</p></div>}
-        <div className={styles.actions}><button type="button" className={styles.secondary} disabled={pending || contractReason.trim().length < 5} onClick={() => void action('verify-contract', { reason: contractReason })}>Verify signed contract value</button><button type="button" className={styles.secondary} disabled={pending || contractReason.trim().length < 5 || proposedDifference === null} onClick={() => void action('revise-contract', { reason: contractReason, contractAmount: revisedContract })}>Record contract revision</button></div>
-      </div>}
+    {reviewState && !reviewState.firstReadAvailable && <div className={styles.status}><strong>Legacy canonical snapshot</strong><p>No original workbook or first reading was preserved.</p></div>}
+    {reviewState && findingsOn && <>
       <BOQFindingsReview projectId={projectId} findings={reviewState.findings} canReview={canReview} pending={pending}
         onDecide={(findingId, decision, reason) => action('finding-decision', reason === undefined ? { findingId, decision } : { findingId, decision, reason })} />
       {reviewState.findings.some(finding => finding.status === 'SET_ASIDE') && <div className={styles.fields}><label><input type="checkbox" checked={acknowledgeSetAside} onChange={event => setAcknowledgeSetAside(event.target.checked)}/> I acknowledge the source rows intentionally set aside.</label><ReasonSelect id="boq-set-aside-reason" label="Acknowledgement reason" options={SET_ASIDE_REASONS} maxLength={300} value={setAsideReason} onChange={setSetAsideReason} placeholder="Reason for acknowledging set-aside rows"/></div>}
-      <details className={styles.history}><summary>Source, correction and reading history</summary><ul>{reviewState.revisions.map(revision => <li key={revision.id}>{revision.action} · {revision.reason} · {new Date(revision.createdAt).toLocaleString('en-PH')}</li>)}{reviewState.readingHistory.map(reading => <li key={reading.id}>Reading {reading.fileName} · {reading.selectedSheet} · {reading.appliedAt ? 'applied' : 'preview only'} · {reading.comparison.length} compared rows<ReadingConflictHistory reading={reading}/></li>)}{reviewState.correctedSources.map(source => <li key={source.versionId}>Corrected source {source.fileName} · {source.status} · {source.assessment.length} assessed rows</li>)}</ul></details>
     </>}
-    {!review && <p className={styles.muted}>Engineering review has not been recorded for this BOQ.</p>}
-    {canReview && <><label htmlFor="boq-engineering-comments">Engineering review comments</label><ReasonSelect id="boq-engineering-comments" options={ENGINEERING_REVIEW_COMMENTS} multiline maxLength={10000} value={comments} onChange={setComments} disabled={pending} placeholder="Engineering review comments" /><p className={styles.muted}>Choose a comment or type your own, then record the review. Choosing alone does not save a review.</p><div className={styles.actions} style={{ marginTop: 14 }}><button className={styles.secondary} disabled={pending || comments.trim().length < 5 || !reviewState?.contract.verified || openFindings.length > 0} onClick={() => action('review')}>{pending ? 'Saving…' : 'Record engineering review'}</button></div></>}
-    {canApprove && <><label htmlFor="boq-pm-approval-note" style={{marginTop:20}}>PM approval note (optional)</label><ReasonSelect id="boq-pm-approval-note" options={PM_APPROVAL_NOTES} optional multiline value={approvalNote} maxLength={1000} disabled={pending} onChange={setApprovalNote} placeholder="PM approval note"/><p className={styles.muted}>Saved with this approval in Evidence & history. Existing review and reconciliation requirements still apply.</p><div className={styles.actions} style={{ marginTop: 20 }}><button className={styles.button} disabled={pending || (approvalNote.trim().length>0&&approvalNote.trim().length<5) || !reconciliation.matches || !review?.current || !reviewState?.contract.verified || openFindings.length > 0 || (reviewState.findings.some(finding => finding.status === 'SET_ASIDE' && !finding.invalidatedAt) && (!acknowledgeSetAside || setAsideReason.trim().length < 5))} onClick={() => { if (confirmApproval) void action('approve'); else setConfirmApproval(true); }}>{pending ? 'Saving…' : confirmApproval ? 'Confirm PM approval & lock' : 'Approve BOQ baseline'}</button>{confirmApproval && <button className={styles.secondary} disabled={pending} onClick={() => setConfirmApproval(false)}>Cancel approval</button>}</div></>}
-    {confirmApproval && <p className={styles.muted}>Approval locks the BOQ and makes it available for work-package planning.</p>}
+
+    <ol className={styles.flow} aria-label="BOQ approval steps">
+      {step(1, 'Verify the contract value', contractDone,
+        <>{money(reconciliation.contractAmount)} · matches the BOQ total{reviewState?.contract.verifiedBy ? ` · ${reviewState.contract.verifiedBy}` : ''}</>,
+        <>
+          <dl className={styles.reconciliationFacts} id="boq-contract-check"><div><dt>Contract value</dt><dd>{money(reconciliation.contractAmount)}</dd></div><div><dt>BOQ total</dt><dd>{money(reconciliation.boqTotal)}</dd></div><div><dt>Difference</dt><dd>{money(reconciliation.difference)}</dd></div></dl>
+          {!reconciliation.matches && <div className={styles.actions}><a className={styles.link} href={`/projects/${projectId}/boq?view=items`}>Correct BOQ items</a>{canApprove && <button type="button" className={styles.secondary} disabled={pending} onClick={() => { setRevisedContract(reconciliation.boqTotal); setConfirmApproval(false); }}>Use BOQ total as contract value</button>}</div>}
+          {canApprove ? <>
+            <div className={styles.fields}>
+              <div><label htmlFor="boq-contract-verification-reason">Reason</label><ReasonSelect id="boq-contract-verification-reason" options={CONTRACT_REASONS} value={contractReason} onChange={setContractReason} maxLength={300} placeholder="Record the signed-document check" disabled={pending}/></div>
+              {(!reconciliation.matches || revisedContract) && <div><label htmlFor="boq-revised-contract">New contract value</label><input id="boq-revised-contract" aria-label="Revised signed contract value" type="number" min="0.01" step="0.01" value={revisedContract} onChange={event => { setRevisedContract(event.target.value); setConfirmApproval(false); }} placeholder="Only for a contract revision" disabled={pending}/></div>}
+            </div>
+            {proposedDifference !== null && <p className={styles.flowSummary}>{money(reconciliation.contractAmount)} → {money(revisedContract)} · difference to BOQ {money(proposedDifference)} · not saved</p>}
+            <div className={styles.actions}>
+              {proposedDifference !== null
+                ? <button type="button" className={styles.button} disabled={pending || contractReason.trim().length < 5} onClick={() => void action('revise-contract', { reason: contractReason, contractAmount: revisedContract })}>Save new contract value</button>
+                : <button type="button" className={styles.button} disabled={pending || contractReason.trim().length < 5} onClick={() => void action('verify-contract', { reason: contractReason })}>Verify contract value</button>}
+            </div>
+          </> : noPermission('the Project Manager')}
+        </>,
+        '')}
+      {step(2, 'Engineering review', reviewDone,
+        <>{review?.reviewerName} · {review ? new Date(review.decidedAt).toLocaleString('en-PH') : ''}{review?.comments ? ` · ${review.comments}` : ''}</>,
+        canReview ? <>
+          {review && !review.current && <p className={styles.flowSummary}>The BOQ changed after the last review; review it again.</p>}
+          <label htmlFor="boq-engineering-comments">Comments</label>
+          <ReasonSelect id="boq-engineering-comments" options={ENGINEERING_REVIEW_COMMENTS} multiline maxLength={10000} value={comments} onChange={setComments} disabled={pending} placeholder="Engineering review comments" />
+          <div className={styles.actions}><button className={styles.button} disabled={pending || comments.trim().length < 5 || !reviewState?.contract.verified || openFindings.length > 0} onClick={() => action('review')}>{pending ? 'Saving…' : 'Record engineering review'}</button></div>
+        </> : noPermission('the Project Engineer'),
+        'After the contract value is verified.')}
+      {step(3, 'PM approval', false, null,
+        canApprove ? <>
+          <label htmlFor="boq-pm-approval-note">Note (optional)</label>
+          <ReasonSelect id="boq-pm-approval-note" options={PM_APPROVAL_NOTES} optional multiline value={approvalNote} maxLength={1000} disabled={pending} onChange={setApprovalNote} placeholder="PM approval note"/>
+          <div className={styles.actions}><button className={styles.button} disabled={pending || (approvalNote.trim().length>0&&approvalNote.trim().length<5) || !reconciliation.matches || !review?.current || !reviewState?.contract.verified || openFindings.length > 0 || (findingsOn && !!reviewState?.findings.some(finding => finding.status === 'SET_ASIDE' && !finding.invalidatedAt) && (!acknowledgeSetAside || setAsideReason.trim().length < 5))} onClick={() => { if (confirmApproval) void action('approve'); else setConfirmApproval(true); }}>{pending ? 'Saving…' : confirmApproval ? 'Confirm: approve & lock BOQ' : 'Approve BOQ baseline'}</button>{confirmApproval && <button className={styles.secondary} disabled={pending} onClick={() => setConfirmApproval(false)}>Cancel</button>}</div>
+          {confirmApproval && <p className={styles.flowSummary}>Locks the BOQ for work-package planning.</p>}
+        </> : noPermission('the Project Manager'),
+        'After the engineering review.')}
+    </ol>
+
+    {reviewState && <details className={styles.history}><summary>History</summary><ul>{reviewState.revisions.map(revision => <li key={revision.id}>{revision.action} · {revision.reason} · {new Date(revision.createdAt).toLocaleString('en-PH')}</li>)}{reviewState.readingHistory.map(reading => <li key={reading.id}>Reading {reading.fileName} · {reading.selectedSheet} · {reading.appliedAt ? 'applied' : 'preview only'} · {reading.comparison.length} compared rows<ReadingConflictHistory reading={reading}/></li>)}{reviewState.correctedSources.map(source => <li key={source.versionId}>Corrected source {source.fileName} · {source.status} · {source.assessment.length} assessed rows</li>)}</ul></details>}
   </section>;
 }

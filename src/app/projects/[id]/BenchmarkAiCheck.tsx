@@ -115,7 +115,7 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
     <div className={styles.header}>
       <div>
         <h3 id="ai-check-benchmark" className={styles.title}>AI Check <span className={styles.badge}>Optional</span></h3>
-        <p className={styles.muted}>Links every benchmark line to its BOQ item (the BOQ is the basis), and checks quantity × unit cost, duplicate lines and lines with no BOQ item. Nothing changes until you save.</p>
+        <p className={styles.muted}>AI links each benchmark line to its BOQ item and checks totals and duplicates. Nothing changes until you save.</p>
       </div>
       <button type="button" className={result ? styles.secondary : styles.primary} disabled={running} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Run AI Check'}</button>
     </div>
@@ -129,7 +129,7 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
 
       <div className={styles.section}>
         <h4 className={styles.sectionTitle}>Link to the BOQ ({openLinks.length} to review)</h4>
-        <p className={styles.muted}>The BOQ is the basis: each budget line is linked to the BOQ item it is for. Change the BOQ item if the AI picked the wrong one, untick what you do not want, or remove a suggestion with ✕. Low-confidence and “not in the BOQ” lines start unticked. Saved links also update the master materials list.{sameAsSaved ? ` ${sameAsSaved} line(s) already have the suggested link.` : ''}</p>
+        <p className={styles.muted}>Change a BOQ item if the AI picked wrong, or untick it. Unsure links start unticked.{sameAsSaved ? ` ${sameAsSaved} line(s) already have the suggested link.` : ''}</p>
         {notInBoq.length > 0 && <p className={styles.muted}><strong>Not in the BOQ ({notInBoq.length}):</strong> {notInBoq.slice(0, 8).map((link) => link.label).join('; ')}{notInBoq.length > 8 ? '; …' : ''}. These are additional budget items; link them in the list below if the AI is wrong.</p>}
         {!openLinks.length ? <p className={styles.muted}>No link changes left to review.</p> : <>
           <div className={styles.tableWrap}><table className={styles.table}>
@@ -168,7 +168,7 @@ export default function BenchmarkAiCheck({ projectId, editable = true }: { proje
       {(result.suggestions ?? []).length > 0 && <div className={styles.section}>
         <h4 className={styles.sectionTitle}>Suggested fixes ({openSuggestions.length})</h4>
         {!openSuggestions.length ? <p className={styles.muted}>No suggestions left to review.</p> : <>
-          <p className={styles.muted}>Change any suggested value, untick what you do not want, or remove a suggestion with ✕. Nothing changes until you save. Total changes start unticked because they change the budget.</p>
+          <p className={styles.muted}>Edit or untick any suggestion, then save.</p>
           <div className={styles.tableWrap}><table className={styles.table}>
             <thead><tr><th><input type="checkbox" aria-label="Select all open suggestions" disabled={!editable || saving} checked={openSuggestions.length > 0 && openSuggestions.every((item) => drafts[item.id]?.selected)} onChange={(event) => setDrafts((current) => ({ ...current, ...Object.fromEntries(openSuggestions.map((item) => [item.id, { ...current[item.id], selected: event.target.checked }])) }))} /></th><th>Line</th><th>Change</th><th>Why</th><th><span className="sr-only">Remove suggestion</span></th></tr></thead>
             <tbody>{openSuggestions.map((item) => {

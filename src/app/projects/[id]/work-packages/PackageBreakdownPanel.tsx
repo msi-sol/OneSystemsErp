@@ -5,6 +5,9 @@ import { RESOURCE_KINDS, type BreakdownKind, type PackageBreakdownUpload } from 
 import type { PlanResource } from '@/lib/scheduling/work-package-details-types';
 import styles from '../planning/planning.module.css';
 import DupaAiCheck, { type DupaChoice } from './DupaAiCheck';
+import UploadDropzone from '@/components/ui/UploadDropzone';
+import { Download } from 'lucide-react';
+import choice from './locations-step.module.css';
 
 type Props = { projectId: string; scheduleId: string; activityId: string; packageName: string; rowVersion: number;
   uploads: PackageBreakdownUpload[]; existingResourceCount: number; existingResources?: PlanResource[]; canEdit: boolean; onSaved: () => void;
@@ -23,6 +26,8 @@ function suggestedKind(section: string | null | undefined): BreakdownKind | unde
 export default function PackageBreakdownPanel(props: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  // The uploaded DUPA shown below the table; a single upload opens by default.
+  const [openId, setOpenId] = useState(props.uploads.length === 1 ? props.uploads[0].id : '');
   const [analysis, setAnalysis] = useState<WorkspaceAnalysis | null>(null);
   const [rows, setRows] = useState<WorkspaceItem[]>([]);
   const [mapping, setMapping] = useState<WorkspaceMapping | null>(null);
@@ -112,53 +117,73 @@ export default function PackageBreakdownPanel(props: Props) {
       <tbody>{items.map(row => <tr key={row.sourceRowNumber} style={upload && !upload.appliedAt && isExcluded(upload, String(row.sourceRowNumber)) ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}><td>{row.sourceRowNumber} · {row.section}</td><th scope="row">{row.itemCode}<br/>{row.description}</th><td>{row.quantity} {row.unit}{(row.quantityDefaulted || row.unitDefaulted) && <p>Quantity or unit needs correction before adding costs.</p>}</td><td>{row.sourceUnitCost === null ? 'Not stated' : money(row.sourceUnitCost)}</td><td>{money(row.amount)}</td>{upload && <td>{upload.appliedAt ? (upload.excludedRows?.includes(String(row.sourceRowNumber)) ? 'Left out' : upload.categories[String(row.sourceRowNumber)]) : isExcluded(upload, String(row.sourceRowNumber)) ? <button type="button" className={styles.secondary} style={{ textDecoration: 'none' }} onClick={() => setExcluded({ ...excluded, [upload.id]: (excluded[upload.id] || []).filter(value => value !== String(row.sourceRowNumber)) })}>Left out · keep it</button> : <select aria-label={`Category for source row ${row.sourceRowNumber}`} disabled={busy || !props.canEdit} value={chosenCategories(upload)[String(row.sourceRowNumber)] || ''} onChange={event => setCategories({ ...categories, [upload.id]: { ...categories[upload.id], [row.sourceRowNumber]: event.target.value as BreakdownKind } })}><option value="">Choose category</option>{RESOURCE_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select>}</td>}</tr>)}</tbody>
     </table></div>;
   }
-  return <section className={styles.panel} id="package-breakdown"><h3>Package breakdown / DUPA</h3>
-    <p className={styles.muted}>For {props.packageName}. Upload an existing package-level component breakdown independently of BOQ-generated suggestions. The original file and all extracted rows are retained.</p>
-    <p className={styles.muted}>Upload Excel (.xlsx/.xls), CSV/TSV, PDF, Word (.docx), text (.txt), or a PNG/JPEG/WEBP scan. Unfamiliar documents and images may use the AI reading helper. Check every extracted value against the original before preserving it. Include description, unit, quantity and stated amount; a unit rate is optional. Quantities must already be for this package. No automatic scaling or inventory matching is performed.</p>
+  const totalOf = (upload: PackageBreakdownUpload) => upload.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const opened = props.uploads.find(upload => upload.id === openId) ?? null;
+  return <section className={styles.panel} id="package-breakdown"><h3>DUPA</h3>
     {error && <p role="alert" className={styles.error}>{error}</p>}{message && <p role="status" className={styles.success}>{message}</p>}
-    {props.canEdit && <><label htmlFor="package-breakdown-file">Choose package breakdown (supported formats · up to 10 MiB)</label><input ref={fileInput} id="package-breakdown-file" type="file" accept=".xlsx,.xls,.csv,.tsv,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" disabled={busy} onChange={event => { setFile(event.target.files?.[0] || null); setAnalysis(null); setRows([]); setMapping(null); setSheet(''); setError(''); setMessage(''); }}/>
+    {props.canEdit && <>
+      {/* Same upload as the BOQ Workspace: choose or drop the file, then analyze it. */}
+      <UploadDropzone prompt="Drop this package's DUPA here" hint="Excel, CSV, PDF, Word, text or an image · up to 10 MB" accept=".xlsx,.xls,.csv,.tsv,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp"
+        inputLabel="Choose the DUPA file" files={file ? [file] : []} disabled={busy} status={analysis ? 'analyzed' : 'ready to analyze'}
+        onFiles={files => { setFile(files[0] ?? null); setAnalysis(null); setRows([]); setMapping(null); setSheet(''); setError(''); setMessage(''); }}
+        action={<><button className={styles.secondary} disabled={busy || !file} onClick={() => void submit('analyze')}>{busy ? 'Processing…' : analysis ? 'Re-analyze' : 'Analyze DUPA'}</button>{analysis && <button className={styles.button} disabled={busy || !current || !!analysis.errors.length || !rows.length} onClick={() => void submit('preserve')}>Save DUPA</button>}</>} />
       {analysis && <div className={styles.fields}><div><label htmlFor="breakdown-sheet">Worksheet</label><select id="breakdown-sheet" disabled={busy} value={sheet} onChange={event => { setSheet(event.target.value); setMapping(null); }}><option value="">Choose worksheet</option>{analysis.sheets.map(value => <option key={value.name}>{value.name}</option>)}</select></div>
         {mapping && <><div><label htmlFor="breakdown-header">Header row</label><input id="breakdown-header" type="number" min="1" max="1000" value={mapping.headerRow} disabled={busy} onChange={event => setMapping({ ...mapping, headerRow: Number(event.target.value) })}/></div>{fields.map((field, index) => <div key={field}><label htmlFor={`breakdown-${field}`}>{labels[index]}</label><select id={`breakdown-${field}`} disabled={busy} value={mapping[field] ?? ''} onChange={event => setMapping({ ...mapping, [field]: event.target.value ? Number(event.target.value) : null })}><option value="">Not mapped</option>{analysis.columns.map(column => <option key={column.index} value={column.index}>{column.index} · {column.label}</option>)}</select></div>)}</>}
       </div>}
-      <div className={styles.actions} style={{ marginTop: 16 }}><button className={styles.secondary} disabled={busy || !file} onClick={() => void submit('analyze')}>{busy ? 'Processing…' : analysis ? 'Re-analyze selection' : 'Analyze package breakdown'}</button>{analysis && <button className={styles.button} disabled={busy || !current || !!analysis.errors.length || !rows.length} onClick={() => void submit('preserve')}>Preserve reviewed breakdown</button>}</div>
-      {analysis && <><p>{rows.length} component rows · {money(analysis.total)} · entire selected worksheet</p>{analysis.errors.map((issue, index) => <p className={styles.error} key={index}>Row {issue.row}: {issue.message}</p>)}{analysis.warnings.map((issue, index) => <p className={styles.muted} key={index}>Row {issue.row}: {issue.message}</p>)}{itemTable(rows)}</>}
+      {analysis && <><p>{rows.length} component rows · {money(analysis.total)}</p>{analysis.errors.map((issue, index) => <p className={styles.error} key={index}>Row {issue.row}: {issue.message}</p>)}{analysis.warnings.map((issue, index) => <p className={styles.muted} key={index}>Row {issue.row}: {issue.message}</p>)}{itemTable(rows)}</>}
     </>}
-    <h4 style={{ marginTop: 24 }}>Preserved package uploads</h4>{!props.uploads.length && <p className={styles.muted}>No breakdown uploaded for this package yet.</p>}
-    {/* How each uploaded DUPA compares with the package's BOQ value. Display only: nothing is scaled or changed. */}
-    {props.packageAmount !== undefined && props.packageAmount > 0 && props.uploads.map(upload => {
-      const total = upload.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-      const share = total / props.packageAmount! * 100;
-      const off = Math.abs(share - 100) > 5;
-      return <p key={`reconcile-${upload.id}`} role="note" className={styles.muted} style={off ? { color: '#fcd34d' } : undefined}>
-        {upload.fileName}: DUPA total {money(total)} vs package BOQ value {money(props.packageAmount!)} ({share.toFixed(1)}%).
-        {off ? ' The DUPA does not cover the package value. Check that its quantities are for this whole package (they are not scaled automatically) or record the difference as an allowance.' : ' The DUPA reconciles with the package value.'}
-      </p>;
-    })}
-    {props.uploads.map(upload => <details key={upload.id} className={styles.history}><summary>{upload.fileName} · {upload.sheetName} · {upload.rows.length} rows · {upload.appliedAt ? 'Added to draft resources' : 'Evidence only'}</summary>
-      <p className={styles.muted}>Preserved {new Date(upload.uploadedAt).toLocaleString('en-PH')}. Source quantities and financial values remain available below.</p>
-      {!!upload.linkedBoqItems?.length && <p>Prices BOQ item{upload.linkedBoqItems.length === 1 ? '' : 's'}: {upload.linkedBoqItems.map(item => `${item.itemCode} ${item.description}`).join('; ')}</p>}
-      <a className={styles.link} href={`${endpoint}?scheduleId=${encodeURIComponent(props.scheduleId)}&uploadId=${encodeURIComponent(upload.id)}`}>Download preserved original</a>
+    <h4 style={{ marginTop: 24 }}>Uploaded DUPAs</h4>
+    {!props.uploads.length ? <p className={styles.muted}>No DUPA uploaded for this package yet.</p>
+      // One row per uploaded DUPA (like Resources & budgets); open one to see its lines and choose how to use it.
+      : <div className={styles.scroll} role="region" aria-label="Uploaded DUPAs" tabIndex={0}><table className={styles.table}>
+        <thead><tr><th>DUPA</th><th style={{ textAlign: 'right' }}>Rows</th><th style={{ textAlign: 'right' }}>DUPA total</th><th style={{ textAlign: 'right' }}>vs package BOQ</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
+        <tbody>{props.uploads.map(upload => {
+          const total = totalOf(upload);
+          const share = props.packageAmount ? total / props.packageAmount * 100 : null;
+          const off = share !== null && Math.abs(share - 100) > 5;
+          return <tr key={upload.id}>
+            <th scope="row" style={{ fontWeight: 600, whiteSpace: 'normal', minWidth: 220 }}>{upload.fileName.replace(/\.[^.]+$/, '')}<div className={styles.muted} style={{ fontWeight: 400, fontSize: 12 }}>{new Date(upload.uploadedAt).toLocaleDateString('en-PH', { dateStyle: 'medium' })}{upload.linkedBoqItems?.length ? ` · prices ${upload.linkedBoqItems.map(item => item.itemCode).join(', ')}` : ''}</div></th>
+            <td style={{ textAlign: 'right' }}>{upload.rows.length}</td>
+            <td style={{ textAlign: 'right', fontWeight: 600 }}>{money(total)}</td>
+            <td style={{ textAlign: 'right', color: share === null ? undefined : off ? '#fcd34d' : '#6ee7b7' }}>{share === null ? '—' : `${share.toFixed(1)}%`}</td>
+            <td>{upload.appliedAt ? <span style={{ color: '#6ee7b7' }}>Applied</span> : <span className={styles.muted}>Not applied</span>}</td>
+            <td style={{ whiteSpace: 'nowrap' }}><div className={styles.actions} style={{ margin: 0, flexWrap: 'nowrap' }}>
+              <button type="button" className={openId === upload.id ? styles.button : styles.secondary} aria-expanded={openId === upload.id} onClick={() => setOpenId(openId === upload.id ? '' : upload.id)}>{openId === upload.id ? 'Close' : upload.appliedAt ? 'View' : 'Open'}</button>
+              <a className={styles.secondary} href={`${endpoint}?scheduleId=${encodeURIComponent(props.scheduleId)}&uploadId=${encodeURIComponent(upload.id)}`} title="Download the original file" aria-label={`Download the original ${upload.fileName}`}><Download size={16} aria-hidden="true" /></a>
+            </div></td>
+          </tr>;
+        })}</tbody>
+      </table></div>}
+    {opened && [opened].map(upload => <div key={upload.id} className={styles.panel} style={{ marginTop: 14 }} aria-label={`DUPA ${upload.fileName}`}>
+      <h4 style={{ marginTop: 0 }}>{upload.fileName.replace(/\.[^.]+$/, '')}</h4>
+      {!!upload.linkedBoqItems?.length && <p className={styles.muted}>Prices BOQ item{upload.linkedBoqItems.length === 1 ? '' : 's'}: {upload.linkedBoqItems.map(item => `${item.itemCode} ${item.description}`).join('; ')}</p>}
       {itemTable(upload.rows, upload)}
       {!!upload.replacedResources?.length && <details><summary>{upload.replacedResources.length} replaced draft rows (retained history)</summary><ul>{upload.replacedResources.map(row => <li key={row.id}>{row.kind} · {row.description} · {row.quantity} {row.unit} · {money(row.amount)}</li>)}</ul></details>}{upload.appliedAt ? <p>Applied {new Date(upload.appliedAt).toLocaleString('en-PH')} · {upload.reason}. Imported resources retain this upload and source-row reference; later resource edits do not change the original.</p> : props.canEdit && <>
         <DupaAiCheck projectId={props.projectId} scheduleId={props.scheduleId} uploadId={upload.id} disabled={busy} onSave={choices => saveAiChoices(upload, choices)} />
-        <fieldset className={styles.panel} style={{ margin: '12px 0' }}>
-          <legend style={{ fontWeight: 600 }}>Which costs should this package use?</legend>
-          <label style={{ display: 'block', marginBottom: 8 }}><input type="radio" name={`dupa-mode-${upload.id}`} disabled={busy} checked={modes[upload.id] === 'dupa'} onChange={() => setModes({ ...modes, [upload.id]: 'dupa' })}/> <strong>Use this DUPA</strong> · its lines replace {props.existingResources?.length ? `the ${props.existingResources.length} current allowance line${props.existingResources.length === 1 ? '' : 's'}` : 'the package allowances'}</label>
-          <label style={{ display: 'block', marginBottom: 8 }}><input type="radio" name={`dupa-mode-${upload.id}`} disabled={busy} checked={modes[upload.id] === 'generated'} onChange={() => setModes({ ...modes, [upload.id]: 'generated' })}/> <strong>Keep the generated allowances</strong> · nothing changes; this DUPA stays as a reference file</label>
-          <label style={{ display: 'block' }}><input type="radio" name={`dupa-mode-${upload.id}`} disabled={busy} checked={modes[upload.id] === 'advanced'} onChange={() => setModes({ ...modes, [upload.id]: 'advanced' })}/> Advanced: add the DUPA lines and choose which current lines they replace</label>
-        </fieldset>
+        {/* Same choice cards as Resources & DUPA: one clear option per card, the chosen one highlighted. */}
+        <h4 id={`dupa-mode-heading-${upload.id}`} style={{ margin: '16px 0 0' }}>Which costs should this package use?</h4>
+        <div className={choice.choiceGroup} role="radiogroup" aria-labelledby={`dupa-mode-heading-${upload.id}`}>
+          {([
+            ['dupa', 'Use this DUPA', props.existingResources?.length ? `Its lines replace the ${props.existingResources.length} current allowance line${props.existingResources.length === 1 ? '' : 's'}` : 'Its lines become the package allowances'],
+            ['generated', 'Keep the current allowances', 'Nothing changes; this DUPA stays as a reference'],
+            ['advanced', 'Advanced', 'Add the DUPA lines and choose which current lines they replace'],
+          ] as const).map(([value, title, detail]) => <button key={value} type="button" role="radio" aria-checked={modes[upload.id] === value} disabled={busy}
+            className={`${choice.choice} ${modes[upload.id] === value ? choice.choiceOn : ''}`} onClick={() => setModes({ ...modes, [upload.id]: value })}>
+            <strong>{title}</strong><span>{detail}</span>
+          </button>)}
+        </div>
         {modes[upload.id] === 'generated' && <p role="status" className={styles.muted}>The generated allowances stay as they are. You can switch to this DUPA later.</p>}
-        {(modes[upload.id] === 'dupa' || modes[upload.id] === 'advanced') && <>
+        {(modes[upload.id] === 'dupa' || modes[upload.id] === 'advanced') && <div style={{ display: 'grid', gap: 12, marginTop: 20, justifyItems: 'start' }}>
           {modes[upload.id] === 'advanced' && <>
             <p className={styles.muted}>Tick the current lines this DUPA replaces. Unticked lines stay and the DUPA lines are added. Replaced values and your reason are kept in the upload history.</p>
             {!!props.existingResources?.length && <fieldset><legend>Current lines to replace (optional)</legend>{props.existingResources.map(resource => <label key={resource.id} style={{display:'block',marginBottom:8}}><input type="checkbox" disabled={busy} checked={(replacements[upload.id] || []).includes(resource.id)} onChange={event => setReplacements(current => ({...current,[upload.id]: event.target.checked ? [...current[upload.id] || [],resource.id] : (current[upload.id] || []).filter(id => id !== resource.id)}))}/>{resource.kind} · {resource.description} · {resource.quantity} {resource.unit} · {money(resource.amount)}</label>)}</fieldset>}
             {props.existingResourceCount > 0 && <label><input type="checkbox" checked={acknowledged[upload.id] || false} disabled={busy} onChange={event => setAcknowledged({ ...acknowledged, [upload.id]: event.target.checked })}/> I reviewed the {props.existingResourceCount} current lines, the ones I am replacing and the costs that will remain.</label>}
           </>}
-          <label htmlFor={`breakdown-reason-${upload.id}`}>Reason (kept in the history)</label><textarea id={`breakdown-reason-${upload.id}`} maxLength={500} placeholder={modes[upload.id] === 'dupa' ? 'Using the uploaded DUPA instead of the generated allowances.' : 'Why these DUPA lines are added'} value={reasons[upload.id] || ''} disabled={busy} onChange={event => setReasons({ ...reasons, [upload.id]: event.target.value })}/>
-          {keptRows(upload).some(row => !chosenCategories(upload)[String(row.sourceRowNumber)]) && <p className={styles.muted}>Choose a category (material, labor or equipment) for every row in the table above first.</p>}
+          <div style={{ display: 'grid', gap: 6, width: '100%' }}><label htmlFor={`breakdown-reason-${upload.id}`} style={{ margin: 0 }}>Reason (kept in the history)</label><textarea id={`breakdown-reason-${upload.id}`} rows={2} style={{ width: '100%', margin: 0 }} maxLength={500} placeholder={modes[upload.id] === 'dupa' ? 'Using the uploaded DUPA instead of the generated allowances.' : 'Why these DUPA lines are added'} value={reasons[upload.id] || ''} disabled={busy} onChange={event => setReasons({ ...reasons, [upload.id]: event.target.value })}/></div>
+          {keptRows(upload).some(row => !chosenCategories(upload)[String(row.sourceRowNumber)]) && <p className={styles.muted} style={{ margin: 0 }}>Choose a category (material, labor or equipment) for every row in the table above first.</p>}
           <button className={styles.button} disabled={busy || keptRows(upload).some(row => !chosenCategories(upload)[String(row.sourceRowNumber)]) || (modes[upload.id] === 'advanced' && ((reasons[upload.id]?.trim().length || 0) < 5 || (props.existingResourceCount > 0 && !acknowledged[upload.id]))) || (modes[upload.id] === 'dupa' && !!reasons[upload.id] && reasons[upload.id].trim().length < 5)} onClick={() => void apply(upload)}>{modes[upload.id] === 'dupa' ? 'Use this DUPA for the package' : 'Add the DUPA lines'}</button>
-        </>}
+        </div>}
       </>}
-    </details>)}
+    </div>)}
   </section>;
 }

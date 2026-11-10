@@ -77,6 +77,8 @@ export type ProjectMetadata = {
   contractAmount: string | null; contractEvidence: string | null;
   /** Other project names written elsewhere in the file (another sheet's PROJECT label), to show as a check. */
   alternateNames: Array<{ name: string; evidence: string }>;
+  /** Other amounts written in the cells of the row where a bid-form sentence states the contract value. */
+  contractRowFigures: string[];
   /** Text of the top rows of each sheet, kept for the AI cross-check and to verify what it returns. */
   sample: Array<{ sheet: string; row: number; cells: string[] }>;
 };
@@ -94,8 +96,13 @@ function toAmount(raw: string | number | null | undefined): string | null {
  * first, then the others (bid form, summary, cash flow…). Never infers a value from item rates or totals.
  */
 function readProjectMetadata(workbook: ExcelJS.Workbook, preferredSheet?: string | null): ProjectMetadata {
-  const meta: ProjectMetadata = { projectName: null, projectNameEvidence: null, contractAmount: null, contractEvidence: null, alternateNames: [], sample: [] };
+  const meta: ProjectMetadata = { projectName: null, projectNameEvidence: null, contractAmount: null, contractEvidence: null, alternateNames: [], contractRowFigures: [], sample: [] };
   const sameName = (left: string, right: string) => { const a = left.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), b = right.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); return a === b || a.includes(b) || b.includes(a); };
+  // Every labelled project name, with the sheets it is written on. The name written on the most sheets wins (the
+  // BOQ sheet first on a tie): a workbook's own BOQ tab can carry a short or older title while the bid form, summary
+  // and cost sheets repeat the formal one.
+  const names: Array<{ name: string; evidence: string; sheets: Set<string> }> = [];
+  const rowFigures = (raw: unknown[]) => raw.filter(value => typeof value === 'number').map(value => toAmount(value as number)).filter((value): value is string => !!value);
   const sheets = [...workbook.worksheets].sort((a, b) => Number(b.name === preferredSheet) - Number(a.name === preferredSheet)).slice(0, 12);
   for (const sheet of sheets) {
     // "The total price of our Bid … is:" is often followed by the figure on the next row(s).
@@ -107,7 +114,7 @@ function readProjectMetadata(workbook: ExcelJS.Workbook, preferredSheet?: string
       if (pendingPhrase && !meta.contractAmount) {
         const figure = cells.map(cell => /\((?:PHP|Php|P|₱)?\s*([\d,]+(?:\.\d{1,2})?)\)/.exec(cell) ?? /(?:PHP|Php|₱|\bP)\s*([\d,]{5,}(?:\.\d{1,2})?)/.exec(cell)).find(Boolean);
         const amount = toAmount(figure?.[1]);
-        if (amount) { meta.contractAmount = amount; meta.contractEvidence = `${sheet.name}, rows ${pendingPhrase.row}–${row} · “${pendingPhrase.text.slice(0, 50).trim()}…”`; }
+        if (amount) { meta.contractAmount = amount; meta.contractEvidence = `${sheet.name}, rows ${pendingPhrase.row}–${row} · “${pendingPhrase.text.slice(0, 50).trim()}…”`; meta.contractRowFigures = rowFigures(raw); }
         pendingPhrase = --pendingPhrase.rowsLeft > 0 ? pendingPhrase : null;
       }
       for (let column = 0; column < cells.length; column += 1) {
@@ -121,8 +128,9 @@ function readProjectMetadata(workbook: ExcelJS.Workbook, preferredSheet?: string
         const where = `${sheet.name}, row ${row}`;
         if (PROJECT_NAME_LABEL.test(label) && value && !PLACEHOLDER.test(value.trim())
             && !Object.values(headerTerms).flat().map(normalizeHeader).includes(normalizeHeader(value)) && value.length >= 4) {
-          if (!meta.projectName) { meta.projectName = value.slice(0, 191); meta.projectNameEvidence = `${where} · “${label}”`; }
-          else if (!sameName(meta.projectName, value) && !meta.alternateNames.some(entry => sameName(entry.name, value)) && meta.alternateNames.length < 3) meta.alternateNames.push({ name: value.slice(0, 191), evidence: where });
+          const known = names.find(entry => sameName(entry.name, value));
+          if (known) known.sheets.add(sheet.name);
+          else names.push({ name: value.slice(0, 191), evidence: `${where} · “${label}”`, sheets: new Set([sheet.name]) });
         }
         if (!meta.contractAmount && CONTRACT_LABEL.test(label) && !NOT_A_CONTRACT_VALUE.test(label)) {
           const amount = toAmount(inline ? inline[2] : nextIndex >= 0 ? raw[nextIndex] as string | number : null);
@@ -133,11 +141,18 @@ function readProjectMetadata(workbook: ExcelJS.Workbook, preferredSheet?: string
           const after = text.slice(text.search(CONTRACT_SENTENCE));
           const figure = /\((?:PHP|Php|P|₱)?\s*([\d,]+(?:\.\d{1,2})?)\)/.exec(after) ?? /(?:PHP|Php|₱|\bP)\s*([\d,]+(?:\.\d{1,2})?)/.exec(after);
           const amount = toAmount(figure?.[1]);
-          if (amount) { meta.contractAmount = amount; meta.contractEvidence = `${where} · “${after.slice(0, 60).trim()}…”`; }
+          if (amount) { meta.contractAmount = amount; meta.contractEvidence = `${where} · “${after.slice(0, 60).trim()}…”`; meta.contractRowFigures = rowFigures(raw); }
           else pendingPhrase = { text: after, rowsLeft: 2, row };
         }
       }
     }
+  }
+  // Stable sort: on a tie the first name found (the BOQ sheet is read first) stays first.
+  const ranked = [...names].sort((a, b) => b.sheets.size - a.sheets.size);
+  if (ranked.length) {
+    meta.projectName = ranked[0].name;
+    meta.projectNameEvidence = ranked[0].sheets.size > 1 ? `${ranked[0].evidence} · on ${ranked[0].sheets.size} sheets` : ranked[0].evidence;
+    meta.alternateNames = ranked.slice(1, 4).map(entry => ({ name: entry.name, evidence: entry.evidence.replace(/ · “.*”$/, '') }));
   }
   return meta;
 }
@@ -1107,6 +1122,13 @@ async function parseWorkspaceWorkbookBuiltin(options: WorkspaceParseOptions): Pr
   }
   if (skippedAfterTotal) issue(warnings, { row: 'sheet', field: 'amount', message: `${skippedAfterTotal} row${skippedAfterTotal === 1 ? '' : 's'} after the grand total (signatures, notes, side calculations) were not read as BOQ items.` });
   const metadata = readProjectMetadata(workbook, selectedSheet);
+  // A bid form whose words state one figure while the amount cell on the same row equals the BOQ total: the words
+  // are stale typed text and the cell is the bid price, so use the BOQ total.
+  if (metadata.contractAmount && items.length && !new Prisma.Decimal(metadata.contractAmount).minus(total).abs().lt(1)
+      && metadata.contractRowFigures.some(figure => new Prisma.Decimal(figure).minus(total).abs().lt(1))) {
+    metadata.contractAmount = total.toFixed(2);
+    metadata.contractEvidence = `${metadata.contractEvidence?.split(' · ')[0] ?? 'the file'} · amount beside the bid wording`;
+  }
   const analysis: WorkspaceAnalysis = {
     readingMethod: 'builtin',
     extractedProjectName: metadata.projectName,
@@ -1115,7 +1137,7 @@ async function parseWorkspaceWorkbookBuiltin(options: WorkspaceParseOptions): Pr
     projectNameEvidence: metadata.projectNameEvidence,
     contractAmountSource: metadata.contractAmount ? 'document' : null,
     contractAmountEvidence: metadata.contractEvidence,
-    metadataChecks: metadata.alternateNames.map(entry => ({ field: 'projectName' as const, message: `The file also names the project “${entry.name}” (${entry.evidence}). Check which name to use.` })),
+    metadataChecks: [...metadata.alternateNames.map(entry => ({ field: 'projectName' as const, message: `The file also names the project “${entry.name}” (${entry.evidence}). Check which name to use.` }))],
     fileName,
     fileHash: createHash('sha256').update(buffer).digest('hex'),
     sheets: sheetSummaries,

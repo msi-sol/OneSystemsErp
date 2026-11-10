@@ -64,7 +64,8 @@ export function packageAllowanceStatus(input: {
     return {
       id: activity.id, code: activity.activityCode, name: activity.name,
       value: value / 100, allowance: allowance / 100, suggestedRows: own.filter(row => row.isSystemSuggested).length,
-      dupa, allowanceWithinValue: allowance < value || value === 0,
+      // Equal to the package value is fine; only above it is flagged.
+      dupa, allowanceWithinValue: allowance <= value || value === 0,
     };
   });
 }

@@ -1,0 +1,14 @@
+/* DUPA upload drop area: same look as the BOQ Workspace upload (centered, dashed, icon, one button). */
+.dropzone { min-height: 220px; border: 1px dashed #527085; border-radius: 14px; background: rgba(0, 240, 255, .025); padding: 28px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; transition: background-color 150ms ease-out, border-color 150ms ease-out; }
+.dragging { background: rgba(0, 240, 255, .09); border-color: var(--accent-color); }
+.icon { width: 56px; height: 56px; border-radius: 14px; background: rgba(0, 240, 255, .08); color: var(--accent-color); display: grid; place-items: center; margin-bottom: 12px; }
+.title { font-size: 1.05rem; font-weight: 600; }
+.meta { color: var(--text-secondary); font-size: .875rem; margin-bottom: 14px; }
+.button { display: inline-flex; gap: 10px; align-items: center; justify-content: center; position: relative; border: 1px solid #526373; border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); padding: 12px 20px; min-height: 46px; font-weight: 600; cursor: pointer; margin: 0; font-size: .95rem; }
+.button:hover { border-color: var(--accent-color); }
+.button:focus-within { outline: 2px solid var(--accent-color); outline-offset: 3px; }
+.button:has(input:disabled) { opacity: .5; cursor: default; }
+.input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 600px) { .dropzone { min-height: 200px; padding: 24px 16px; } .button { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .dropzone { transition: none; } }

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import UploadDropzone from '@/components/ui/UploadDropzone';
 import { uploadMasterMaterialsList } from '@/app/actions/consolidation';
 import styles from './materialsFlow.module.css';
 
@@ -30,21 +31,12 @@ export default function UploadMasterMaterialsButton({ projectId }: { projectId: 
   };
 
   return (
-    <div style={{ marginTop: 12 }}>
-      <p style={{ marginBottom: 12 }}>
-        The Excel file needs columns for item no., description, quantity, unit and unit cost. An uploaded list is not linked
-        line by line to the procurement benchmark.
-      </p>
+    <div>
       {error && <p role="alert" className={styles.error}>{error}</p>}
-      <div className={styles.fileRow}>
-        <label className={styles.ghost} style={{ cursor: 'pointer' }}>
-          {file ? `📄 ${file.name}` : 'Choose Excel file (.xlsx)'}
-          <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={event => setFile(event.target.files?.[0] ?? null)} />
-        </label>
-        <button type="button" className={styles.secondary} onClick={() => void handleUpload()} disabled={!file || isPending}>
-          {isPending ? 'Uploading…' : 'Upload list'}
-        </button>
-      </div>
+      <UploadDropzone prompt="Drop the materials list here" hint="Excel with item no., description, quantity, unit and unit cost"
+        accept=".xlsx,.xls" inputLabel="Choose the materials list file" files={file ? [file] : []} onFiles={files => setFile(files[0] ?? null)}
+        disabled={isPending} status="ready to upload"
+        action={<button type="button" className={styles.cta} onClick={() => void handleUpload()} disabled={!file || isPending}>{isPending ? 'Uploading…' : 'Upload list'}</button>} />
     </div>
   );
 }

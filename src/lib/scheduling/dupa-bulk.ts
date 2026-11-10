@@ -7,6 +7,7 @@ import { WorkspaceError } from '@/lib/boq/workspace-types';
 import { attachWorkPackageBreakdown } from './work-package-details';
 import { readPlanDetails } from './work-package-details-types';
 import { buildDupaBlockWorkbook, heuristicPackageMatch, isSpreadsheetName, readDupaBlocks, type DupaBlock, type MatchablePackage } from './dupa-split';
+import { matchDupaToBoq, reconcileDupa, referenceQuantityFromTitle, type BoqMatch, type DupaReconciliation, type MatchableBoqItem } from './dupa-boq-match';
 
 /**
  * Bulk DUPA reading: one or more files, each possibly holding many DUPAs. Every DUPA found is read with the normal
@@ -22,7 +23,22 @@ export type DupaReading = {
   key: string; fileName: string; sheetName: string; title: string; titleLines: string[]; firstRow: number | null; lastRow: number | null;
   componentCount: number; total: number; components: string[]; errors: string[];
   suggestion: { packageId: string; confidence: 'high' | 'medium' | 'low'; reason: string; boqItems: BoqLink[]; source: 'ai' | 'built-in' };
+  /** Built-in match against every approved BOQ item (not only the suggested package's). */
+  boqMatch: BoqMatch;
+  /** DUPA total vs the suggested BOQ items, per-unit or extended. */
+  reconciliation: DupaReconciliation;
+  referenceQuantity: number | null;
+  /** Set when the same DUPA (same components) is already uploaded anywhere in this plan, or twice in this selection. */
+  duplicateOf: string | null;
+  /** The package the already-uploaded copy is under (to open it), when it is in the plan. */
+  duplicateActivityId: string | null;
+  /** The saved copy's upload, and whether it is already used for its package (so it can be used in bulk). */
+  duplicateUploadId: string | null;
+  duplicateApplied: boolean;
+  /** Content signature, so the browser can also spot the same DUPA across files read in separate requests. */
+  signature: string;
 };
+export type ProjectBoqItem = MatchableBoqItem & BoqLink;
 
 /** Same components (description, unit, quantity, amount) in the same order = same DUPA. */
 export function dupaSignature(rows: Array<{ description: string; unit: string; quantity: number | string; amount: number | string }>) {
@@ -30,6 +46,28 @@ export function dupaSignature(rows: Array<{ description: string; unit: string; q
 }
 
 const clip = (value: string | null | undefined, max = 120) => (value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/** Every approved BOQ item of the project with the packages it is allocated to: the DUPA may price any of them. */
+async function loadBoqItems(projectId: string, packages: PlanPackage[]): Promise<ProjectBoqItem[]> {
+  const items = await prisma.awardedBOQItem.findMany({ where: { projectId }, orderBy: [{ itemCode: 'asc' }, { id: 'asc' }],
+    select: { id: true, itemCode: true, description: true, unit: true, quantity: true, combinedUnitCost: true, totalCost: true } });
+  return items.map(item => ({ id: item.id, itemCode: clip(item.itemCode, 30), description: clip(item.description, 140), unit: item.unit,
+    quantity: Number(item.quantity), unitCost: Number(item.combinedUnitCost), amount: Number(item.totalCost),
+    packageIds: packages.filter(pkg => pkg.boqItems.some(link => link.id === item.id)).map(pkg => pkg.id) }));
+}
+
+const linkOf = (item: ProjectBoqItem): BoqLink => ({ id: item.id, itemCode: item.itemCode, description: item.description });
+const packageLabel = (pkg: PlanPackage | undefined) => pkg ? `${pkg.code ? `${pkg.code} ` : ''}${pkg.name}` : 'another package';
+
+/** Content signatures of every DUPA already uploaded in this plan, with where each one is. */
+async function uploadedSignatures(projectId: string, scheduleId: string, packages: PlanPackage[]) {
+  const schedule = await prisma.projectSchedule.findFirst({ where: { id: scheduleId, projectId }, select: { description: true } });
+  const map = new Map<string, { label: string; activityId: string; uploadId: string; applied: boolean }>();
+  for (const upload of readPlanDetails(schedule?.description ?? null).breakdownUploads ?? []) {
+    map.set(dupaSignature(upload.rows), { label: `${upload.fileName} under ${packageLabel(packages.find(pkg => pkg.id === upload.activityId))}`, activityId: upload.activityId, uploadId: upload.id, applied: !!upload.appliedAt });
+  }
+  return map;
+}
 
 async function loadPackages(projectId: string, scheduleId: string): Promise<PlanPackage[]> {
   const schedule = await prisma.projectSchedule.findFirst({
@@ -44,13 +82,13 @@ async function loadPackages(projectId: string, scheduleId: string): Promise<Plan
   });
 }
 
-type Reading = { block: DupaBlock | null; reading: Omit<DupaReading, 'suggestion'> };
+type Reading = { block: DupaBlock | null; signature: string; reading: Omit<DupaReading, 'suggestion' | 'boqMatch' | 'reconciliation' | 'referenceQuantity' | 'duplicateOf' | 'duplicateActivityId' | 'duplicateUploadId' | 'duplicateApplied' | 'signature'> };
 
 async function readBlocks(buffer: Buffer, fileName: string, context: string): Promise<Reading[]> {
   if (!isSpreadsheetName(fileName)) {
     // PDF, Word, text or image: read as one DUPA with the normal (AI-assisted) document reader.
     const { analysis, items } = await parseWorkspaceWorkbook({ buffer, fileName, documentContext: context });
-    return [{ block: null, reading: { key: `${fileName}#document`, fileName, sheetName: analysis.selectedSheet || 'Document', title: fileName.replace(/\.[^.]+$/, ''), titleLines: [],
+    return [{ block: null, signature: dupaSignature(items), reading: { key: `${fileName}#document`, fileName, sheetName: analysis.selectedSheet || 'Document', title: fileName.replace(/\.[^.]+$/, ''), titleLines: [],
       firstRow: null, lastRow: null, componentCount: items.length, total: Number(analysis.total || 0), components: items.slice(0, 20).map(item => clip(item.description, 100)),
       errors: analysis.errors.slice(0, 3).map(error => error.message) } }];
   }
@@ -59,9 +97,10 @@ async function readBlocks(buffer: Buffer, fileName: string, context: string): Pr
   const readings: Reading[] = [];
   for (const block of blocks) {
     const built = await buildDupaBlockWorkbook(block, fileName);
-    const { analysis, items } = await parseWorkspaceWorkbook({ buffer: built.buffer, fileName: built.fileName, selectedSheet: 'DUPA' });
+    // Built-in reader first; the AI layout helper only runs when the built-in reader cannot find the columns.
+    const { analysis, items } = await parseWorkspaceWorkbook({ buffer: built.buffer, fileName: built.fileName, selectedSheet: 'DUPA', documentContext: `${context}:${block.key}` });
     if (!items.length && !analysis.errors.length) continue;
-    readings.push({ block, reading: { key: `${fileName}#${block.key}`, fileName, sheetName: block.sheetName, title: block.title, titleLines: block.titleLines,
+    readings.push({ block, signature: dupaSignature(items), reading: { key: `${fileName}#${block.key}`, fileName, sheetName: block.sheetName, title: block.title, titleLines: block.titleLines,
       firstRow: block.firstRow, lastRow: block.lastRow, componentCount: items.length, total: Number(analysis.total || 0),
       components: items.slice(0, 20).map(item => clip(item.description, 100)), errors: analysis.errors.slice(0, 3).map(error => error.message) } });
   }
@@ -97,13 +136,33 @@ For EVERY DUPA return: dupa (its D number), package (the P number of the package
 
 export async function readDupaFiles(args: { actor: Actor; projectId: string; scheduleId: string; files: Array<{ buffer: Buffer; fileName: string }> }) {
   const packages = await loadPackages(args.projectId, args.scheduleId);
+  const boqItems = await loadBoqItems(args.projectId, packages);
+  const byId = new Map(boqItems.map(item => [item.id, item]));
+  const linkedItems = (links: BoqLink[]) => links.map(link => byId.get(link.id)).filter((item): item is ProjectBoqItem => !!item);
+  const existing = await uploadedSignatures(args.projectId, args.scheduleId, packages);
   const readings: DupaReading[] = [];
   const problems: string[] = [];
+  const seen = new Map<string, string>();
   for (const file of args.files) {
     try {
       const found = await readBlocks(file.buffer, file.fileName, `dupa-bulk:${args.actor.id}:${args.projectId}:${args.scheduleId}`);
       if (!found.length) problems.push(`${file.fileName}: no DUPA table was found (a header row with Description and Amount columns).`);
-      for (const { reading } of found) readings.push({ ...reading, suggestion: { ...heuristicPackageMatch(reading, reading.fileName, packages), boqItems: [], source: 'built-in' } });
+      for (const { reading, signature } of found) {
+        const boqMatch = matchDupaToBoq(reading, boqItems);
+        const referenceQuantity = referenceQuantityFromTitle(`${reading.titleLines.join(' ')} ${reading.title}`);
+        const matched = boqMatch.status === 'matched' ? byId.get(boqMatch.items[0].id) : undefined;
+        let suggestion: DupaReading['suggestion'] = { ...heuristicPackageMatch(reading, reading.fileName, packages), boqItems: matched ? [linkOf(matched)] : [], source: 'built-in' };
+        // The DUPA need not follow the package structure: a clear BOQ match decides the package when the title does not.
+        if (matched && matched.packageIds.length === 1 && suggestion.confidence !== 'high' && suggestion.packageId !== matched.packageIds[0]) {
+          suggestion = { ...suggestion, packageId: matched.packageIds[0], confidence: 'medium', reason: `Prices BOQ ${matched.itemCode} ${matched.description} (${boqMatch.items[0].reason}).` };
+        }
+        const duplicateOf = existing.get(signature)?.label ?? seen.get(signature) ?? null;
+        const duplicateActivityId = existing.get(signature)?.activityId ?? null;
+        const duplicateUploadId = existing.get(signature)?.uploadId ?? null;
+        const duplicateApplied = existing.get(signature)?.applied ?? false;
+        if (!seen.has(signature)) seen.set(signature, `${reading.fileName} · ${reading.title}`);
+        readings.push({ ...reading, signature, suggestion, boqMatch, referenceQuantity, duplicateOf, duplicateActivityId, duplicateUploadId, duplicateApplied, reconciliation: reconcileDupa(reading.total, linkedItems(suggestion.boqItems), referenceQuantity) });
+      }
     } catch (error) {
       problems.push(`${file.fileName}: ${error instanceof Error ? error.message : 'could not be read.'}`);
     }
@@ -112,7 +171,13 @@ export async function readDupaFiles(args: { actor: Actor; projectId: string; sch
   if (readings.length && packages.length && process.env.OPENAI_API_KEY?.trim()) {
     try {
       const { result, model } = await suggestWithAi(readings, packages);
-      result.forEach((suggestion, index) => { readings[index].suggestion = suggestion; });
+      // The AI may refine the package and BOQ items; keep the built-in BOQ match when it found none.
+      result.forEach((suggestion, index) => {
+        const reading = readings[index];
+        const merged = { ...suggestion, boqItems: suggestion.boqItems.length ? suggestion.boqItems : reading.suggestion.boqItems };
+        reading.suggestion = merged;
+        reading.reconciliation = reconcileDupa(reading.total, linkedItems(merged.boqItems), reading.referenceQuantity);
+      });
       ai = { status: 'used', model };
       await prisma.auditLog.create({ data: { userId: args.actor.id, userRole: args.actor.role, moduleName: 'PROJECT_MANAGEMENT', transactionId: args.projectId,
         actionType: 'AI_CHECK_RUN', newValue: JSON.stringify({ scope: 'dupa-links', provider: 'openai', model, dupas: readings.length, linked: [...result.values()].filter(entry => entry.packageId).length }) } });
@@ -120,7 +185,7 @@ export async function readDupaFiles(args: { actor: Actor; projectId: string; sch
       ai = { status: 'unavailable', message: `${error instanceof AiCheckError ? error.message : 'The AI check failed.'} Packages were suggested by the built-in matcher.` };
     }
   }
-  return { readings, problems, ai, packages: packages.map(pkg => ({ id: pkg.id, code: pkg.code, name: pkg.name, value: pkg.value, boqItems: pkg.boqItems })) };
+  return { readings, problems, ai, boqItems, packages: packages.map(pkg => ({ id: pkg.id, code: pkg.code, name: pkg.name, value: pkg.value, boqItems: pkg.boqItems })) };
 }
 
 /**
@@ -134,6 +199,7 @@ export async function saveDupaSelections(args: {
   selections: Array<{ key: string; activityId: string; boqItemIds: string[] }>;
 }) {
   const packages = await loadPackages(args.projectId, args.scheduleId);
+  const boqItems = await loadBoqItems(args.projectId, packages);
   let version = args.expectedRowVersion;
   const results: Array<{ key: string; ok: boolean; message: string; rows?: number }> = [];
   const isSheet = isSpreadsheetName(args.file.fileName);
@@ -142,7 +208,8 @@ export async function saveDupaSelections(args: {
     try {
       const pkg = packages.find(entry => entry.id === selection.activityId);
       if (!pkg) throw new WorkspaceError('Choose a package from this plan.', 400);
-      const linkedBoqItems = pkg.boqItems.filter(item => selection.boqItemIds.includes(item.id));
+      // Any approved BOQ item may be linked, also one allocated to another package.
+      const linkedBoqItems = boqItems.filter(item => selection.boqItemIds.includes(item.id)).map(linkOf);
       let buffer = args.file.buffer, fileName = args.file.fileName, sheet: string | null = null;
       if (isSheet) {
         const block = blocks.find(entry => `${args.file.fileName}#${entry.key}` === selection.key);
@@ -153,11 +220,9 @@ export async function saveDupaSelections(args: {
       const context = `dupa:${args.actor.id}:${args.projectId}:${args.scheduleId}:${pkg.id}`;
       const { analysis, items } = await parseWorkspaceWorkbook({ buffer, fileName, selectedSheet: sheet, documentContext: context });
       // A rebuilt DUPA workbook gets new bytes each time, so duplicates are found by content, not file hash.
-      const existing = await prisma.projectSchedule.findFirst({ where: { id: args.scheduleId, projectId: args.projectId }, select: { description: true } });
-      const signature = dupaSignature(items);
-      if (readPlanDetails(existing?.description ?? null).breakdownUploads?.some(upload => upload.activityId === pkg.id && dupaSignature(upload.rows) === signature)) {
-        throw new WorkspaceError(`This DUPA is already uploaded under ${pkg.code ? `${pkg.code} ` : ''}${pkg.name}. Open its DUPA tab instead of uploading it again.`, 409);
-      }
+      // The same DUPA must not be uploaded twice anywhere in the plan, so its costs cannot be applied twice.
+      const duplicate = (await uploadedSignatures(args.projectId, args.scheduleId, packages)).get(dupaSignature(items))?.label;
+      if (duplicate) throw new WorkspaceError(`This DUPA is already uploaded (${duplicate}). Open that DUPA instead of uploading it again.`, 409);
       if (analysis.errors.length || !analysis.mapping || !analysis.selectedSheet) throw new WorkspaceError(analysis.errors[0]?.message || 'The DUPA columns could not be read; upload it on the package’s DUPA tab.', 400);
       const saved = await attachWorkPackageBreakdown({ projectId: args.projectId, scheduleId: args.scheduleId, activityId: pkg.id, actor: args.actor, buffer, fileName,
         fileHash: analysis.fileHash, selectedSheet: analysis.selectedSheet, mapping: analysis.mapping, expectedRowVersion: version, documentToken: analysis.documentToken ?? null, linkedBoqItems });

@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { hasPermission } from '@/lib/permissions';
 import { cookies } from 'next/headers';
+import { wpsCapacitiesRequired } from './wps-capacity-mode';
 
 export async function planningCapacity(actor: { id: string; role: string }, projectId: string) {
   const [assignment, project, view, edit, grants, sourceUpload] = await Promise.all([
@@ -30,17 +31,22 @@ export async function planningCapacity(actor: { id: string; role: string }, proj
     held.add('PROJECT_ENGINEER');
     held.add('PROJECT_MANAGER');
   }
+  const canEdit = open && (edit || admin || (activeAssignment && ['PLANNER', 'PROJECT_ENGINEER', 'SITE_ENGINEER'].includes(assignment.projectRole)));
+  const canEngineerReview = open && (admin || roles.has('PROJECT_ENGINEER') || roles.has('SITE_ENGINEER'));
+  const canApprove = open && (admin || roles.has('PROJECT_MANAGER'));
+  // With capacity rules off, the plan follows the same role rules as the BOQ steps; no capacity grants are needed.
+  const strict = wpsCapacitiesRequired();
   return {
     canView,
-    canEdit: open && (edit || admin || (activeAssignment && ['PLANNER', 'PROJECT_ENGINEER', 'SITE_ENGINEER'].includes(assignment.projectRole))),
-    canEngineerReview: open && (admin || roles.has('PROJECT_ENGINEER') || roles.has('SITE_ENGINEER')),
-    canApprove: open && (admin || roles.has('PROJECT_MANAGER')),
+    canEdit,
+    canEngineerReview,
+    canApprove,
     capacities: [...held],
     sourceUploaderAccess,
-    canEditPlan: open && (held.has('PLANNER') || held.has('PROJECT_ENGINEER')),
-    canReviewPlan: open && held.has('PROJECT_ENGINEER'),
-    canApprovePlan: open && held.has('PROJECT_MANAGER'),
-    canManageCapacities: open && admin,
+    canEditPlan: strict ? open && (held.has('PLANNER') || held.has('PROJECT_ENGINEER')) : canEdit,
+    canReviewPlan: strict ? open && held.has('PROJECT_ENGINEER') : canEngineerReview,
+    canApprovePlan: strict ? open && held.has('PROJECT_MANAGER') : canApprove,
+    canManageCapacities: strict && open && admin,
     canRecordSiteLogs: open && (admin || ['PROJECT_MANAGER','PROJECT_ENGINEER','SITE_ENGINEER'].some(role=>roles.has(role))),
     canManageWeekly: open && (admin || ['PROJECT_MANAGER','PLANNER','ESTIMATOR'].some(role=>roles.has(role))),
   };

@@ -50,3 +50,12 @@
 .amountOut { display: block; padding: 10px 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .emptyState p { margin: 0; }
 .emptyState p + p { margin-top: 6px; }
+
+/* Resources & DUPA: pick how to set the allowances (confirm suggestions or upload DUPA). */
+.choiceGroup { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.choice { display: grid; gap: 4px; text-align: left; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(255, 255, 255, .02); color: var(--text-primary); cursor: pointer; font: inherit; }
+.choice strong { font-size: .95rem; }
+.choice span { color: var(--text-secondary); font-size: .8rem; }
+.choice:hover { border-color: rgba(0, 240, 255, .4); }
+.choice:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.choiceOn { border-color: var(--accent-color); background: rgba(0, 240, 255, .08); box-shadow: inset 0 0 0 1px var(--accent-color); }

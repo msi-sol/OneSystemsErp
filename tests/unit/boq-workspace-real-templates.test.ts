@@ -34,6 +34,37 @@ describe('BOQ workspace: real template layouts', () => {
     expect(analysis.warnings.some(warning => /after the grand total/.test(warning.message))).toBe(true);
   });
 
+  it('uses the project name written on the most sheets and the bid amount cell over stale bid-form words', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const pow = workbook.addWorksheet('POW');
+    pow.addRow(['PROJECT:', 'DESIGN AND BUILD OF TALAKAG GOVERNMENT CENTER']);
+    pow.addRow(['ITEM #', 'DESCRIPTION', 'UNIT', 'QUANTITY', 'UNIT COST', 'AMOUNT']);
+    pow.addRow(['1', 'Mobilization', 'lot', 1, 300000, 300000]);
+    pow.addRow(['2', 'Concrete', 'cu.m', 100, 2000, 200000]);
+    const bid = workbook.addWorksheet('BID FORM');
+    bid.addRow(['The total price of our Bid, excluding any discounts offered below, is:']);
+    bid.addRow(['ONE HUNDRED NINETY THREE THOUSAND PESOS (P 193,000.00)', 500000, 'ABC']);
+    for (const name of ['SUM', 'CASH FLOW', 'I']) workbook.addWorksheet(name).addRow(['Project Title:', 'Construction of Talakag Government Center (Design and Build Scheme)']);
+
+    const analysis = await analyzeBOQWorkbook({ buffer: await buffer(workbook), fileName: 'talakag.xlsx', selectedSheet: 'POW' });
+    expect(analysis.total).toBe('500000.00');
+    expect(analysis.extractedProjectName).toBe('Construction of Talakag Government Center (Design and Build Scheme)');
+    expect(analysis.metadataChecks?.some(check => check.field === 'projectName' && check.message.includes('DESIGN AND BUILD OF TALAKAG'))).toBe(true);
+    expect(analysis.extractedContractAmount).toBe('500000.00');
+    expect(analysis.metadataChecks?.some(check => check.field === 'contractAmount')).toBe(false);
+  });
+
+  it('keeps a bid-form amount that differs from the BOQ total when nothing beside it matches the total', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const pow = workbook.addWorksheet('POW');
+    pow.addRow(['ITEM #', 'DESCRIPTION', 'UNIT', 'QUANTITY', 'UNIT COST', 'AMOUNT']);
+    pow.addRow(['1', 'Mobilization', 'lot', 1, 500000, 500000]);
+    workbook.addWorksheet('BID FORM').addRow(['The total price of our Bid is ONE HUNDRED NINETY THREE THOUSAND PESOS (P 193,000.00)', 193548]);
+
+    const analysis = await analyzeBOQWorkbook({ buffer: await buffer(workbook), fileName: 'bid.xlsx', selectedSheet: 'POW' });
+    expect(analysis.extractedContractAmount).toBe('193000.00');
+  });
+
   it('reads headings shifted into the item-code column', async () => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('POW');

@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: Context) {
   try {
     const { id: projectId } = await params;
     const actor = await getSessionActor();
-    if (!(await planningCapacity(actor, projectId)).canEditPlan) throw new WorkspaceError('A project Planner or Engineer capacity is required to upload a package breakdown.', 403);
+    if (!(await planningCapacity(actor, projectId)).canEditPlan) throw new WorkspaceError('You do not have permission to upload a package breakdown for this plan.', 403);
     if (Number(request.headers.get('content-length')) > MAX_WORKSPACE_FILE_BYTES + 2 * 1024 * 1024) throw new WorkspaceError('The document request is too large.', 400);
     const form = await request.formData();
     const bulkAction = form.get('action');

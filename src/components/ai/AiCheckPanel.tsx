@@ -179,8 +179,8 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
       <div>
         <h3 id={`ai-check-${scope}`} className={styles.title}>AI Check <span className={styles.badge}>Optional</span></h3>
         <p className={styles.muted}>{scope === 'boq'
-          ? 'Have AI look over this BOQ for misplaced items, inconsistent units, duplicates and unclear descriptions before the baseline is locked. Nothing changes unless you accept a suggestion.'
-          : 'Have AI suggest how BOQ sections should be grouped into work packages and which packages must finish before others start. Edit any suggestion before accepting it; nothing changes otherwise.'}</p>
+          ? 'AI checks the BOQ for wrong sections, units, duplicates and unclear names. Nothing changes until you accept.'
+          : 'AI suggests how to group sections into packages and their order. Nothing changes until you accept.'}</p>
       </div>
       <button type="button" className={result ? styles.secondary : styles.primary} disabled={busy} onClick={() => void run()}>{running ? 'Checking…' : result ? 'Run again' : 'Run AI Check'}</button>
     </div>
@@ -276,6 +276,6 @@ export default function AiCheckPanel({ projectId, scope }: { projectId: string; 
           })()}</>}
       </div>
     </>}
-    {result && <p className={styles.muted} style={{ marginTop: 14 }}>Suggestions by {result.model}. AI can be wrong: review before accepting. Accepted changes are recorded in the history like any other edit.</p>}
+    {result && <p className={styles.muted} style={{ marginTop: 14 }}>AI can be wrong. Review before accepting.</p>}
   </section>;
 }

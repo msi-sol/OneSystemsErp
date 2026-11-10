@@ -57,7 +57,6 @@ export default function WorkPackageLocationsStep({ projectId, schedule, members,
 
     {canEdit && unlocatedLines > 0 && <section className={styles.panel} aria-labelledby="wp-where-heading">
       <h3 id="wp-where-heading">Where is the work done?</h3>
-      <p className={styles.muted}>Most projects have one site. Name it once and every package without a location gets it. Packages that already have a location keep theirs.</p>
       <form className={own.quickRow} onSubmit={(event) => { event.preventDefault(); void plan('locate-all-at', { name: site.trim() }); }}>
         <div>
           <label htmlFor="wp-site-name">Site or location name</label>

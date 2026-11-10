@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { readWorkPackagePlanDetails, type WorkPackagePlanDetails } from './work-package-details-types';
+import { wpsAllowancesRequired } from './wps-capacity-mode';
 
 export type ReadinessActivity = { id:string; activityCode?:string|null; name:string; plannedStartDate:Date|string|null; plannedFinishDate:Date|string|null; plannedWeight:number; boqAllocations:{id:string;allocatedQuantity:unknown}[] };
 export type ReadinessCondition = {key:string;label:string;passed:boolean;detail:string};
@@ -15,11 +16,14 @@ export function deriveWorkPackageReadiness(input:{activities:ReadinessActivity[]
   const impossible=activities.filter(row=>{const start=day(row.plannedStartDate),finish=day(row.plannedFinishDate);return start!==null&&finish!==null&&(!Number.isFinite(start)||!Number.isFinite(finish)||start>finish);});
   const missingScope=activities.filter(row=>!row.boqAllocations.length||row.boqAllocations.some(allocation=>allocation.allocatedQuantity==null));
   const unlocated=activities.filter(row=>row.boqAllocations.length&&!row.boqAllocations.some(allocation=>details.allocationLocations[allocation.id]));
-  const missingResources=activities.filter(row=>!['MATERIAL','LABOR','EQUIPMENT'].every(kind=>details.resources.some(resource=>resource.activityId===row.id&&resource.kind===kind)));
-  const unreviewed=activities.filter(row=>details.resources.some(resource=>resource.activityId===row.id&&resource.isSystemSuggested)||details.resourcesReviewNeeded?.[row.id]);
+  // Allowances are optional unless that rule is switched on: then every package needs all three kinds, confirmed.
+  const allowancesRequired=wpsAllowancesRequired();
+  const missingResources=allowancesRequired?activities.filter(row=>!['MATERIAL','LABOR','EQUIPMENT'].every(kind=>details.resources.some(resource=>resource.activityId===row.id&&resource.kind===kind))):[];
+  const unreviewed=!allowancesRequired?[]:activities.filter(row=>details.resources.some(resource=>resource.activityId===row.id&&resource.isSystemSuggested)||details.resourcesReviewNeeded?.[row.id]);
   const unaccountable=details.constraints.filter(row=>row.status==='OPEN'&&(!row.ownerId||!row.neededBy));
   const weight=activities.reduce((sum,row)=>sum.plus(String(row.plannedWeight)),new Decimal(0));
   const directCost=details.resources.reduce((sum,row)=>sum.plus(row.amount),new Decimal(0));
+
   const outgoing=new Map<string,string[]>();for(const link of input.dependencies)outgoing.set(link.predecessorId,[...(outgoing.get(link.predecessorId)||[]),link.successorId]);
   const visiting=new Set<string>(),done=new Set<string>();
   function cyclic(id:string):boolean{if(visiting.has(id))return true;if(done.has(id))return false;visiting.add(id);if((outgoing.get(id)||[]).some(cyclic))return true;visiting.delete(id);done.add(id);return false;}
@@ -34,9 +38,10 @@ export function deriveWorkPackageReadiness(input:{activities:ReadinessActivity[]
     check('scope_checks','BOQ quantities and stated values reconcile',input.scopeReconciled),
     check('scope_present','Every package carries stated BOQ scope',activities.length>0&&!missingScope.length,codes(missingScope)),
     check('weights','Completion weights total 100%',activities.length>0&&weight.minus(1).abs().lt('0.000001'),`${weight.times(100).toDecimalPlaces(4)}% entered`),
-    check('resources','Materials, labor and equipment allowances are set',activities.length>0&&!missingResources.length,codes(missingResources)),
-    check('resource_review','Resource allowances have been reviewed',!unreviewed.length,codes(unreviewed)),
-    check('direct_cost','Direct cost stays below the BOQ value',activities.length>0&&directCost.lt(String(input.contractAmount)),`${directCost.toFixed(2)} direct cost`),
+    check('resources',allowancesRequired?'Materials, labor and equipment allowances are set':'Allowances (optional)',activities.length>0&&!missingResources.length,codes(missingResources)),
+    check('resource_review',allowancesRequired?'Resource allowances have been reviewed':'Allowance review (optional)',!unreviewed.length,codes(unreviewed)),
+    // Only the overall total matters: all allowances together may not exceed the BOQ value (equal is fine).
+    check('direct_cost','Total allowances do not exceed the BOQ value',activities.length>0&&directCost.lte(String(input.contractAmount)),`${directCost.toFixed(2)} direct cost`),
     check('dates','Every package has planner-entered start and finish dates',activities.length>0&&!missingDates.length,codes(missingDates)),
     check('windows','No planned finish precedes its start',!impossible.length,codes(impossible)),
     check('acyclic','Sequence links contain no cycle',!cycle),

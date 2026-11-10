@@ -49,7 +49,9 @@ function setup({
 }
 
 describe('planning capacity source uploader access', () => {
-  beforeEach(() => jest.clearAllMocks());
+  // These cover the capacity rules when they are switched on.
+  beforeEach(() => { jest.clearAllMocks(); process.env.NEXT_PUBLIC_WPS_CAPACITIES_REQUIRED = 'true'; });
+  afterAll(() => { delete process.env.NEXT_PUBLIC_WPS_CAPACITIES_REQUIRED; });
 
   it('derives planner, engineer, and PM capabilities from this project’s original BOQ uploader record', async () => {
     const result = await setup();
@@ -120,5 +122,30 @@ describe('planning capacity source uploader access', () => {
     expect(result.canEditPlan).toBe(false);
     expect(result.canReviewPlan).toBe(false);
     expect(result.canApprovePlan).toBe(false);
+  });
+});
+
+describe('planning capacity with capacity rules off (default)', () => {
+  beforeEach(() => { jest.clearAllMocks(); delete process.env.NEXT_PUBLIC_WPS_CAPACITIES_REQUIRED; });
+
+  it('lets an admin simulating SUPER_ADMIN prepare, review and approve without capacity grants', async () => {
+    const result = await setup({ role: 'ADMIN', sourceUploader: 'different-user', simulatedRole: 'SUPER_ADMIN' });
+
+    expect(result.capacities).toEqual([]);
+    expect(result).toMatchObject({ canEditPlan: true, canReviewPlan: true, canApprovePlan: true, canManageCapacities: false });
+  });
+
+  it('follows the project roles: an engineer prepares and reviews but does not approve', async () => {
+    const result = await setup({ role: 'PROJECT_ENGINEER', sourceUploader: null, assignment: { projectRole: 'PROJECT_ENGINEER', assignmentStatus: 'active' } });
+
+    expect(result).toMatchObject({ canEditPlan: true, canReviewPlan: true, canApprovePlan: false });
+  });
+
+  it('still gives a view-only user nothing, and nothing on an archived project', async () => {
+    const viewer = await setup({ role: 'GUEST', sourceUploader: null, canView: true });
+    expect(viewer).toMatchObject({ canView: true, canEditPlan: false, canReviewPlan: false, canApprovePlan: false });
+
+    const archived = await setup({ status: 'ARCHIVED' });
+    expect(archived).toMatchObject({ canEditPlan: false, canReviewPlan: false, canApprovePlan: false });
   });
 });

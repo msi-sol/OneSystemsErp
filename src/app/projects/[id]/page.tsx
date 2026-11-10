@@ -378,7 +378,8 @@ export default async function ProjectDetailsPage({
         </>
       )}
 
-      {materialsFlow && (tab === 'benchmark' || tab === 'consolidation') && <MaterialsFlowCard projectId={project.id} tab={tab} state={materialsFlow} />}
+      {/* The step card shows on the benchmark tab only; the materials list leads with its own two choices. */}
+      {materialsFlow && tab === 'benchmark' && <MaterialsFlowCard projectId={project.id} tab={tab} state={materialsFlow} />}
 
       {tab === 'benchmark' && (
         <ProcurementBenchmarkTab

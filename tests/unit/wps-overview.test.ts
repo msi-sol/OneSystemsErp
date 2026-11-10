@@ -35,6 +35,9 @@ describe('Allowances and DUPA by package', () => {
       uploads: [{ activityId: 'b', appliedAt: '2026-11-01T00:00:00Z' }],
     });
     expect(rows[0]).toMatchObject({ value: 100000, allowance: 60000, suggestedRows: 1, dupa: 'none', allowanceWithinValue: true });
-    expect(rows[1]).toMatchObject({ value: 50000, allowance: 50000, dupa: 'applied', allowanceWithinValue: false });
+    // Equal to the package value is fine; only above it is flagged.
+    expect(rows[1]).toMatchObject({ value: 50000, allowance: 50000, dupa: 'applied', allowanceWithinValue: true });
+    const over = packageAllowanceStatus({ activities: [{ id: 'b', activityCode: 'WP-02', name: 'Concrete' }], allocations: [{ activityId: 'b', allocatedAmount: '50000' }], resources: [{ activityId: 'b', amount: '50000.01' }], uploads: [] });
+    expect(over[0].allowanceWithinValue).toBe(false);
   });
 });

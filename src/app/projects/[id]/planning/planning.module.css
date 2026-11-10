@@ -81,3 +81,39 @@
 .moduleBody :is(a,button,summary,input,select,textarea,.scroll):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 3px; }
 @media (max-width: 1050px) { .moduleBody { padding: 24px 0; } }
 @media (max-width: 600px) { .fields { grid-template-columns: minmax(0,1fr); } .projectHeader h1 { font-size: 1.2rem; } .panel { padding: 16px; } .actions > button { flex: 1 1 150px; } .packageHeading { padding: 15px; } .packageHeading > button { width: 100%; } .packageTabs > button { flex: 1 1 calc(50% - 8px); } }
+
+/* BOQ review and approval: one numbered step at a time (done -> one line, current -> open, later -> waiting).
+   Spacing scale: 6 label-to-field, 12 inside a group, 16 between groups, 28 between steps. */
+.flow { list-style: none; margin: 20px 0 0; padding: 0; }
+.flowStep { position: relative; padding: 0 0 28px 46px; }
+.flowStep:last-child { padding-bottom: 0; }
+.flowStep:not(:last-child)::before { content: ''; position: absolute; left: 14px; top: 38px; bottom: 8px; width: 2px; border-radius: 1px; background: var(--glass-border); }
+.flowHead { display: flex; align-items: center; gap: 16px; min-height: 30px; margin-left: -46px; }
+.flowHead strong { font-size: 1rem; line-height: 1.3; }
+.flowNumber { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .85rem; border: 2px solid var(--glass-border); color: var(--text-secondary); }
+.flowBody { margin-top: 12px; display: grid; gap: 16px; max-width: 760px; }
+.flowBody > * { margin: 0; }
+.flowBody label { margin: 0 0 6px; }
+.flowBody .fields { margin: 0; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.flowBody .reconciliationFacts { margin: 0; padding: 16px; gap: 12px 24px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border: 1px solid var(--glass-border); border-radius: 10px; background: rgba(255, 255, 255, .02); }
+.flowBody .reconciliationFacts > div { margin: 0; min-width: 0; }
+.flowBody .reconciliationFacts dt { font-size: .8rem; }
+.flowBody .reconciliationFacts dd { margin-top: 6px; font-size: 1rem; white-space: nowrap; overflow-wrap: normal; }
+.flowBody .actions { margin: 0; gap: 12px; }
+.flowSummary { margin: 0; color: var(--text-secondary); font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
+.flow_current .flowNumber { border-color: var(--accent-color); color: var(--accent-color); }
+.flow_done .flowNumber { border-color: #34d399; background: rgba(52, 211, 153, .15); color: #34d399; }
+.flow_done .flowHead strong { color: var(--text-secondary); }
+.flow_waiting { opacity: .6; }
+.flow_waiting .flowHead strong { color: var(--text-secondary); }
+.flow_waiting .flowBody, .flow_done .flowBody { margin-top: 4px; }
+@media (max-width: 560px) {
+  .flowStep { padding-left: 40px; }
+  .flowHead { margin-left: -40px; gap: 10px; }
+  .flowBody .reconciliationFacts { grid-template-columns: 1fr; }
+}
+/* Work-package approval step 1: the plan checks still failing, one per row. */
+.flowChecks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.flowChecks li { display: grid; gap: 2px; padding: 10px 14px; border: 1px solid var(--glass-border); border-left: 3px solid #f59e0b; border-radius: 8px; background: rgba(255, 255, 255, .02); }
+.flowChecks strong { font-size: .875rem; font-weight: 600; }
+.flowChecks span { color: var(--text-secondary); font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; }

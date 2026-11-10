@@ -1,4 +1,5 @@
 import { consumeMaterialReservations } from '../../../../src/lib/scheduling/work-package-material-inventory';
+import { readPackageMaterialPlanning } from '../../../../src/lib/scheduling/work-package-material-planning';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 // @ts-nocheck
@@ -111,6 +112,7 @@ router.post('/:id/approve', async (req, res) => {
     const { userId } = getPbacContext(req);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
+    const overAllocation:{materialId:string;description:string;unit:string;required:number;alreadyIssued:number;releasing:number;excess:number}[]=[];
     await prisma.$transaction(async (tx) => {
       const slip = await tx.materialIssuance.findUnique({
         where: { id },
@@ -122,6 +124,16 @@ router.post('/:id/approve', async (req, res) => {
 
       const packageLink=await tx.auditLog.findFirst({where:{transactionId:slip.id,actionType:'WPS_PROCUREMENT_RECORD_LINKED'},orderBy:{createdAt:'desc'},select:{newValue:true}});
       const sourcePackageId=packageLink?JSON.parse(packageLink.newValue||'{}').sourcePackageId||null:null;
+      // The destination section's material allocation (required vs already issued). Releasing more is still allowed,
+      // as before, but it is flagged on the slip's history and returned as a warning, never silently accepted.
+      const allocation=sourcePackageId?await readPackageMaterialPlanning(tx,slip.projectId,sourcePackageId):[];
+      for (const item of slip.items) {
+        const requirement=allocation.find(row=>row.materialId===item.consolidatedBoqItemId);
+        if(!requirement)continue;
+        const required=Number(requirement.requiredQuantity), afterRelease=Number(requirement.issued)+Number(item.releasedQty);
+        if(required>0&&afterRelease>required+1e-9)overAllocation.push({materialId:item.consolidatedBoqItemId,description:requirement.description,unit:requirement.unit,required,alreadyIssued:Number(requirement.issued),releasing:Number(item.releasedQty),excess:Number((afterRelease-required).toFixed(4))});
+      }
+      if(overAllocation.length)await tx.auditLog.create({data:{userId,userRole:'SYSTEM',moduleName:'MATERIAL_ISSUANCE',transactionId:slip.id,actionType:'ISSUANCE_ABOVE_SECTION_ALLOCATION',newValue:JSON.stringify({projectId:slip.projectId,sourcePackageId,items:overAllocation})}});
       for (const item of slip.items) {
         const boqItem = await tx.consolidatedBOQItem.findUnique({
           where: { id: item.consolidatedBoqItemId }
@@ -156,7 +168,7 @@ router.post('/:id/approve', async (req, res) => {
       });
     },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
 
-    res.json({ success: true });
+    res.json({ success: true, ...(overAllocation.length ? { warnings: overAllocation.map(row=>`${row.description}: ${row.alreadyIssued + row.releasing} ${row.unit} issued to this section, above its allocation of ${row.required} (by ${row.excess}).`) } : {}) });
   } catch (error: any) {
     console.error('Error approving issuance:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to approve issuance' });

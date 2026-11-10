@@ -15,7 +15,7 @@
 .fileButton:has(input:disabled) { opacity: .5; cursor: default; }
 .fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
 .clearFile { position: absolute; right: 12px; top: 12px; color: var(--text-secondary); background: transparent; border: 1px solid var(--glass-border); border-radius: 7px; min-width: 36px; min-height: 36px; display: grid; place-items: center; cursor: pointer; }
-.analysisBar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; margin-top: 24px; }
+.analysisBar { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 20px; margin-top: 24px; }
 .progress { list-style: none; display: flex; flex-wrap: wrap; padding: 0; margin: 0; gap: 10px; color: var(--text-secondary); font-size: .825rem; line-height: 1.7; }
 .progress li { display: inline-flex; align-items: center; gap: 6px; }
 .progress li + li::before { content: '›'; margin-right: 4px; color: var(--text-secondary); }
@@ -35,7 +35,7 @@
 .moreWays button:disabled { opacity: .5; cursor: default; }
 .destination { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; border-top: 1px solid var(--glass-border); margin-top: 22px; padding-top: 22px; }
 .destination p { grid-column: 1/-1; color: var(--text-secondary); font-size: .825rem; line-height: 1.6; margin: 0; }
-.projectDetails { border-top: 1px solid var(--glass-border); margin-top: 22px; padding-top: 22px; min-width: 0; }
+.projectDetails { margin-top: 22px; min-width: 0; }
 .projectDetails h3 { font-size: .95rem; margin: 0 0 14px; }
 .detailGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .detailField { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--glass-border); border-radius: 10px; background: rgba(255, 255, 255, .02); min-width: 0; }
@@ -57,7 +57,11 @@
 .error { display: flex; flex-direction: column; gap: 6px; padding: 16px 20px; border: 1px solid #91424b; border-radius: 10px; margin: 0 0 20px; color: #ffc1c1; font-size: .875rem; line-height: 1.6; }
 .message { color: #99e4c4; margin: 0 0 20px; font-size: .875rem; line-height: 1.6; }
 .warning { color: #f1c782; font-size: .875rem; line-height: 1.6; }
-.sectionHeader { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 24px; }
+.sectionHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 24px; }
+/* The title takes the free space; the status badge stays at the top right instead of wrapping below. */
+.sectionHeader > div { flex: 1; min-width: 0; }
+.sectionHeader > span { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 600px) { .sectionHeader { flex-wrap: wrap; } }
 .sectionHeader h2, .board h2 { font-size: 1.15rem; margin: 0 0 8px; line-height: 1.4; }
 .sectionHeader p { color: var(--text-secondary); margin: 0; font-size: .875rem; line-height: 1.6; overflow-wrap: anywhere; }
 .badge { color: #f1c782; background: rgba(241,199,130,.06); border: 1px solid rgba(241,199,130,.25); padding: 6px 10px; border-radius: 6px; font-size: .8rem; white-space: nowrap; }
@@ -77,7 +81,7 @@
 .tableScroll tbody th { font-weight: 500; white-space: nowrap; }
 .tableScroll td:nth-child(2) { min-width: 220px; max-width: 400px; overflow-wrap: anywhere; }
 .tableScroll td:nth-child(n+4) { text-align: right; white-space: nowrap; }
-.confirmBar { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; gap: 20px; align-items: center; flex-wrap: wrap; }
+.confirmBar { margin-top: 24px; display: flex; justify-content: flex-end; gap: 20px; align-items: center; flex-wrap: wrap; }
 .confirmBar p { max-width: 65ch; margin: 0; color: var(--text-secondary); font-size: .825rem; line-height: 1.65; }
 .uploadFacts { display: flex; flex-wrap: wrap; gap: 24px 48px; font-variant-numeric: tabular-nums; }
 .uploadFacts dt { color: var(--text-secondary); font-size: .825rem; }
