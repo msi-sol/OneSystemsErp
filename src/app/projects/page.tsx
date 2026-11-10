@@ -6,6 +6,7 @@ import { cookies } from 'next/headers';
 import PermissionGuard from '@/components/PermissionGuard';
 import { getUserPermissions } from '@/lib/permissions';
 import NewProjectButton from './NewProjectButton';
+import DeleteProjectButton from './DeleteProjectButton';
 import { groupProjectsByAction } from '@/lib/projects/project-action-groups';
 
 export const dynamic = 'force-dynamic';
@@ -154,7 +155,7 @@ export default async function ProjectsPage() {
                 <td>{entry.boqLabel}</td>
                 <td>{entry.wpsLabel}{schedule ? ` · ${schedule._count.activities} ${schedule._count.activities === 1 ? 'package' : 'packages'}` : ''}</td>
                 {/* One action per project: it opens the BOQ or WPS stage the project is at. */}
-                <td className={styles.projectTableAction}><Link className={styles.primaryProjectAction} href={entry.nextHref}>{entry.nextLabel}</Link></td>
+                <td className={styles.projectTableAction}><Link className={styles.primaryProjectAction} href={entry.nextHref}>{entry.nextLabel}</Link>{isSuperAdmin && <DeleteProjectButton projectId={project.id} projectName={project.name} />}</td>
               </tr>;
             })}
           </tbody>

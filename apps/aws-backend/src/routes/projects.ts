@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { deleteProjectCompletely } from '../../../../src/lib/projects/delete-project';
 // @ts-nocheck
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -228,10 +229,11 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ success: false, error: 'Unauthorized: Only SUPER_ADMIN can delete projects' });
     }
 
-    await prisma.$transaction([
-      prisma.projectUserAssignment.deleteMany({ where: { projectId: id } }),
-      prisma.project.delete({ where: { id } })
-    ]);
+    const project = await prisma.project.findUnique({ where: { id }, select: { name: true } });
+    if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
+    // Removes the project with everything recorded for it (BOQ, plan, procurement, issuance, history).
+    const result = await deleteProjectCompletely(prisma, id);
+    await prisma.auditLog.create({ data: { userId, userRole: effectiveRole, moduleName: 'PROJECT_MANAGEMENT', transactionId: id, actionType: 'PROJECT_DELETED', newValue: JSON.stringify({ name: project.name, rows: result.rows }) } });
 
     res.json({ success: true });
   } catch (error: any) {

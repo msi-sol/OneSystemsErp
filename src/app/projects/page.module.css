@@ -276,3 +276,7 @@
 .projectTable tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
 .projectTableSub { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 0.8rem; }
 .projectTableAction { text-align: right; white-space: nowrap; }
+.deleteProjectAction { display: inline-flex; align-items: center; gap: 6px; margin-left: 1.25rem; padding: 6px 10px; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; background: transparent; color: #f87171; font-size: 0.85rem; font-weight: 600; cursor: pointer; vertical-align: middle; }
+.deleteProjectAction:hover:not(:disabled) { background: rgba(239, 68, 68, 0.1); }
+.deleteProjectAction:focus-visible { outline: 2px solid #f87171; outline-offset: 2px; }
+.deleteProjectAction:disabled { opacity: 0.5; cursor: not-allowed; }

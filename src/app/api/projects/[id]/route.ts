@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { deleteProjectCompletely } from '@/lib/projects/delete-project';
 import { getSessionActor, checkSchedulingAccess } from '@/lib/scheduling/authUtils';
 
 // The proxy only verifies that a session exists; mutating a project needs project permissions.
@@ -41,17 +42,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const denied = await authorizeProject(projectId, 'canDelete');
     if (denied) return denied;
 
-    // First delete some common children that might cause FK constraints if not cascaded
-    await prisma.projectSchedule.deleteMany({ where: { projectId } });
-    await prisma.awardedBOQItem.deleteMany({ where: { projectId } });
-    await prisma.consolidatedBOQItem.deleteMany({ where: { projectId } });
-    await prisma.materialRequest.deleteMany({ where: { projectId } });
-    await prisma.projectUserAssignment.deleteMany({ where: { projectId } });
-
-    // Now delete the project itself
-    await prisma.project.delete({
-      where: { id: projectId }
-    });
+    await deleteProjectCompletely(prisma, projectId);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
